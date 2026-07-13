@@ -25,7 +25,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 // ============================================================
 const SUPABASE_URL = "https://rooajvvwnvscfgvfhwkz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvb2FqdnZ3bnZzY2ZndmZod2t6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDcxMjksImV4cCI6MjA5OTUyMzEyOX0.JEeltcsp-MIyTdhFeQfT5htQ2fFhR9q7oNMiyIrS8TM";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ---------- design tokens ----------
 const NAVY = "#182859";
 const NAVY_SOFT = "#e7eaf5";
@@ -83,7 +83,7 @@ function mapStudent(row) {
     };
 }
 async function fetchStudents() {
-    const { data, error } = await supabase.from("attn_students").select("*").order("name");
+    const { data, error } = await supabaseClient.from("attn_students").select("*").order("name");
     if (error)
         throw error;
     return data.map(mapStudent);
@@ -95,18 +95,18 @@ async function upsertStudent(form) {
         clinic_time: form.clinicTime, enroll_date: form.enrollDate || null,
     };
     if (form.id) {
-        const { error } = await supabase.from("attn_students").update(payload).eq("id", form.id);
+        const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", form.id);
         if (error)
             throw error;
     }
     else {
-        const { error } = await supabase.from("attn_students").insert(payload);
+        const { error } = await supabaseClient.from("attn_students").insert(payload);
         if (error)
             throw error;
     }
 }
 async function deleteStudentRow(id) {
-    const { error } = await supabase.from("attn_students").delete().eq("id", id);
+    const { error } = await supabaseClient.from("attn_students").delete().eq("id", id);
     if (error)
         throw error;
 }
@@ -114,7 +114,7 @@ async function fetchEventsForMonth(monthDate) {
     const year = monthDate.getFullYear(), month = monthDate.getMonth();
     const start = fmt(new Date(year, month, 1));
     const end = fmt(new Date(year, month + 1, 0));
-    const { data, error } = await supabase.from("attn_events").select("*").gte("event_date", start).lte("event_date", end);
+    const { data, error } = await supabaseClient.from("attn_events").select("*").gte("event_date", start).lte("event_date", end);
     if (error)
         throw error;
     const grouped = {};
@@ -126,33 +126,33 @@ async function fetchEventsForMonth(monthDate) {
     return grouped;
 }
 async function addEventRow(date, title) {
-    const { error } = await supabase.from("attn_events").insert({ event_date: date, title });
+    const { error } = await supabaseClient.from("attn_events").insert({ event_date: date, title });
     if (error)
         throw error;
 }
 async function deleteEventRow(id) {
-    const { error } = await supabase.from("attn_events").delete().eq("id", id);
+    const { error } = await supabaseClient.from("attn_events").delete().eq("id", id);
     if (error)
         throw error;
 }
 async function fetchNotices() {
-    const { data, error } = await supabase.from("attn_notices").select("*").order("created_at", { ascending: false }).limit(200);
+    const { data, error } = await supabaseClient.from("attn_notices").select("*").order("created_at", { ascending: false }).limit(200);
     if (error)
         throw error;
     return data.map((r) => ({ id: r.id, text: r.text, date: r.notice_date }));
 }
 async function addNoticeRow(text) {
-    const { error } = await supabase.from("attn_notices").insert({ notice_date: todayStr(), text });
+    const { error } = await supabaseClient.from("attn_notices").insert({ notice_date: todayStr(), text });
     if (error)
         throw error;
 }
 async function deleteNoticeRow(id) {
-    const { error } = await supabase.from("attn_notices").delete().eq("id", id);
+    const { error } = await supabaseClient.from("attn_notices").delete().eq("id", id);
     if (error)
         throw error;
 }
 async function fetchAttendanceForDate(date) {
-    const { data, error } = await supabase.from("attn_attendance").select("*").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_attendance").select("*").eq("attn_date", date);
     if (error)
         throw error;
     const result = { regular: {}, clinic: {} };
@@ -161,13 +161,13 @@ async function fetchAttendanceForDate(date) {
 }
 async function setAttendanceRow(date, session, studentId, status, isCurrentlyActive) {
     if (isCurrentlyActive) {
-        const { error } = await supabase.from("attn_attendance").delete()
+        const { error } = await supabaseClient.from("attn_attendance").delete()
             .eq("attn_date", date).eq("session", session).eq("student_id", studentId);
         if (error)
             throw error;
     }
     else {
-        const { error } = await supabase.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+        const { error } = await supabaseClient.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
         if (error)
             throw error;
     }
@@ -200,7 +200,7 @@ function LoginScreen() {
         e.preventDefault();
         setError("");
         setLoading(true);
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
         setLoading(false);
         if (error)
             setError("이메일 또는 비밀번호가 올바르지 않습니다.");
@@ -242,7 +242,7 @@ function MainApp({ session }) {
             reloadStudents();
         })
             .subscribe();
-        return () => { supabase.removeChannel(channel); };
+        return () => { supabaseClient.removeChannel(channel); };
     }, []);
     return (React.createElement("div", { style: { background: PAPER, color: INK, minHeight: "100vh" }, className: "pb-10" },
         React.createElement("div", { style: { background: NAVY, borderBottom: `4px solid ${RED}` }, className: "px-4 sm:px-6 py-3" },
@@ -253,7 +253,7 @@ function MainApp({ session }) {
                         React.createElement("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#4ade80", display: "inline-block" } }),
                         "\uC2E4\uC2DC\uAC04 \uB3D9\uAE30\uD654"),
                     React.createElement("span", { style: { color: "#c7cdea", fontSize: 11.5 } }, session.user.email),
-                    React.createElement("button", { onClick: () => supabase.auth.signOut(), style: { color: "#fff", fontSize: 12, fontWeight: 700, background: "rgba(255,255,255,0.12)", padding: "6px 10px", borderRadius: 8 } }, "\uB85C\uADF8\uC544\uC6C3")))),
+                    React.createElement("button", { onClick: () => supabaseClient.auth.signOut(), style: { color: "#fff", fontSize: 12, fontWeight: 700, background: "rgba(255,255,255,0.12)", padding: "6px 10px", borderRadius: 8 } }, "\uB85C\uADF8\uC544\uC6C3")))),
         React.createElement("div", { className: "max-w-5xl mx-auto px-3 sm:px-6 pt-4" },
             React.createElement("div", { className: "flex items-center gap-1.5 p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto", style: { background: "#fff", border: `1px solid ${LINE}` } },
                 React.createElement(TabButton, { active: tab === "attendance", onClick: () => setTab("attendance") }, "\uCD9C\uC11D\uCCB4\uD06C"),
@@ -293,7 +293,7 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_events" }, () => loadEvents())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_notices" }, () => loadNotices())
             .subscribe();
-        return () => { supabase.removeChannel(channel); };
+        return () => { supabaseClient.removeChannel(channel); };
     }, [month]);
     const selEvents = events[selectedDate] || [];
     const addEvent = async () => {
@@ -400,7 +400,7 @@ function Attendance({ students, selectedDate, setSelectedDate }) {
             .channel(`attn_attendance_${selectedDate}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .subscribe();
-        return () => { supabase.removeChannel(channel); };
+        return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
     const roster = students.filter((s) => {
         if (s.enrollDate && selectedDate < s.enrollDate)
@@ -589,8 +589,8 @@ function Root() {
     const [session, setSession] = useState(null);
     const [checked, setChecked] = useState(false);
     useEffect(() => {
-        supabase.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
-        const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+        supabaseClient.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
+        const { data: sub } = supabaseClient.auth.onAuthStateChange((_e, s) => setSession(s));
         return () => sub.subscription.unsubscribe();
     }, []);
     if (!checked) {
