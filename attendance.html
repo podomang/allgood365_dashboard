@@ -7,7 +7,6 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#faf9f6; }
@@ -17,9 +16,9 @@
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="react">
+<script>
+"use strict";
 const { useState, useEffect, useMemo, useRef } = React;
-
 // ============================================================
 // 1) 여기에 Supabase 프로젝트 정보를 넣으세요
 //    (Settings → API 에서 Project URL / anon public key 복사)
@@ -27,7 +26,6 @@ const { useState, useEffect, useMemo, useRef } = React;
 const SUPABASE_URL = "https://rooajvvwnvscfgvfhwkz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvb2FqdnZ3bnZzY2ZndmZod2t6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDcxMjksImV4cCI6MjA5OTUyMzEyOX0.JEeltcsp-MIyTdhFeQfT5htQ2fFhR9q7oNMiyIrS8TM";
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 // ---------- design tokens ----------
 const NAVY = "#182859";
 const NAVY_SOFT = "#e7eaf5";
@@ -41,698 +39,567 @@ const PAPER = "#faf9f6";
 const INK = "#20242e";
 const SUBINK = "#6b7080";
 const LINE = "#e4e2da";
-
 const LOGO_HORIZONTAL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCACdAyADASIAAhEBAxEB/8QAHQABAAIBBQEAAAAAAAAAAAAAAAcIBgECAwQFCf/EAFsQAAEDAgIEBgoOBwYDBwQDAAEAAgMEBQYRBxIhMQgTGEFR0RQVF1VWYXGTlNIWIjI3U1RzdIGRkqGxsiMzNDZCUsFicnWVs8I1Y4MkQ0VGV4ThJSYnRILw8f/EABsBAQACAwEBAAAAAAAAAAAAAAADBAECBQYH/8QAOhEAAgEDAQMJBwIGAgMAAAAAAAECAwQREgUhMRMUQVFScZGhsQYVMjM0YYEiUxZCRNHh8HLBIyRU/9oADAMBAAIRAxEAPwC1KIiAIiIAiIUARYtiXH+GMM14or3doKWqLQ/i3Ak5Hn2BeT3YcCeENP8AYd1KWNCrJZUXjuNdcV0mfosA7sOBPCGn+w7qXZtmlLBt0uEFFQ32nlqZ3akbNVw1j0bQsu3qrjF+A1x6zNkQHNFCbBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAF52IbtTWOy1lzrnhtPTRmRxJ35c30r0VW3hS401nwYVoZNgymrC08/8Lf6qxa27uKqpr/UaTlojkg3F1+qcT4jrrtWOJkqJC4D+VvMB5AvHQDJF7mMFCKjHgjmt5eWFyQTSU88c8DyyWNwexw3gg5grjRZwYL0aJsWx4xwZRXDWHZTBxVS3okG/wCves0VOuDtjM4axi231cmrbrmRE7M7GSfwu/oriNOa8XtG15tWaXB70dGjPXE1REVElCIiAIijHSPprwlgWofR1lS+tubd9JSAOcz+8dzfxQEnIqsVfCzYJT2JhVxj5jLV5H7mrg5Wkvgmz00+ogLXIqo8rSXwTZ6afUTlaS+CbPTT6iAtciqjytJfBNnpp9RbmcLR+sNfCjdXnyrNv5UBaxFBuCuEphG/VUdLdI6my1Ehya6oydFn43jd9IU3QTMniZJE9r43gOa9pzDgecFAciLGsWY5w5hGSnZiS7U9vfUAuiEuftgN+WQXg92rR54U0H1u6kBIaKPO7Vo88KaD63dSd2rR54U0H1u6kBIaKPO7Vo88KaD63dSd2rR54U0H1u6kBIaKPO7Vo88KaD63dSd2rR54U0H1u6kBIaKPWaaNHr3Na3FFCXOOQGbupSBG8PY1zTm1wzBQG5ERAEQlYhctJeDLXXz0NxxLbKasgeWSwyTAOY4cxCAy9Fg/dawD4W2jz4XtYbxfYMTunGHrvR3EwZGUU8mtqZ7s/qKA95ERAEREARFVnSHwkL/hjG95slLZ7bNBQ1LoWSSF+s4DnORQFpkVN+VdiXvFaftSdasToQxtWaQMCx3y4U0FNO+oki4uEnVyadh2oDP0RdW511PbLfUV1bIIqWnjdLK8jPVaBmSgO0ijEad9HHhJD5mT1Vubp10cuc1rcRwlzjkBxMnqoCTEWyJ4kY17drXAEHpBW9AERdStuNHQFvZtXT0+v7njZAzPyZp3A7aLyvZDZ++1B6QzrT2Q2fvtQekM61nTLqMZR6qLyvZDZ++1B6QzrT2Q2fvtQekM600y6hlHqovK9kNn77W/0hnWvRjkbIxr2ODmOGYcDmCFh5XEzxORFgty0r4LtlwqKGuvcUVVTvMcjDG86rhvGwLrd2XAff8Ah80/qUyt6z3qD8DXXHrJDRebh290GIbVDcrRUCoopc9SQAgHI5HYdu9ekommnhmwREWAEWO4txnYcJGmGIK9lH2RrcVrNcdbLLPcD0hY93ZcB9/4fNP6lJGjUksxi2u41ckuLJDRYxhPHOHcWVE8FguLKyWBofI1rHN1QTkDtCyZaSjKDxJYZlNPgaosLqNKODKWplp6jEFIyaJxY9pJza4HIjcuI6V8D82IqP7+pSKhVf8AK/Axqj1mcosWxLj3DmGhSG93OOlFXHxsJLXO129OweMLxe7LgPv/AA+af1JGhVksxi3+A5xXFkhosZsOOMPX63VtfarlHPR0W2ol1XNEYyz25joXRGlHBPhJb/trHJVMtaXu+xnUuszRFhndRwV4SW/zid1HBXhJb/OLPIVey/AxqXWZmiwzuo4K8JLf5xad1HBPhJb/ADichV7L8BqXWZoi8bDmJrNiRkzrHcaeubCQJDC7PVJ3ZrnxFfLfh21S3K8VApqKIgPkIJAzOQ3LTRJPS1vM5WMnpIo87suA+/8AD5p/UuzbNK+DLpcaahoL1FNV1DxHFGI3gucdw2hSO3qrjB+DMa49ZnSLQLVQmwREQBERAEREAREQBERAEREAREJQHhY1xDTYXwzXXesI1KeMlrSfdu/haPKVQ293OpvV3q7lWvL6ipkMjyekncpo4UGNO2V6iw3RS50tEdeoLTsdKdw+gfioKG5eq2Pa8lT5WXGXoUbieXpXQERZPo2wvLi/GNBa4weJc8PncP4YxtJ/ouvOahFylwRAll4RjGaKV+EJgWPCeJIa22wiO1VzPaNaNkbwMi3+qihaUK8a8FUhwZmUXF4Zq1xY4PYS1zTmCN4Ku1oSxk3GGCqaaZ4NwpQIKkZ7S4DY76QqSKR9BOMThLGsLaiTVt1eRBOCdjST7V30FU9p2vOKLxxW9ElGeiRdVFtY4OaCDmDtBHOty8adAIiICOtPuL58FaM7lcqF2pXSltLTu/le/ZrfQMyvnpUTSVE8k08jpJZHFz3vOZcTvJKvdwrbLUXnRFWupGOfJQzx1bmtGZLBmHfUHZ/QqHIDnoaSor6uKlooZJ6mVwZHFG0uc4nmACzEaJcfEZjCd18yvCwViSrwjie33y3NjfVUcmuxsoza7YQQfoJU9DhY3oDbhq3Z/LvQERdyTH3gndfMp3JMfeCd18ypd5WV68Grf596crK9eDVv8+9ARH3JMfeCd18ysbxDh274crG0t9t1VQVDm6zWTxlpI6R0qwB4WN68Grf596irS9pRueky4UVRcaSmo4qNjmRRQ5necySTv3BAR8recDbGtXcrfc8MXCZ8woGtnpXOOZbGTk5nkByI8qqGrOcCay1Lr1iC9OYRSMgbStcdznlwcR9AH3oDfw4P+K4W+Rm/M1VgX0C0yaIKTSfVW2asus9AaFj2NEUYfraxB25+RRxyTLV4T13ozOtAVERW6PBNtI/80V3ozOtOSdafCit9HZ1oCoqK3XJOtHhTW+js60HBNtJ3YorvR2daAqKitLizgw2yx4Yu11jxHWSvoqWSobG6naA4taTkTn4lVpAc9F+2QfKN/FfUei/Yqf5Nv4L5cUX7ZB8o38V9R6L9jg+Tb+CA5kRCckAK+cunL33sWfP5Fd3SZpTw3gGhkdc6xk1x1SYqGFwdK882Y/hHjK+fmJ7xPiHEVxu9WAJ62d87wNwLjnl9CA8tWl4D37Tiz+5T/i9VaUscHfSXT6OcUVL7pG99puEbYp3RjN0RBza8DnyzOY8aAv4i8rDmIbTiS2x19ir4K6leNj4nZ5eIjeD4ivVQBUdxTp+0gW/E12o6W6QNgp6qWKMGmYcmteQOboCvEqSYo4PWPrjiS61tNRURgqKqWWMmqaCWucSNnkKA8XlFaRu+1P6KzqUY4gu9Zf71WXW5yCStq5DLM8NDQXHxDcpRl4OeP4Wa81Lbo2dL61gH3rrdwPGf81l/zKPrQETKQcF6X8YYMsjbTYK+KChbI6QMdA151nb9pC9juB4z/msv+ZR9a5IOD5jmodqwR2mV3QyvjcfuQGvKK0jd9qf0VnUp8wBi67414PGJrriCdk9bxNXFrtYGDVDNgyHlUFcm7SJ8RofS2qeMC4Pu+CODzia03+KOKs4mrl1Y5A8apZs2jyICkS56H9tg+Ub+IXAueh/bIPlG/igPqLb/ANhp/km/guwupQSxihp/bt/VN5x0Ltg57kAVcOF7uw35Zv8AarHquHC+3Yb8s3+1X9l/VQ/PoRV/gZXPM9JTM9JWi9rCuGLviqvko7FS9lVEbOMczWDcm55Z7fKvZScYrVLcjnrLPGzPSUzPSVIfcYx53kPn2dadxjHneQ+fZ1qHnVDtrxRnTLqI7OeR2lfQPB37p2b5nF+QKoB0MY8y/wCCHz7OtXEwzTy0mHrZTVDdSaGmjje3PPJwaAQuJtqrTqQgoST39BZt003ko9pP98XEfz6X8yxhZPpP98XEfz6X8VjHMu9b/Kh3IrS4sulwdfels/ll/O5SUo14OvvS2fyy/ncpKXirz58+9nRp/CgiITkqxuVv4X/usM/9b/Yq5qwfC6rYJLlh6jY8GeKOWR7RvaHFoGflyKr4vY7JWLWP59Tn1/jZPfBG/eLEHzWP8ym69aTMI2S6T266XiGnrICBJG5riWnLPmCgzgkzxsxTfIXOAkkpGlrec5O2/isG07++ziD5Vv5AqFxaRur6UJPG4khUcKaaMTxJURVeI7pUU7w+GWqkexw52lxIK89vum+VaLVvum+ULvxWmKS6Cs97yTjwmf1ODP8ADvVUGqcuEz+owZ/h3qqDVT2b9PH8+rJK3xk86DPek0g/JO/0ioFbuU9aDPek0g/JO/0ioFbuWLX59XvXoYn8MTXJMluj1OOjEhyjLhrEdGe1TjFbtBpiYZLpctfIa22Xf9lWK9wqOMpvPUsmsYauBBmSZKdu1ugvvpc/tS+qu/YMLaGL/d6e2WqvuU1bUEtjj15G5nLPeW5cyrvaEEsuEvA35F9aPQ4IX/DsR/LRflKzrhG+9Pdf78X5wsPoMW4E0PXu7WOipbuZy9hnJIkaTq5jIkjmK8LSzpkw/i3A9bZ7bT1zKqZzC0ysAbscD0rjTpVLi7VeEXpbW/wLCkoU9De8r6FlOiv3ycNfPo/xWLDcsp0V++Thr59H+K9JW+XLuZTjxRfILVBvWjjkF4BHVNUWLYix5h7D9SKW43Bgq88uIjBe/PxgbvpWMYn0uUljip5H2S6Ojn2xukaI2ub0g5nNRyqwjxZdobOurjHJ0288Pv3EoIojtWmy23HsrUtdWx0ERmDTI3N4G8Dxrox6fbST7e0VzR0h7StecUu0WlsDaLbjyLyiakUO93mwljj2uuQcNwybt+9Dp4sPGRgUFw1HNze7JvtT0ZZ7fKnOKfaHuDaX7MiYkUU2jTfhmscW1rKyhPMZGa4+tqka03ehu9EyrttVHU07xmHxnP8A/wAW8akZ/C8lO52fc2nz6bj3r/s9BERblQIiIAujezWi1VRtTI313FuEIkdqt1stmZXeK8WTFNhilfHLeLcyRhyc11QwEHoO1ZSbe5ZDKx1ugXHNdWT1VVNbZJ5nmR7jUHMknM8y4eT5jP8Amtnnz6qtD7LMPd+7b6SzrT2WYe79230lnWuutq3aWFFeDK/IQKvcnzGf81s8+fVUyaCtGtRgajrai78S+61LtXWidrBkY3AHxlSNb75a7lMYrfcaSqkAzLIZWvIHTkCvSUFxtK4rQdOe5M2hRhF5Rh2lTCcWMMGVttLR2SG8bTu/lkG769yoxUwSUtTLTzsLJY3Fj2neCDkQvouRmqm8JnBvabEzL7RxZUVxP6TVGxko3/XvVvYt1pk6EuD4d5pcQytSIWTaNo2EIi9OUi5nB/xmMVYLigqpNa5W8CCbM7XNy9q76R+ClBUb0OYvdg7G1JVPeRQ1BEFS3m1Sd/0HarwwyMliZJG4OY8BzSNxBXjtqWvN62VwlvR0KE9UcG9ERc0mOOeKOohkhmY2SKRpa9jhmHA7CCFV3SdwYnVNdPX4EqoYmSEuNBUnINJ5mP6PEV3uEhpbxXgTHFLbcO1VPFSSUbJnNkga86xc4HafIFFHKR0i/H6L0NiA8qr0D6RqaUs9jssuX8UUrHA/eulWaGNIFHSTVNThuqjghY6SR5czJrQMyd/QFkXKR0i/H6L0Ni69w4QuP7hQVNHU11GYKiJ0MgFIwEtcCDt8hQERItStEBmOFtGmLsV2vtjh+yz1tFrmPjWOaBrDeNp8a9qPQbpFe8N9jNS3Pnc9gH5lwYF0w4uwPZO1OH6qmiouNdNqyU7XnWdlntPkWQ8pHSL8fovQ2IDIcFcGDElwqY5MU1NPa6MHN8cbhLK4dAy2D61bLB2GbXhGw01oslOIKOAbBvc887nHnJVLOUjpF+P0PobF6eGuENj+uxBb6apraJ8Ms7WPb2I0ZgnaM0BdwbUVLJeFHjNkj2igs+QcR+qf6y2cqXGnxCz+af6yAtdpRkfDo5xLJE9zJGW+Ytc05EHUO0FfOj2RXrvvcfSX9alq/wDCRxbfLJXWurorU2nrIXQSFkTg4NcMjl7beoQQHq+yK9d97j6S/rX0F0GTS1GiLCs08j5ZX0TS573FznHM7yV85VNGEuEPirC+GrdZKCjtb6WhiEMbpI3FxA6fbIC42k4F2jnE7WglxttQAAMyf0ZXza7Aq/is/mz1KdHcKTGTgQ632Yg7wYX+suLlNYr70WH0d3rICFqKhqxWQZ0s/wCsb/3Z6fIvp9RHKjg+Tb+CpVymsV96LD6O71lktLpr0gYn0c4lulrjt9LNanw8a+CEl7Yn6wLm5kjMED6EBZLGuOMPYLoTVYhuUNKMs2RZ60knia0bSqr6TuEteb1xtDg+F1poTm01L8jO8eLmb+KgW73SvvFdJWXWsnrKqQ5ulmeXOP0ldJAc1XVT1lTJUVc0k88h1nySOLnOPSSVwrnoqSprqllPRQS1FQ85NjiYXOcfEAp50bcGq/3ziqvFcvaagO3icg6oePJub9P1ICv6K7uJuDRg64WSKlspqbZXwtybVa5k4w/22nf9GSrRpE0O4twPJJJXUDqu3A7K2kBfHl4xvb9KAxbCWLb5hG4trcP3GejmB9sGO9q8dDm7iPKrSaM+E5brjxNFjen7X1Ryb2bCCYXHpc3e37wqflEB9SLZcaO6UUdXbqqGqppBmyWF4c0jyhRfp/0sRaOLPDBb2MqL9WtJgjftbE0b5HDn8Q51TrRli7FuHr9SU+EK+dlRVTNibS+7ilcTkAWHZ9K9zhIXCvrtK9yZdHtdUUscNOdTMMBEYJ1R0ZklAYhibGeIcT1r6q93esqpHnPVdIQxviDRsC8LjpfhH/aK41YDQToMtmkLCct6ul3qKf8ATugZBTNaS3VyzLienNAQHx0vwj/tFctNX1dLKJKaqnhkBzDo5C0j6Qrez8FLDnEv4q/XRsmR1XOawgHxjJVGvNF2tu1bQ8aybsaZ8PGM3P1XEZjxHJAT3oN0+3W1Xaks2Mqt9daJnCJlVKc5acnYCT/E3pz3K0ekxzXaN8SOaQQbdMQRzjUK+aqvvZrjNdeDKKyqJdM+wvDnHedWMtz+5AUHWoOR2LRataXODWjMk5AIDti51+wdm1WXyrutfTTCpJwzaCSSTSREk/3AvnkzRdjlwa5uFbuWnaCKc7V9D8NRyQ4etcUzCySOlia5p3ghoBCA9JVw4X27Dflm/wBqseq4cL7dhvyzf7V0Nl/VQ/PoRV/gZXJTXwUf39uHzF35goUU18FH9/rh8xd+cL0+0fpp9xSpfGi2ACbFqFAnCjv93sXaDtNcqqh44y8ZxEhbrZauWf1rx1vQdeoqafE6EpaVlk9bEyyKoZ3QMXeEl19IKd0DF3hJdfPldX3HV7SIOcx6jTSh742I/n0v4rGOZctXUTVlVLU1cr5qiVxe+R5zLid5JXFzL0tKLhCMX0JFNvLyXS4OvvS2fyy/ncpKUa8HX3pbP5ZfzuUlLxF58+fezpU/hQXjYuxBQ4YsFZdrlIGU9OzPLPa93M0eMlerUSsghfLM9rImNLnPccg0DeSqb6dNIz8aXzsK3yOFjo3kRAf98/nkP9FvZWkruppXDpZipUUFkwbF2IKzFWIq273FxM1Q/MNz2MbzNHiAXkINiyWlwTe6nBdRiiGmJtkMvFuOXtiOd4H8oOzNeyzToxUeC4HP3yZ0sI4grMLYiorvbnETU78y3me3+Jp8RCmS+aMK/ShdqjF9gulvZQXIte2OXW143BoBa7IbwQVAakzQjpIlwRfOxq5732OrcBMzfxLtwkA/HxKreU6mOWofGl4o3ptP9MuBHlyo32+41VHK5rpKeV0Ti3cS05HL6l12+6b5QvSxPNHUYlu00Dw+KSrlexw3EF5IK81vum+UK5BtwTfEje5k48Jn9Rgz/DvVUGqcuEz+owZ/h3qqDVU2d9PH8+rJK3xk86DPek0g/JO/0ioFbuU9aDPek0g/JO/0ioFbuWtr8+r3r0MT+GJrs50zHSFuic1k0bnt1mtcCW9Iz3KcotKOjlsbGu0fxucAATqR7SrFerKnjTBy7sGsYqXF4IL2eJZ7oIy7rOH/AJV35Cs57qWjj/09j+xGuzbtMGArbWRVdvwKaaqiObJYxG1zT4iqlWvVnCUFSe9fb+5JGEU09SMB0+++1fv78f8AptUfKem4x0eY4xlTi4YQrHXG5TshdO+oyGZyaCQCsi01aM8KYd0eXC5Wi1tp6yJ0YZIJHHLNwB2ErWjexoKnQqxaeEv+uszKnqbkmVjWU6K/fJw18+j/ABWLBZTor98nDXz6P8V0a3y5dzIY8UXyWP6QLtLY8HXa40z2snggLo3OGYDtw+8rIFgOnRodoyu2s/Uy4s+X242L57N6YtnfsqcatzTpy4OSXmVVNZLNcTW1bjPI+TWkfKNbWJ35r05LxJX2iC21JlmZC4mFueZa4nY1g6F5LHvkpjEZGMia4HIjaSdmfjyWYYWsN9Fda8QQWqouMUcwcI2QnJ7WkDPdltG7yLiR1Nn2e65KnFOaS08N+O5I6tXo7xXRWp9xntM7KZrdd5BBcG9OQOeSxHcra3Yz0LKnE0Ed7rXVVOIRZw3NrHEZZlvNu2+VViumHL1QxOqq+1VVJA5/u5Yy1jczsGamr0VTxpOXsTbM7/Vy+lYxjG7f0rD4461uPIYxz3NawFznHIADMkrt19quFvax1fRVFO14za6WMtB8mamWzNwbo2s9LcK2WG83+ZoexkLg/U8nM0DpO1bLZplpb1cJKHF1ope1FQdVpaNbigf5s9/lCxyEVunLDZmW2ripJztbdzpx4vhn/iukhBZ9oWxB2ixzRCaVzaOqzge3W9rm7cSPLkvO0kWuw2y9j2L3GOtoZm6+q12sYT/KTzrzMFta7F1ma+ITNNVGCw8/tgo45p1FjimdCvKlf2Mm09MovisPh9+ku0Nw2rVANiLunxEIi0cQ1pJOQG0koDBNM2MG4OwXVVMbwK6oBgpm8+sR7r6BtVIJHOllfJKdZ7yXOcd5J51JOnrGZxZjSWKmk1rbb84INuxx/id9JUar1+yrXkKOqXGW8oV56pY6jTVHQEIGW4LVZjonwnJjHGtFby0mkY7jql3MIxzfTuXRqTjTi5y4IhSy8IsNwa8G9ocJm71cWrX3PJ4zG1sX8I+nepauldBbLdUVtW8R09PG6R7jzADNc1NDHBBHFE0NjjaGtaNwA3BQLwpMadh2yDDNDJlPVZS1Wqfcxjc36SvGYnf3P/J+COjupQJR0a40pMcWA3Kkbxb2SOikiJzLCDs+sZFc+kbDEGLsJV9qmA15Ga0Lj/DIPclVd4POMfYxjNlFVSatuuWUL8zsa/8Ahd/T6VcgbWjJb31tKyrrRw4oxTmqkd587K+jmt9bUUdWwx1EDzG9p5iDkV11OvChwZ2uvUOJKKPKnrf0dRqjY2Ubj9I/BQUvV2tdXFJVEUZx0SwCMwrecG/Gfshwn2qrJNa4WzJm07Xxfwn6NyqIsr0X4rlwdjGiubXHsYu4uoaP4ozv+reodoWvOaLiuK3ozSnokXwCFcNHURVdLFUU7w+GVoexw3EHaCuZeKxg6RXThCaGsRaQcZU92s09vipYqRsDuyJS12sHOJ3A7NqivkyYx74WP0l3qq2Wltzo9GOKHscWuFumILTkR7Ur5yds6/49Vedd1oCaeTJjHvhY/SXeqnJkxj3wsfpLvVULds6/49Veed1p2zr/AI9Veed1oCaeTJjHvhY/SXeqnJkxj3wsfpLvVULds6/49Veed1p2zr/j1V553WgJp5MmMe+Fj9Jd6qcmTGPfCx+ku9VQt2zr/j1V553WnbOv+PVXnndaAmnkyYx74WP0l3qrv2Xg5YvtNyp7nPV2h9PSPE0gjnc4kN2nL2u9QP2zr/j1V553WrjcDKeWp0f3d1TK+Y9sCM5HF2zUb0oCm1RBMZ5P0Unuj/CelcfY83wUn2Srxaa9Ktu0ZXqgoHYZprgauAz64LWauTssvclR1yoLZ4Dwedb6iArF2PN8FJ9kp2PN8FJ9kqzvKgtngPB51vqJyoLZ4Dwedb6iArF2PN8FJ9kp2PN8FJ9kqzvKgtngPB51vqJyoLZ4Dwedb6iArF2PN8FJ9kp2PN8FJ9kqzvKgtngPB51vqJyoLZ4Dwedb6iArF2PN8FJ9kqz/AAMqCOtt2NKOvgL6eoZDFIx42OaQ8Efeue2cJa2V1ypKQYKp2dkTMi1uNactZwGfufGpT04aQH6K7Fbrha7TSVDqyoML2H9GAA0nP2o2oCn2ONG95sekavwxbqCqrpWya1MIYy4yRO2sds8X4KVNHnBgutw4qqxnWC205yPYkBD5j4idzfvW8cKu5iczDC1tExGqX8a7WI6M8lv5WN48Gbf596AshgjR5hrBVM2PD1rhgkyydUOGvK/yvO1ZaAqh8rK8eDVB596crK8eDVB596At4tr2Ne0tc0OYRkQRmCqi8rK8eDVB596crK8eDVB596AmDSFoEwdi7jKiGlNouL9vZFGA1pP9pm4/cqzaQdAOMMJ8bUUtOLxbm5nj6MEuaP7TN4+jNZzysbx4NW/z71pysbx4NW/z70Bx8EDALqy/1eKrpTkQ24mClbI3LOYj2ztv8o+8rqcMHBVTb8Xx4pp4XOt9xY2OZ7RsjmaMtvlGX1FdyHhV3OFrmw4VtkYcS4hsrgCTvO7erN0ZocYYFpJr7R076O40bJpoJdrAHNByzPRnvQHzQXrWXEd6sbZG2e61tC2Q5vFPM5gd5cirO4s4NOG6yqfPhrFEdvY45inqHNla3yOBBy+tYxyYKjw1sv2D6yAhmbHuLZ4nxS4ku743gtc01T8iPrWNEknMnMqxfJgqPDWy/YPrLtW/gwRce3thja2iHn4hg1vvcgK+4ZsddiO+0dptULpquqkEbGtGeXST4hvK+gWIrLFh3QlcbPAc46KzSQB3SWxkE/SV09Gej3Bmj2Bxs81PLXyN1ZK2omY6Vw6B/KPEFkmNDT3jCF4ttJXUXZFXSSQR687QNZzSBmc0B80Vz0P7bB8o38Qph5OuLfj9g9OHUuSm4PGLI6iJ5r7Dk14Jyrh0+RAXgt/7DT/JN/BdhcNG0x0sLDlm1jQcvEFzIAq4cL7dhvyzf7VY9Vw4X27Dflm/2robL+qh+fQir/AyuSmrgo/v9cPmLvzhQqpq4KP7/XD5i784Xp9o/TT7ilS+NFsgq5cLwEjDeQJ2zbh/dVjQuCpo6aq1eyqeGbV3cYwOy+teQta/N6qqYzgvzjqjg+deq7+V31Jqu/ld9S+hvai2976PzLepO1FtB/4fR+Zb1Lt+/o9jz/wVuavrPnjz5JzLJdJjGx6QsQsja1jG1sgDWjIAZrGuZd6nPXFS6ys1h4LpcHX3pbP5ZfzuUlKNeDr70tn8sv53KSl4e8+fPvZ0qfwox3H2HfZXhets/Zk9H2Q3LjYj0cx6R0hUnxvg674LuzqC8U5aDtinbtjlb0tP9FfpeLivDVsxTaZbdeaZk9O8bM/dMP8AM08xViw2hK0eGsxZpVpa964lM9E+AqvHeImU7Q6O2QEOq6jLY1v8o/tFXUorPQ0dmjtUFNG23xxcSINX2pZllkRzrCMJXnR/gi0tstuvtuiEDiJS+Ya7385cele33SMG+Els88Fvf3NW6n+mL0rhu8zFKCgt/ErBpv0azYJvBrLexz7FVPJidv4lx/gd/QrztE+je4Y8ugOq+ns8Lh2RVEb/AOy3pd+CuHW0toxjhx0MnE19prY9jmnNrx0g/wBV2rHaKKx2ynt9rp46ekgbqsjYP/7mfGpo7ZqRoaGv1rdn/ek15unLPQUDv9LHQ365UkGfFQVMkTMzmcmuIC6LfdN8oXq4v/e29fPZvzleU33TfKF6am24JvqKb3MnHhM/qMGf4d6qg1Tlwmf1ODP8P9VQaqmzvp4/n1ZJW+MnjQZ70mkH5J3+kVAzdyszwTIo58O4jimY2SN9QxrmOGYI1NxCy3TDcbPgHD9LcafDFprHTVAhLHwtaB7UnPYPEqHPOQu501HLk16EnJ6qaeeBTrMJmFM/drofASx/ZHqp3a6HwEsf2R6q6HOK/wC15oi0x7RDGYTMKZ+7XQ+Alj+yPVTu10PgJY/sj1U5xX/a80NMe0R5o3I7oOG/n8X5grVcIz3prqf7cX5wobh040sEzJYcD2WOVh1mvbsLT0g5Lt3ThBy3WjfSXLCtvqqV5BdFLK5zTlu2ZLnXVK4r1oVFTxp+6JYShGLWeJBIIyWVaKyO6Vhrb/8AvR/isw7qti/9OrD9X/wvcwNpIs1xxlZaODAtlo5Z6pkbaiIe2jJPuhs3q/Vr1XTkuTfB9K/uRxisreWmWA6cYYZtGt1NQ8sDNR7CDvcHDILPlHenuJsmjW4a0vF6j43j+0dYe1Xh6vy2d/Ze+9o7/wCZepVAqx2i2ao7nlBNWOcynLnMZJJWvbrZE5AADYPEq4LMrBpJxJYLVFbrdVRNpIs9Rr4Wuyz27yuTQqKnLMj6vt6wrX9BU6KWU097wT+KuFxJFWwFvRcJvv8AarBNOlfRvw7aWMq5ppzOHSwiZ7o3NA25khYN3W8Y98mDyU7OpeFifGF7xO2Jt6rTPHES5jA0NAJ58gp6lzGUGkcHZ/s5dULqFapjEXnc/wDBmo0o2WCnZHSYJtgDGhuchBJ2f3VnuMbxh+xYTsd7dhO3VcdwyLmBjW8Xm3PZs2qt31L07nfrlc7fQ0NbVvlpKJupBEdzB/VRRuWk1L8bjrXHs9SlUpui2kn+r9Ut6x39Z7WPcTWvELqUWew01pjhzLzEBrSE9OQ3Lz8E0sk2LLGBm1r6yMB/jDgSvBXuYJnEOLrK6R5EbKuMnxe2Ch1apps6sreNtayp0uCT4tvo+5dkIm8Iu8fDQuCupxV0U9O4lrZY3RkjeMxkudEB8/saWCpwxie4WmsB4yCUhrj/ABtO0O+kLxFZ/hR4M7NtUGJaKLOek/RVOQ91GdzvoP4qsC9vYXKuKKn09Pec2pDRLAWXYCx/d8DmqNkZSa9Tlrvmi1nZDcAehYiis1KcasdE1lGibTyiYWcIXGLfdRW13/RPWoyxPfa3Et9qrtdHh1TUOzdluaOYAcwXmLRRUrSjReqnFJm0pylubNWuc1zXMJa5pzBHMVdrQljAYvwTSzTPBr6UCnqRz6wGx30jaqSKStAeMThTG0MdTIW264ZQTZnY1x9y76/xVXalrzii8cVvRvRnokWzxxh2nxThivtNUAWzxkMcf4Xj3J+tUNu9uqLTdKu31rCyoppDG9p6QV9DwdZuY2qs/Clwb2PWU+KKKPKOfKGrDRud/C76dy5Gxrrk6nJS4S9Se4hlakV9TInYBmTsA6UCk/QBgs4rxiypqo9a2W4iaXMbHv8A4W/1Xpa1WNGDqS4IqRi5PCLLaGrbc7To7s9LeJHPqRHrBrt8bTta0+QLN1owZNAGwDctV4OpN1Jub6TppYWDH9IMlBDgm+SXmGSe2to5DURRHJ749U5gHpyVOe3+g/wTxF6SPWVt9L3vX4q/w6b8pXzaWhkm7t/oO8E8Q+kj1k7f6DvBPEPpI9ZQrBE6aeOKMZve4NaPGTkpcbwddIbmhwt1HkRn+2M60B3u3+g7wTxD6SPWTt/oO8E8Q+kj1l0uTppE73UfpjOtOTppE73UfpjOtAdw3/Qf4J4i9JHrKMMb1NgqsRTy4Ro6mitBa3ioal+s8HL22ZzPOpD5OmkTvdR+mM605OmkTvdR+mM60BDyufwKve9u/wDiJ/I1QjydNIne6j9MZ1qyXBmwVesC4RuNvxFBFDUzVhmY2OUSAt1QM8x4wUBDXDa/fSwfMHf6hVcVY7htfvpYPmDv9QquKA1WilbQPe8B2aruztIlDHVwyRsFMH05m1XAnW8mzJTD7OuD/wB4af8Ay0oCpCK2/s64P/eGn/y0p7OuD/3hp/8ALSgKkIrb+zrg/wDeGn/y0p7OuD/3hp/8tKAq5hf95rR88h/OFbHhsfuRh7587/TK6kOPtAUM0csNjgZKxwcxwtxzaQcwVNuLMH4e0i2W3tvtK+qom5VMAD3Rkazdh2eIoD5sIr88nnRz3nl9Jf1pyedHPeeX0l/WgKDIr88nnRz3nl9Jf1qmelmz0WH9JGIbTa4zFRUlU6KJhcXarRlszKAxJEU9cFrR9h3Hc2IG4lo3VIpGxGLVlczV1i7Pd5AgIFRX55POjnvPL6S/rTk86Oe88vpL+tAUGV/L6cuDPOQcj7Hm7f8ApBbOTzo57zy+kv61mmJcKx3DR9XYXt0gpYZaI0ULn5uEbdXIZ85yQHzW42T4R/2itONk+Ef9ZVmeSbcvCij9Gd1pyTLl4UUfozutAVm42T4R/wBZTjZPhH/WVZnkmXLwoo/Rndacky5eFFH6M7rQFZ+Ok+Ef9opx0nwj/tFWY5Jly8KKP0Z3WvNxJwYbhY8P3G6yYkpJm0dO+cxtp3AuDQTlnn4kBXnjpPhH/aK5qKWQ1kH6R/6xv8R6V1Vz0P7bB8o38QgPqLb/ANhp/km/guwuvb/2Gn+Sb+C7CAKuHC+3Yb8s3+1WPVcOF9uw35Zv9q6Gy/qofn0Iq/wMrkpT4PGJLThfF9bWX2sZSU76Qxte4E5u1gctiixMs166vSVam6b4MoRlpeS7g0w4Fy/4/B9h3Ute7DgXv/B9h3UqRZBMvGuR7io9pk/OZdRd3uw4F7/wfYd1LTuwYF7/AMH2HdSpHl41yU0EtVURwU0b5Z5HBjGMGZcTuACe4qK/mfkOcy6j2sfVtPcsbXutopRLTT1ckkbxuc0nYV4PMuzcqGotlwqKKtj4upgeWSMzz1XDeF1uZdqnFRgkugrt5ZdLg6+9LZ/LL+dykpRrwdfels/ll/O5SUvD3nz597OlT+FBCiHeqxufPjFg/wDum8fPJfzleVkOheriz96bx88l/OV5S9/S+XHuRynxZePQgP8A8VYb+aj8Ss4KrLgDTtasM4OtdnqLRWzS0cXFukY9oa45k5jPyrIeUnZe8Vw84xeSuLC4lVlJQeG2X41YJJZOe6cHi03C51dbJeq5j6iV8paI25AuOeX3rrcmyzggi+1/m2rdyk7L3juHnGJyk7L3iuHnGKwpbTSws+Rp/wCHie3pb0T1mNe0jaG5Q0rLdTmA8cwuL92R2eRR7ya7x3+ofNOWT8pOy94rh5xicpOy947h5xizRltGjDRCO7uRiXIyeWzMdC2jyr0f2+5U1ZWw1ZqpWyAxNLdXIZbc1jPCz/cS2/Pm/kcsv0X6S6LSA+4NoaGppOwwwu45wOtrZ7svIsQ4Wf7iW35838jlBRdV30XWWJZJJaeTengVSG5EG5Zjokudps+PLfW4hMYtsYeJOMj4wbWkDZkc9q9ZUm4Rcks4KC3vBhyK3o0laKud1D/l59VO6Xop/mof8vPqrl+9Kn7MifkV2kVCTNW97pein+ah/wAvPqrCtMWNsA3nAdZRYcdS9snvjLOLpDGcg4Z+2yHMtqe0Zzkouk1k1dJJZ1IruNqynRX75OGvn0f4rFhuWU6K/fJw18+j/FdCr8uXcyKPEvko809e9ncPak+3i3c3thtUhlR1p7mqItG1caYEh8kbJdmeTC7b/RfPavy5HpNlL/3aOO0vUqgFJGFpNGsVlpxf2XOW5uGcuo06oPQMio3U56NcKWO54VpLicMVlZUh2TpXVLWte5p2kDMZBcihFylhY/J9Y25XhQoKVSUorP8AK0n+W+g858mimONnZdrvdIT7nXa8a46d69G46OcHXfCcN6w7dH2+lMmq6oq3EsyzyIIO45rPcTWmHEkVMy8YQqZ2wfqtWrjaW579zvEo70t2ykw/guCho7NXUMM1QC3jKwPja7efagnMlW500k3JJrwPJ2l9OvOnCjVnGblwcozWP9+xlWBtG9opsL3KBldRXM3JpbBV8UDqDLL2u3bkduxRPfcH2rD+KLRb+3ENzdLVNhqoI2lpiGsAQT481LODKqukwfanXPCNZJW21gNE6PJofs2O3gjPnzUbS4LxvW4u7d1ljldO6qFU8azQ3Y4HIbfFksVYx0R0x9Sxs24rxu67uK6S38XHe1uWN/Vv3Y3m/TLgBuG66S42xtNDaHljGQ8bnIHEbfanblsWCYTlfBii1SRsZI5tVHk1+4+2CynTZcKm444mkqrfUUDhCxoimIJOWfttmzIrGcHw8fiu0RcY2PXqoxrHm9sFVq45X9KPR7NdZ7NUrmWp6X4Y6Xl57y7bfcrVaNGwLVds+MhERAdW6UEFzt9TRVbA+nqIzG9p5wRkqG49w1PhLFdfaagHKF5MTj/Gw7Wn6lfxRLpw0WzY6FDV2mSnguVPmxzpSQHxnmzA3grqbKvFb1dM3+lkFenrju4lPUU1cnXFXx61ecd1JydcVfH7V9t3UvR+8LbtoqclPqIVRTVydcVfH7V9t3UnJ1xV8ftX23dSe8LbtoclPqIVTMgggkEbQQpq5OuKvj9q+27qTk64q+P2rzjupPeFt20OSn1E0aB8ZDFmCYBO/O4UOVPODvOQ9q76QsyxZZKbEeHq61VrQYqqMszI9yeY/QVD+h7RdirAuKOzKitt8lvnjMdRFG9xJHMRs3gqd+bavKXqhCu5UZZXEvU8uGJI+fF6sVbacR1Flmica2KbiQwDa455DLyq6eiTCEeDcHUlCWjsyQcdUvy2ueeb6Ny4rto7tty0iUGKpQOOpoyHRZbHvHuXHyDP7lnLdytX+0Xc04wj+e80pUtEmzVERcknMQ0ve9fir/DpvylfNpfUPEVpgv1jrrVWF4pqyF0EhYcnarhkcioZ5L+Bvh7v6Q31UBSMEggg5EbQV6Pb27j/AMUr/SH9auZyX8C/D3f0hvqpyX8C/D3f0hvqoCmfb2799a/0h/Wnb2799a/0h/Wrmcl/Avw939Ib6qcl/Avw939Ib6qApn29u/fWv9If1p29u/fWv9If1q5nJfwL8Pd/SG+qnJfwL8Pd/SG+qgKZ9vbv31r/AEh/WrQ8Cquq604p7Mqqio1eI1eNkL8vdbsysq5L+Bvh7v6Q31VnejHRdY9HBr+0L6x/ZupxnZEgd7nPLLIDpKArrw2v30sHzB3+oVXFfQ7SZohw9pFudJXX6WuZNTRGFgp5A0apOe3MFYdyXsDfD3f0hvqoCkaK7nJewN8Pd/SG+qnJewN8Pd/SG+qgKRIru8l7A3w939Ib6qcl7A3w939Ib6qApEiu7yXsDfD3f0hvqpyXsDfD3f0hvqoCkbfdDyr6f4V/dez/ADOH8gUOcl7Aw28fePSG+qpwoKVlFQ09JFnxcEbYm6xzOTRkM/qQHOiIgC+dOnr348W/Pn/gF9Fju2KC8Z8HCxYqxTc75VXq5Qz10xmfHG1ha0nmGYQFH1aXgPftOK/7lP8Ai9ZDyUMOd/7t9iPqUiaItEtt0ZSXJ1suFXWGuDA/jw0aurnlll5UBJSIiAIiIAiIgCIiALGNKHvc4l/w+f8AIVk68/ENrjvdjr7XO98cVZA+B72b2hwyJCA+Xa56H9tg+Ub+IVw+Slhjv5dvqj6lui4K2GYpWPF7uxLXBwzDOb6EBYC3/sNP8k38F2FxwR8VCyMHMMaGg+QLkQBRJp30dXXHptHaiali7E4zX49xGetlllkPEpbRS0a0qE1UhxRrKKksMqZydcVfHbZ9t3UnJ1xV8dtn23dStnkmS6Hvm5+3gRc3gVM5OuKvjts+27qTk64q+O2z7bupWzyTJZ983P28BzeBUzk64q+O2z7bupSnob0PwYMldcry6GsvJzEbmDNkDf7OfOelTBkihr7UuK0HCT3PqMxoQi8lCtJ/vi4j+fS/isY5lcS+aCsK3m81lyrJbiKiqldLIGTANzJ25DJdLk8YOy/W3Tz46l2qO17aFOMW3lJdBBKhNts9vg6+9LZ/LL+cqSl4mDcOUeE8P09ntrpXUsBcWGV2s7aczmfpXtrzdxNVKspx4NluCxFJhDvRaFQmx8+cWfvTePnkv5yvKVvq/QFhKurqirnluXGzyOldqzADMnM5bFwcnjB3wt08+Operp7YtowSbe77FF282ypCK2/J4wd8LdPPjqTk8YO+Funnx1Lf3za9b8DHN5lSEVt+Txg74W6efHUnJ4wd8LdPPjqT3za9b8BzeZUhFbfk8YO+Funnx1JyeMHfC3Tz46k982vW/Ac3mYlwQv1+JfJD/uWR8LP9xbb8+b+RyzvR7o6s+A31rrI+qcasNEnHyB3uc8stnjXcx/gq244tcNBeHTtgilEzeJfqnWyI6PGuLUu6cr1V18JYVNqnp6ShY3Irb8njB3wt08+OpOTxg74W6efHUu175tet+BX5vMqQitvyeMHfC3Tz46k5PGDvhbp58dSe+rXrfgObzKkrNGaP7hDo4rMW3HWp6cPjZSxEe2l1nZFx6B0dKsTQaAMHUlbBUEV8/FPD+KlmBY7LmIy2hZ7jDCduxVht9kuAkjonFhygIaRqnMAeJV622qeYqnwzvf2N42735KCDcsp0V++Thr59H+KsdyeMHfC3Tz46l3rDoLwtZL1RXSjluJqaSUTRh8wLdYdIyUtTbFtKDSb4dRqreaZKywvTJRy1uji9R07S57YxJkN5DXAn7gs1C2SsbJG5jwHNcMiDuIXknHUmjqW9bkK0aq/lafg8lDhuUr4R0g4ft+A4LDebfXzuildIex5dQOJOY2gg8+5ZLjHQa6puEtVhysigikcXdjzg5MPQ0jmWET6HsYMqxTtooJGAbJmytDOv7lyVSq0ZbkfVKu0tlbWoxjUq6cPPHS00e0zHWBCMzYLwxzfc5VrvWXgaQMS4YvVqghsdsroKxsms6Sonc8NbzgAuO0rdPoexhE/JtBFIOlkzf6rv0WizG1JBLFFb6Eskyc7jHscdm4eJbN1ZLS4+RDThsuhONancZa4ZqGHw42xPBSx08V8r44YxqsY2UjIdC7NJpAxRDVwSyXyvkZG8OLDLmHAHaCskr9FONrk5tXU0lLxpGrxbZGsLQN2wbFw0+hjF0rXF9PTREHIB8w2/UtNNboyXOc7Gkm5unnp+E8vSriunxjiCKvoaeSGGKBsJ4zLNxzJz2eVcWia0vvGPrVC1uccMgnkPQ1u38clkTdCGKi7ImgAPOZT1KZNFmAKfBlA58rmzXScZTTDcB/K3xKSnQqVKmqaOffbZsNn7PdvaTUnjCSecZ6X3GfjciDci6p8vCIiAIQCiIBkmSIgGSZIiAZJkiIBkEREAyCIiALQnIrVdK5VAp4JJWkl8bS4NAJJ8g50MpZeEdwnamaiXHV+v1VScfh2CrmgIycIXOikjI36zCNii+vq9IjKbjDX3E0u4vZLmGZ8xI2hV6lwoPGGzvWfs/Uuo6nUjH7N7y0U1dSwZ8dUwR5b9d4GS4JL3a4ow+W5UbGHc50zQD96p3d7ViERtqLjS1cwm2iYtc8O//kvNqbRc6fUFTQVkev7jXicM/JsUEr1rhE7lL2NhJJu4X4X+S5jsVWBriDerdn84b1rhfjLDjTk6+W4f9dqpzHZblJNxTLdVmTLPUELs/qyTtLc+LdJ2uq9Rpyc4wuyB+pa89l2SdexdunvuPJf3LhPxxhlgzdfbfl8sFs9n2Fcie39vyH/NCqAbLcxqk2+sAd7k8S7b9y7LcMXx+ZZaa52QzP6B3UnPZ9ky/Y20XGu/Itn3Q8JZ5eyC35/KLb3RMJZgeyCg2/21U44Xvo2mzXD0d3Uj8M31nurPXj/27upY55Pshex9l++/ItkNImEi7IYgoM/lFtGkbCJBPsgodn9tVN9jV8y/4PcMvm7upPY3e+9Fw9Hd1LPPKnZM/wAHWX778i2XdHwj4QUP2/8A4W3ulYP7/wBH9Z6lVFuGL673NmuB/wDbu6lvGE8QHdZLh6O7qWOeVOz6j+ELFca78i1fdKwh3/o/tHqW12kvB7Tkb9SfRmf6Kq/sRxCN9juHmHdS3HB+IhlnZLht/wCQ5Od1ez6mP4RsP/o84lp+6Vg/L/j9H9Z6lqzSVg9x2X+j+kkf0VXG4GxO4ZtsVd9MS3NwHipzshYa/P5NZ53V7Jq/ZTZy/qPOJaI6SMId/wCi+0epa90fCG3/AOv0Wz+0epVbbgXE7t1jrt+W2JcrdHuK3D2tirM+jUTndXs+ph+yuzlxufOJZ8aR8IH/AMfovpcepbTpJwgCR2/ovtHqVZDo7xaBmbDWAf3QuxTaMcX1DNZllnaOh5DT9RKK6rdj1NX7MbMSy7rziWWGkTCRZreyCgyyz92trdI+ESAfZBQ7el6rhHopxk9wAs8g8ZkaP6rnfoixi05drQc9mYlatuc1uwRv2c2Ut3O14xLFjSHhI/8AmCg84tzNIGFHu1WYgoCflFXRuiDGBbrG3sAzyyMozXJDocxbJHrmkiYf5XSDNOcVuwaP2e2Sv6teMSw/dAwprlnb+g1h/wAxcseOcMSOyZfreTu/WhV+g0I4qkZm7sOM9DpP/hbxoNxST7ugAy+FPUs8vW7BE9h7HW7nnoT+/G2GmnI363Zj/nNXJFjDDso/R3u3u8kzVXoaEMU6xBNEANx4w7fuXLDoMxK8nXnoY/GXk5/cs8vW7BiWxNkpfWLyLBjFlhccm3ihPkmbsW5uKbC4EtvFAQN5E7dn3qAm6C8StyaK23hp2HJ7updmPQZiGN4LbrRNHSA5bctW7BDLY+yl/WLwJyOLLAGkm80AA3/pmrU4rsA33mg6f17etQUdBmIDISa+2kE55nW6l2odCF7ZGWurrWctwMbjn9KctW7BrLZOykvq/InSnvtrqf2e4Ushyz9rIDsXOLhSujdIydjmDeQc1BMeh3ELZRnV2trAMgWGQfdmvetWj7FFGcjV2xvtg7WDpjnluOWst1Vn0xKtXZljFZp3Kf4JW7Z0pGYlBAOqSOYrZJeKCOYRyVcQeRnlmsEqsLYrnMh7Mswc/IFwikGeXSNZcdDgm/0rHtZW2vJ+ZOcL3bebeTs8S31y6iqrK2xmVZEhdsqYgkSDVAzJ5slq65UbWB7qqENOwEuG1R7U4LxLURsZJcrWWjf/ANmcAfFkCujVaO71NGItezam4lsUgOX1rDqS7JtGxtXxrL/fAkx15tzQC6upgDuzkC0kvVtjy16+mbn0yt61FkGimvDS6Wpt5l1sx+iIA8mS4pdD9XNHIZrlBJI73IdGS1p6cs1q6lTskysNn533PkSy6825r2tNdT6ztw1xtXPDX0sxAiqI3k7Bk4LAbZo9npooBJcSeL5mg5fRtXvnDELaZrNV8jwfdGV2YH1qSMpPiilWoWsHiFTP4MgdWQN1taVo1dhJ5lpJWQMZrulaG9Oax72KUgqePML3vAyANRJkPHlmuzFh+B8YbPHIBnuE7931rbLIHTo43Sfh/k9Vtwp3NDg/2p3HI5FbhX0pBPHNyG9dQWGi1QP+0bNg/Tv61sZZqePWaIXFp6ZnHNN5pil1s7jblRuALahmR3bVq24UrzkydjjnlsOe1dPtTTvYBJTZgHMDjCcltbaqemlL6ehYTv1g/IlN5nTS635HomsgAcTIAGnI+JboKmGdutDI148RXBFSxljmmAtDt+bs1q2mdGco8g3ybQskbUTnM8YbrFw1elaumja3Wc8BvSTkus+KoDTqTAnLZmwZo2Bxh1Zxxue05rI0rjk5BW0xbrCePV6dYLeypheAWysdnuycF50tmo5m5S0oe3fqudzrWC00MGq6KiDC3YAOZa7zfTTxubz+P7nqa7d2tt8q11hlnmut2PEXhwjyIHQhgjft4s/gskeEcrqiIEgyNBG/atRKwnIPGZ8a67aSJubWMDWnoWgo2DIlusRsHiCbxiPWdsvA3lNdueWe07l0JqQyjIGSPbscDtWjrdH7X29SSNv60plmVGPSz0NYZ7/oWusF5zYf0h2TjZl7pGUgDy4SVAz/AOYSCmRpXWd9sjXe5cD5CtQ9p3EZeVdB9FEDrO40bc8w8j8Fzt4qJuTQ4joAJTJhpdB2c9mfMtV1WTmRvtGOABy2jIrliIyLA4kjfmsmGsHKtM1tAIyGewdK43SsDhnrbDzAoY4nOtMxmtjHh25cb5IxKAXe3OzYgwc+YWu9bHMa/eM1uDQBkNyAaoTVC1RAMgmQREBpqjoTILVEBpkE1QtUQBERAEREAREQBERAEREAREQBERAEREAW0tBK3IgNnFtWghjAIDGgO37N65EQHGIYwzUDG6n8uWxaOgjcAHMaQNwLc8lyohnLOPiWa2sGt1hz5bU4lm32rdu/ZvXIiGMnGImAZBrQPIt2oFuRBk01U1VqiA0yTJaomAaZJl41qiA0yTVWqIDTLxpl41qiA01U1VqiA01U1VqiAJkiIBkiIgGSZBEQDJMkRAMkyREAyTJEQDJMkRAMkyREAyREQDJMkRAMkyREAyREQBMkRAEREAyTJEQDJERAEREAyREQBERAEyREAyWmS1RAaEZoAtUQGmSau1aogGS0IWqIDQBNUZrVEAAyREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAf/Z";
-
 const WEEKDAYS_MON_FIRST = ["월", "화", "수", "목", "금", "토", "일"];
 const JS_DAY_TO_KOR = ["일", "월", "화", "수", "목", "금", "토"];
 const STATUS = {
-  출석: { color: NAVY, soft: NAVY_SOFT },
-  지각: { color: AMBER, soft: AMBER_SOFT },
-  조퇴: { color: PURPLE, soft: PURPLE_SOFT },
-  결석: { color: RED, soft: RED_SOFT },
+    출석: { color: NAVY, soft: NAVY_SOFT },
+    지각: { color: AMBER, soft: AMBER_SOFT },
+    조퇴: { color: PURPLE, soft: PURPLE_SOFT },
+    결석: { color: RED, soft: RED_SOFT },
 };
 const STATUS_ORDER = ["출석", "지각", "조퇴", "결석"];
 const SESSIONS = { regular: "정규수업", clinic: "클리닉" };
 const SESSION_ORDER = ["regular", "clinic"];
-
 function fmt(d) {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
 }
 function todayStr() { return fmt(new Date()); }
 function korWeekdayOf(dateStr) {
-  return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
+    return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
 function monthLabel(d) { return `${d.getFullYear()}년 ${d.getMonth() + 1}월`; }
 function buildMonthGrid(d) {
-  const year = d.getFullYear(), month = d.getMonth();
-  const startOffset = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < startOffset; i++) cells.push(null);
-  for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
+    const year = d.getFullYear(), month = d.getMonth();
+    const startOffset = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startOffset; i++)
+        cells.push(null);
+    for (let day = 1; day <= daysInMonth; day++)
+        cells.push(new Date(year, month, day));
+    while (cells.length % 7 !== 0)
+        cells.push(null);
+    return cells;
 }
-
 // ---------- supabase data helpers ----------
 function mapStudent(row) {
-  return {
-    id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
-    days: row.days || [], phone: row.phone || "", memo: row.memo || "",
-    clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
-    enrollDate: row.enroll_date || "",
-  };
+    return {
+        id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
+        days: row.days || [], phone: row.phone || "", memo: row.memo || "",
+        clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
+        enrollDate: row.enroll_date || "",
+    };
 }
 async function fetchStudents() {
-  const { data, error } = await supabase.from("attn_students").select("*").order("name");
-  if (error) throw error;
-  return data.map(mapStudent);
+    const { data, error } = await supabase.from("attn_students").select("*").order("name");
+    if (error)
+        throw error;
+    return data.map(mapStudent);
 }
 async function upsertStudent(form) {
-  const payload = {
-    name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
-    phone: form.phone, memo: form.memo, clinic: form.clinic, clinic_days: form.clinicDays,
-    clinic_time: form.clinicTime, enroll_date: form.enrollDate || null,
-  };
-  if (form.id) {
-    const { error } = await supabase.from("attn_students").update(payload).eq("id", form.id);
-    if (error) throw error;
-  } else {
-    const { error } = await supabase.from("attn_students").insert(payload);
-    if (error) throw error;
-  }
+    const payload = {
+        name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
+        phone: form.phone, memo: form.memo, clinic: form.clinic, clinic_days: form.clinicDays,
+        clinic_time: form.clinicTime, enroll_date: form.enrollDate || null,
+    };
+    if (form.id) {
+        const { error } = await supabase.from("attn_students").update(payload).eq("id", form.id);
+        if (error)
+            throw error;
+    }
+    else {
+        const { error } = await supabase.from("attn_students").insert(payload);
+        if (error)
+            throw error;
+    }
 }
 async function deleteStudentRow(id) {
-  const { error } = await supabase.from("attn_students").delete().eq("id", id);
-  if (error) throw error;
+    const { error } = await supabase.from("attn_students").delete().eq("id", id);
+    if (error)
+        throw error;
 }
 async function fetchEventsForMonth(monthDate) {
-  const year = monthDate.getFullYear(), month = monthDate.getMonth();
-  const start = fmt(new Date(year, month, 1));
-  const end = fmt(new Date(year, month + 1, 0));
-  const { data, error } = await supabase.from("attn_events").select("*").gte("event_date", start).lte("event_date", end);
-  if (error) throw error;
-  const grouped = {};
-  data.forEach((r) => {
-    if (!grouped[r.event_date]) grouped[r.event_date] = [];
-    grouped[r.event_date].push({ id: r.id, title: r.title });
-  });
-  return grouped;
+    const year = monthDate.getFullYear(), month = monthDate.getMonth();
+    const start = fmt(new Date(year, month, 1));
+    const end = fmt(new Date(year, month + 1, 0));
+    const { data, error } = await supabase.from("attn_events").select("*").gte("event_date", start).lte("event_date", end);
+    if (error)
+        throw error;
+    const grouped = {};
+    data.forEach((r) => {
+        if (!grouped[r.event_date])
+            grouped[r.event_date] = [];
+        grouped[r.event_date].push({ id: r.id, title: r.title });
+    });
+    return grouped;
 }
 async function addEventRow(date, title) {
-  const { error } = await supabase.from("attn_events").insert({ event_date: date, title });
-  if (error) throw error;
+    const { error } = await supabase.from("attn_events").insert({ event_date: date, title });
+    if (error)
+        throw error;
 }
 async function deleteEventRow(id) {
-  const { error } = await supabase.from("attn_events").delete().eq("id", id);
-  if (error) throw error;
+    const { error } = await supabase.from("attn_events").delete().eq("id", id);
+    if (error)
+        throw error;
 }
 async function fetchNotices() {
-  const { data, error } = await supabase.from("attn_notices").select("*").order("created_at", { ascending: false }).limit(200);
-  if (error) throw error;
-  return data.map((r) => ({ id: r.id, text: r.text, date: r.notice_date }));
+    const { data, error } = await supabase.from("attn_notices").select("*").order("created_at", { ascending: false }).limit(200);
+    if (error)
+        throw error;
+    return data.map((r) => ({ id: r.id, text: r.text, date: r.notice_date }));
 }
 async function addNoticeRow(text) {
-  const { error } = await supabase.from("attn_notices").insert({ notice_date: todayStr(), text });
-  if (error) throw error;
+    const { error } = await supabase.from("attn_notices").insert({ notice_date: todayStr(), text });
+    if (error)
+        throw error;
 }
 async function deleteNoticeRow(id) {
-  const { error } = await supabase.from("attn_notices").delete().eq("id", id);
-  if (error) throw error;
+    const { error } = await supabase.from("attn_notices").delete().eq("id", id);
+    if (error)
+        throw error;
 }
 async function fetchAttendanceForDate(date) {
-  const { data, error } = await supabase.from("attn_attendance").select("*").eq("attn_date", date);
-  if (error) throw error;
-  const result = { regular: {}, clinic: {} };
-  data.forEach((r) => { result[r.session][r.student_id] = r.status; });
-  return result;
+    const { data, error } = await supabase.from("attn_attendance").select("*").eq("attn_date", date);
+    if (error)
+        throw error;
+    const result = { regular: {}, clinic: {} };
+    data.forEach((r) => { result[r.session][r.student_id] = r.status; });
+    return result;
 }
 async function setAttendanceRow(date, session, studentId, status, isCurrentlyActive) {
-  if (isCurrentlyActive) {
-    const { error } = await supabase.from("attn_attendance").delete()
-      .eq("attn_date", date).eq("session", session).eq("student_id", studentId);
-    if (error) throw error;
-  } else {
-    const { error } = await supabase.from("attn_attendance").upsert(
-      { attn_date: date, session, student_id: studentId, status, updated_at: new Date().toISOString() },
-      { onConflict: "attn_date,session,student_id" }
-    );
-    if (error) throw error;
-  }
+    if (isCurrentlyActive) {
+        const { error } = await supabase.from("attn_attendance").delete()
+            .eq("attn_date", date).eq("session", session).eq("student_id", studentId);
+        if (error)
+            throw error;
+    }
+    else {
+        const { error } = await supabase.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+        if (error)
+            throw error;
+    }
 }
-
 // ---------- small atoms ----------
 function TabButton({ active, onClick, children }) {
-  return (
-    <button onClick={onClick}
-      className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0"
-      style={{ background: active ? NAVY : "transparent", color: active ? "#fff" : SUBINK }}>
-      {children}
-    </button>
-  );
+    return (React.createElement("button", { onClick: onClick, className: "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0", style: { background: active ? NAVY : "transparent", color: active ? "#fff" : SUBINK } }, children));
 }
 function StampButton({ status, active, onClick }) {
-  const cfg = STATUS[status];
-  const [popped, setPopped] = useState(false);
-  return (
-    <button
-      onClick={() => { onClick(); if (status === "출석") { setPopped(true); setTimeout(() => setPopped(false), 260); } }}
-      className="flex flex-col items-center justify-center gap-1 py-2.5 rounded-lg text-xs font-bold border transition-transform"
-      style={{
-        background: active ? cfg.color : "#fff", color: active ? "#fff" : cfg.color, borderColor: cfg.color,
-        minHeight: 52, transform: popped ? "scale(1.1) rotate(-5deg)" : "scale(1)",
-        transition: "transform 180ms ease, background 120ms ease, color 120ms ease",
-      }}>
-      {status}
-    </button>
-  );
+    const cfg = STATUS[status];
+    const [popped, setPopped] = useState(false);
+    return (React.createElement("button", { onClick: () => { onClick(); if (status === "출석") {
+            setPopped(true);
+            setTimeout(() => setPopped(false), 260);
+        } }, className: "flex flex-col items-center justify-center gap-1 py-2.5 rounded-lg text-xs font-bold border transition-transform", style: {
+            background: active ? cfg.color : "#fff", color: active ? "#fff" : cfg.color, borderColor: cfg.color,
+            minHeight: 52, transform: popped ? "scale(1.1) rotate(-5deg)" : "scale(1)",
+            transition: "transform 180ms ease, background 120ms ease, color 120ms ease",
+        } }, status));
 }
-
 // ============================================================
 // Login screen
 // ============================================================
 function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) setError("이메일 또는 비밀번호가 올바르지 않습니다.");
-  };
-
-  return (
-    <div style={{ background: PAPER, minHeight: "100vh" }} className="flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-        <img src={LOGO_HORIZONTAL} alt="올곧수학 더센텀" style={{ height: 34, margin: "0 auto 20px", display: "block" }} />
-        <div style={{ fontWeight: 800, fontSize: 15, textAlign: "center", marginBottom: 18, color: INK }}>
-          내부 관리 시스템 로그인
-        </div>
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder="이메일" className="px-3 py-3 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} />
-          <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="비밀번호" className="px-3 py-3 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} />
-          {error && <div style={{ color: RED, fontSize: 12.5, fontWeight: 600 }}>{error}</div>}
-          <button type="submit" disabled={loading}
-            className="py-3 rounded-lg text-sm font-bold mt-1" style={{ background: NAVY, color: "#fff", opacity: loading ? 0.6 : 1 }}>
-            {loading ? "로그인 중..." : "로그인"}
-          </button>
-        </form>
-        <div style={{ fontSize: 11.5, color: SUBINK, marginTop: 14, textAlign: "center" }}>
-          계정이 없다면 원장님께 문의하세요.
-        </div>
-      </div>
-    </div>
-  );
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+    const submit = async (e) => {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        setLoading(false);
+        if (error)
+            setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+    };
+    return (React.createElement("div", { style: { background: PAPER, minHeight: "100vh" }, className: "flex items-center justify-center px-4" },
+        React.createElement("div", { className: "w-full max-w-sm rounded-2xl p-6", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement("img", { src: LOGO_HORIZONTAL, alt: "\uC62C\uACE7\uC218\uD559 \uB354\uC13C\uD140", style: { height: 34, margin: "0 auto 20px", display: "block" } }),
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, textAlign: "center", marginBottom: 18, color: INK } }, "\uB0B4\uBD80 \uAD00\uB9AC \uC2DC\uC2A4\uD15C \uB85C\uADF8\uC778"),
+            React.createElement("form", { onSubmit: submit, className: "flex flex-col gap-3" },
+                React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), placeholder: "\uC774\uBA54\uC77C", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("input", { type: "password", required: true, value: password, onChange: (e) => setPassword(e.target.value), placeholder: "\uBE44\uBC00\uBC88\uD638", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                error && React.createElement("div", { style: { color: RED, fontSize: 12.5, fontWeight: 600 } }, error),
+                React.createElement("button", { type: "submit", disabled: loading, className: "py-3 rounded-lg text-sm font-bold mt-1", style: { background: NAVY, color: "#fff", opacity: loading ? 0.6 : 1 } }, loading ? "로그인 중..." : "로그인")),
+            React.createElement("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 14, textAlign: "center" } }, "\uACC4\uC815\uC774 \uC5C6\uB2E4\uBA74 \uC6D0\uC7A5\uB2D8\uAED8 \uBB38\uC758\uD558\uC138\uC694."))));
 }
-
 // ============================================================
 // Main app
 // ============================================================
 function MainApp({ session }) {
-  const [tab, setTab] = useState("attendance");
-  const [students, setStudents] = useState([]);
-  const [studentsLoaded, setStudentsLoaded] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(todayStr());
-  const [month, setMonth] = useState(new Date());
-
-  const reloadStudents = async () => {
-    try { setStudents(await fetchStudents()); } catch (e) { console.error(e); }
-  };
-  useEffect(() => { reloadStudents().then(() => setStudentsLoaded(true)); }, []);
-
-  // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
-  useEffect(() => {
-    const channel = supabase
-      .channel("attn_students_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "attn_students" }, () => {
-        reloadStudents();
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  return (
-    <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="pb-10">
-      <div style={{ background: NAVY, borderBottom: `4px solid ${RED}` }} className="px-4 sm:px-6 py-3">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
-          <img src={LOGO_HORIZONTAL} alt="올곧수학 더센텀" style={{ height: 30 }} />
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:flex items-center gap-1.5" style={{ color: "#9aa3d1", fontSize: 11 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: "#4ade80", display: "inline-block" }} />
-              실시간 동기화
-            </span>
-            <span style={{ color: "#c7cdea", fontSize: 11.5 }}>{session.user.email}</span>
-            <button onClick={() => supabase.auth.signOut()}
-              style={{ color: "#fff", fontSize: 12, fontWeight: 700, background: "rgba(255,255,255,0.12)", padding: "6px 10px", borderRadius: 8 }}>
-              로그아웃
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 pt-4">
-        <div className="flex items-center gap-1.5 p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-          <TabButton active={tab === "attendance"} onClick={() => setTab("attendance")}>출석체크</TabButton>
-          <TabButton active={tab === "dashboard"} onClick={() => setTab("dashboard")}>대시보드</TabButton>
-          <TabButton active={tab === "students"} onClick={() => setTab("students")}>학생관리</TabButton>
-        </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 pt-5">
-        {!studentsLoaded ? (
-          <div style={{ color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" }}>불러오는 중...</div>
-        ) : (
-          <React.Fragment>
-            {tab === "attendance" && (
-              <Attendance students={students} selectedDate={selectedDate} setSelectedDate={setSelectedDate} />
-            )}
-            {tab === "dashboard" && (
-              <Dashboard month={month} setMonth={setMonth} selectedDate={selectedDate} setSelectedDate={setSelectedDate} goToAttendance={() => setTab("attendance")} />
-            )}
-            {tab === "students" && <StudentManager students={students} reload={reloadStudents} />}
-          </React.Fragment>
-        )}
-      </div>
-    </div>
-  );
+    const [tab, setTab] = useState("attendance");
+    const [students, setStudents] = useState([]);
+    const [studentsLoaded, setStudentsLoaded] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(todayStr());
+    const [month, setMonth] = useState(new Date());
+    const reloadStudents = async () => {
+        try {
+            setStudents(await fetchStudents());
+        }
+        catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { reloadStudents().then(() => setStudentsLoaded(true)); }, []);
+    // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
+    useEffect(() => {
+        const channel = supabase
+            .channel("attn_students_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_students" }, () => {
+            reloadStudents();
+        })
+            .subscribe();
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+    return (React.createElement("div", { style: { background: PAPER, color: INK, minHeight: "100vh" }, className: "pb-10" },
+        React.createElement("div", { style: { background: NAVY, borderBottom: `4px solid ${RED}` }, className: "px-4 sm:px-6 py-3" },
+            React.createElement("div", { className: "max-w-5xl mx-auto flex items-center justify-between gap-3" },
+                React.createElement("img", { src: LOGO_HORIZONTAL, alt: "\uC62C\uACE7\uC218\uD559 \uB354\uC13C\uD140", style: { height: 30 } }),
+                React.createElement("div", { className: "flex items-center gap-3" },
+                    React.createElement("span", { className: "hidden sm:flex items-center gap-1.5", style: { color: "#9aa3d1", fontSize: 11 } },
+                        React.createElement("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#4ade80", display: "inline-block" } }),
+                        "\uC2E4\uC2DC\uAC04 \uB3D9\uAE30\uD654"),
+                    React.createElement("span", { style: { color: "#c7cdea", fontSize: 11.5 } }, session.user.email),
+                    React.createElement("button", { onClick: () => supabase.auth.signOut(), style: { color: "#fff", fontSize: 12, fontWeight: 700, background: "rgba(255,255,255,0.12)", padding: "6px 10px", borderRadius: 8 } }, "\uB85C\uADF8\uC544\uC6C3")))),
+        React.createElement("div", { className: "max-w-5xl mx-auto px-3 sm:px-6 pt-4" },
+            React.createElement("div", { className: "flex items-center gap-1.5 p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                React.createElement(TabButton, { active: tab === "attendance", onClick: () => setTab("attendance") }, "\uCD9C\uC11D\uCCB4\uD06C"),
+                React.createElement(TabButton, { active: tab === "dashboard", onClick: () => setTab("dashboard") }, "\uB300\uC2DC\uBCF4\uB4DC"),
+                React.createElement(TabButton, { active: tab === "students", onClick: () => setTab("students") }, "\uD559\uC0DD\uAD00\uB9AC"))),
+        React.createElement("div", { className: "max-w-5xl mx-auto px-3 sm:px-6 pt-5" }, !studentsLoaded ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : (React.createElement(React.Fragment, null,
+            tab === "attendance" && (React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate })),
+            tab === "dashboard" && (React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance") })),
+            tab === "students" && React.createElement(StudentManager, { students: students, reload: reloadStudents }))))));
 }
-
 // ---------- Dashboard ----------
 function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttendance }) {
-  const cells = useMemo(() => buildMonthGrid(month), [month]);
-  const [events, setEvents] = useState({});
-  const [notices, setNotices] = useState([]);
-  const [newEvent, setNewEvent] = useState("");
-  const [newNotice, setNewNotice] = useState("");
-  const today = todayStr();
-
-  const loadEvents = async () => { try { setEvents(await fetchEventsForMonth(month)); } catch (e) { console.error(e); } };
-  const loadNotices = async () => { try { setNotices(await fetchNotices()); } catch (e) { console.error(e); } };
-  useEffect(() => { loadEvents(); }, [month]);
-  useEffect(() => { loadNotices(); }, []);
-
-  // realtime: 다른 사람이 일정/공지를 추가·삭제하면 자동 반영
-  useEffect(() => {
-    const channel = supabase
-      .channel("attn_dashboard_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "attn_events" }, () => loadEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "attn_notices" }, () => loadNotices())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [month]);
-
-  const selEvents = events[selectedDate] || [];
-
-  const addEvent = async () => {
-    if (!newEvent.trim()) return;
-    await addEventRow(selectedDate, newEvent.trim());
-    setNewEvent("");
-    loadEvents();
-  };
-  const removeEvent = async (id) => { await deleteEventRow(id); loadEvents(); };
-  const addNotice = async () => {
-    if (!newNotice.trim()) return;
-    await addNoticeRow(newNotice.trim());
-    setNewNotice("");
-    loadNotices();
-  };
-  const removeNotice = async (id) => { await deleteNoticeRow(id); loadNotices(); };
-
-  return (
-    <div>
-      <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 2 }}>올곧수학 더센텀 일정</h1>
-      <p style={{ color: SUBINK, fontSize: 13, marginBottom: 16 }}>월별 일정과 공지사항을 한눈에 확인하세요.</p>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 rounded-2xl overflow-hidden" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-          <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${LINE}` }}>
-            <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="p-1.5 rounded-lg" style={{ background: NAVY_SOFT, color: NAVY }}>◀</button>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>{monthLabel(month)}</div>
-            <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="p-1.5 rounded-lg" style={{ background: NAVY_SOFT, color: NAVY }}>▶</button>
-          </div>
-          <div className="grid grid-cols-7 px-3 pt-3" style={{ gap: 4 }}>
-            {["일", "월", "화", "수", "목", "금", "토"].map((w, i) => (
-              <div key={w} className="text-center text-xs font-bold pb-2" style={{ color: i === 0 ? RED : i === 6 ? NAVY : SUBINK }}>{w}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 px-3 pb-4" style={{ gap: 4 }}>
-            {cells.map((d, i) => {
-              if (!d) return <div key={i} />;
-              const ds = fmt(d);
-              const isToday = ds === today, isSel = ds === selectedDate;
-              const evs = events[ds] || [];
-              return (
-                <button key={i} onClick={() => setSelectedDate(ds)} className="text-left rounded-xl p-1.5 flex flex-col"
-                  style={{ minHeight: 62, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` }}>
-                  <span style={{ fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK }}>{d.getDate()}</span>
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    {evs.slice(0, 2).map((e) => (
-                      <span key={e.id} style={{ fontSize: 9.5, background: NAVY, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</span>
-                    ))}
-                    {evs.length > 2 && <span style={{ fontSize: 9, color: SUBINK, fontWeight: 600 }}>+{evs.length - 2}개 더보기</span>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="rounded-2xl p-5" style={{ background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" }}>
-          <div style={{ fontSize: 13, color: SUBINK, fontWeight: 600 }}>선택한 날짜</div>
-          <div style={{ fontSize: 17, fontWeight: 800, marginTop: 2 }}>{selectedDate} <span style={{ color: RED }}>({korWeekdayOf(selectedDate)})</span></div>
-          <div className="flex gap-2 mt-4">
-            <input value={newEvent} onChange={(e) => setNewEvent(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addEvent()}
-              placeholder="일정 추가 (예: 중간고사)" className="flex-1 px-3 py-2 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} />
-            <button onClick={addEvent} className="px-3 rounded-lg" style={{ background: NAVY, color: "#fff" }}>+</button>
-          </div>
-          <div className="mt-3 flex flex-col gap-2">
-            {selEvents.length === 0 && <div style={{ fontSize: 12.5, color: SUBINK, padding: "10px 0" }}>등록된 일정이 없습니다.</div>}
-            {selEvents.map((e) => (
-              <div key={e.id} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: NAVY_SOFT }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{e.title}</span>
-                <button onClick={() => removeEvent(e.id)} style={{ color: SUBINK }}>✕</button>
-              </div>
-            ))}
-          </div>
-          <button onClick={goToAttendance} className="w-full mt-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: RED, color: "#fff" }}>
-            이 날짜로 출석체크 하러가기
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl p-5" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 1 }}>📣 공지사항</div>
-        <p style={{ color: SUBINK, fontSize: 12.5, marginBottom: 12 }}>한 줄씩 기록해두는 원내 공지 로그입니다.</p>
-        <div className="flex gap-2">
-          <input value={newNotice} onChange={(e) => setNewNotice(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNotice()}
-            placeholder="공지 내용을 입력하고 Enter" className="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} />
-          <button onClick={addNotice} className="px-4 rounded-lg text-sm font-bold" style={{ background: NAVY, color: "#fff" }}>등록</button>
-        </div>
-        <div className="mt-4 flex flex-col">
-          {notices.length === 0 && <div style={{ fontSize: 12.5, color: SUBINK, padding: "8px 0" }}>등록된 공지사항이 없습니다.</div>}
-          {notices.map((n) => (
-            <div key={n.id} className="flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${LINE}` }}>
-              <div className="flex items-center gap-3 min-w-0">
-                <span style={{ fontSize: 11, color: "#fff", background: NAVY, borderRadius: 6, padding: "2px 7px", fontWeight: 700, flexShrink: 0 }}>{n.date}</span>
-                <span style={{ fontSize: 13.5, fontWeight: 500 }}>{n.text}</span>
-              </div>
-              <button onClick={() => removeNotice(n.id)} style={{ color: SUBINK, flexShrink: 0 }}>🗑</button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+    const cells = useMemo(() => buildMonthGrid(month), [month]);
+    const [events, setEvents] = useState({});
+    const [notices, setNotices] = useState([]);
+    const [newEvent, setNewEvent] = useState("");
+    const [newNotice, setNewNotice] = useState("");
+    const today = todayStr();
+    const loadEvents = async () => { try {
+        setEvents(await fetchEventsForMonth(month));
+    }
+    catch (e) {
+        console.error(e);
+    } };
+    const loadNotices = async () => { try {
+        setNotices(await fetchNotices());
+    }
+    catch (e) {
+        console.error(e);
+    } };
+    useEffect(() => { loadEvents(); }, [month]);
+    useEffect(() => { loadNotices(); }, []);
+    // realtime: 다른 사람이 일정/공지를 추가·삭제하면 자동 반영
+    useEffect(() => {
+        const channel = supabase
+            .channel("attn_dashboard_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_events" }, () => loadEvents())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_notices" }, () => loadNotices())
+            .subscribe();
+        return () => { supabase.removeChannel(channel); };
+    }, [month]);
+    const selEvents = events[selectedDate] || [];
+    const addEvent = async () => {
+        if (!newEvent.trim())
+            return;
+        await addEventRow(selectedDate, newEvent.trim());
+        setNewEvent("");
+        loadEvents();
+    };
+    const removeEvent = async (id) => { await deleteEventRow(id); loadEvents(); };
+    const addNotice = async () => {
+        if (!newNotice.trim())
+            return;
+        await addNoticeRow(newNotice.trim());
+        setNewNotice("");
+        loadNotices();
+    };
+    const removeNotice = async (id) => { await deleteNoticeRow(id); loadNotices(); };
+    return (React.createElement("div", null,
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800, marginBottom: 2 } }, "\uC62C\uACE7\uC218\uD559 \uB354\uC13C\uD140 \uC77C\uC815"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uC6D4\uBCC4 \uC77C\uC815\uACFC \uACF5\uC9C0\uC0AC\uD56D\uC744 \uD55C\uB208\uC5D0 \uD655\uC778\uD558\uC138\uC694."),
+        React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-3 gap-5" },
+            React.createElement("div", { className: "lg:col-span-2 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "flex items-center justify-between px-5 py-4", style: { borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u25C0"),
+                    React.createElement("div", { style: { fontWeight: 800, fontSize: 16 } }, monthLabel(month)),
+                    React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u25B6")),
+                React.createElement("div", { className: "grid grid-cols-7 px-3 pt-3", style: { gap: 4 } }, ["일", "월", "화", "수", "목", "금", "토"].map((w, i) => (React.createElement("div", { key: w, className: "text-center text-xs font-bold pb-2", style: { color: i === 0 ? RED : i === 6 ? NAVY : SUBINK } }, w)))),
+                React.createElement("div", { className: "grid grid-cols-7 px-3 pb-4", style: { gap: 4 } }, cells.map((d, i) => {
+                    if (!d)
+                        return React.createElement("div", { key: i });
+                    const ds = fmt(d);
+                    const isToday = ds === today, isSel = ds === selectedDate;
+                    const evs = events[ds] || [];
+                    return (React.createElement("button", { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
+                        React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
+                        React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" },
+                            evs.slice(0, 2).map((e) => (React.createElement("span", { key: e.id, style: { fontSize: 9.5, background: NAVY, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
+                            evs.length > 2 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
+                                "+",
+                                evs.length - 2,
+                                "\uAC1C \uB354\uBCF4\uAE30"))));
+                }))),
+            React.createElement("div", { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
+                React.createElement("div", { style: { fontSize: 13, color: SUBINK, fontWeight: 600 } }, "\uC120\uD0DD\uD55C \uB0A0\uC9DC"),
+                React.createElement("div", { style: { fontSize: 17, fontWeight: 800, marginTop: 2 } },
+                    selectedDate,
+                    " ",
+                    React.createElement("span", { style: { color: RED } },
+                        "(",
+                        korWeekdayOf(selectedDate),
+                        ")")),
+                React.createElement("div", { className: "flex gap-2 mt-4" },
+                    React.createElement("input", { value: newEvent, onChange: (e) => setNewEvent(e.target.value), onKeyDown: (e) => e.key === "Enter" && addEvent(), placeholder: "\uC77C\uC815 \uCD94\uAC00 (\uC608: \uC911\uAC04\uACE0\uC0AC)", className: "flex-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement("button", { onClick: addEvent, className: "px-3 rounded-lg", style: { background: NAVY, color: "#fff" } }, "+")),
+                React.createElement("div", { className: "mt-3 flex flex-col gap-2" },
+                    selEvents.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "10px 0" } }, "\uB4F1\uB85D\uB41C \uC77C\uC815\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."),
+                    selEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center justify-between px-3 py-2 rounded-lg", style: { background: NAVY_SOFT } },
+                        React.createElement("span", { style: { fontSize: 13, fontWeight: 600 } }, e.title),
+                        React.createElement("button", { onClick: () => removeEvent(e.id), style: { color: SUBINK } }, "\u2715"))))),
+                React.createElement("button", { onClick: goToAttendance, className: "w-full mt-4 py-2.5 rounded-lg text-sm font-bold", style: { background: RED, color: "#fff" } }, "\uC774 \uB0A0\uC9DC\uB85C \uCD9C\uC11D\uCCB4\uD06C \uD558\uB7EC\uAC00\uAE30"))),
+        React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 1 } }, "\uD83D\uDCE3 \uACF5\uC9C0\uC0AC\uD56D"),
+            React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 12 } }, "\uD55C \uC904\uC529 \uAE30\uB85D\uD574\uB450\uB294 \uC6D0\uB0B4 \uACF5\uC9C0 \uB85C\uADF8\uC785\uB2C8\uB2E4."),
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("input", { value: newNotice, onChange: (e) => setNewNotice(e.target.value), onKeyDown: (e) => e.key === "Enter" && addNotice(), placeholder: "\uACF5\uC9C0 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uACE0 Enter", className: "flex-1 px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("button", { onClick: addNotice, className: "px-4 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "\uB4F1\uB85D")),
+            React.createElement("div", { className: "mt-4 flex flex-col" },
+                notices.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "8px 0" } }, "\uB4F1\uB85D\uB41C \uACF5\uC9C0\uC0AC\uD56D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."),
+                notices.map((n) => (React.createElement("div", { key: n.id, className: "flex items-center justify-between py-2.5", style: { borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("div", { className: "flex items-center gap-3 min-w-0" },
+                        React.createElement("span", { style: { fontSize: 11, color: "#fff", background: NAVY, borderRadius: 6, padding: "2px 7px", fontWeight: 700, flexShrink: 0 } }, n.date),
+                        React.createElement("span", { style: { fontSize: 13.5, fontWeight: 500 } }, n.text)),
+                    React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1"))))))));
 }
-
 // ---------- Attendance ----------
 function Attendance({ students, selectedDate, setSelectedDate }) {
-  const [session, setSession] = useState("regular");
-  const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {} });
-  const [loading, setLoading] = useState(true);
-  const weekday = korWeekdayOf(selectedDate);
-
-  const load = async () => {
-    setLoading(true);
-    try { setSessionAttendance(await fetchAttendanceForDate(selectedDate)); } catch (e) { console.error(e); }
-    setLoading(false);
-  };
-  const loadQuiet = async () => {
-    try { setSessionAttendance(await fetchAttendanceForDate(selectedDate)); } catch (e) { console.error(e); }
-  };
-  useEffect(() => { load(); }, [selectedDate]);
-
-  // realtime: 다른 사람이 같은 날짜에 체크한 출석이 바로 반영됨
-  useEffect(() => {
-    const channel = supabase
-      .channel(`attn_attendance_${selectedDate}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` },
-        () => loadQuiet()
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedDate]);
-
-  const roster = students.filter((s) => {
-    if (s.enrollDate && selectedDate < s.enrollDate) return false;
-    if (session === "clinic") {
-      if (!s.clinic) return false;
-      const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
-      return clinicDays.includes(weekday);
-    }
-    return s.days.includes(weekday);
-  });
-
-  const current = sessionAttendance[session] || {};
-
-  const setStatus = async (studentId, status) => {
-    const isActive = current[studentId] === status;
-    // optimistic update
-    setSessionAttendance((prev) => {
-      const rec = { ...prev[session] };
-      if (isActive) delete rec[studentId]; else rec[studentId] = status;
-      return { ...prev, [session]: rec };
+    const [session, setSession] = useState("regular");
+    const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {} });
+    const [loading, setLoading] = useState(true);
+    const weekday = korWeekdayOf(selectedDate);
+    const load = async () => {
+        setLoading(true);
+        try {
+            setSessionAttendance(await fetchAttendanceForDate(selectedDate));
+        }
+        catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
+    const loadQuiet = async () => {
+        try {
+            setSessionAttendance(await fetchAttendanceForDate(selectedDate));
+        }
+        catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { load(); }, [selectedDate]);
+    // realtime: 다른 사람이 같은 날짜에 체크한 출석이 바로 반영됨
+    useEffect(() => {
+        const channel = supabase
+            .channel(`attn_attendance_${selectedDate}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
+            .subscribe();
+        return () => { supabase.removeChannel(channel); };
+    }, [selectedDate]);
+    const roster = students.filter((s) => {
+        if (s.enrollDate && selectedDate < s.enrollDate)
+            return false;
+        if (session === "clinic") {
+            if (!s.clinic)
+                return false;
+            const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
+            return clinicDays.includes(weekday);
+        }
+        return s.days.includes(weekday);
     });
-    try { await setAttendanceRow(selectedDate, session, studentId, status, isActive); }
-    catch (e) { console.error(e); load(); }
-  };
-
-  const counts = STATUS_ORDER.reduce((acc, s) => { acc[s] = roster.filter((st) => current[st.id] === s).length; return acc; }, {});
-  const uncheckedCount = roster.filter((st) => !current[st.id]).length;
-
-  return (
-    <div>
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
-        <h1 style={{ fontSize: 20, fontWeight: 800 }}>출석체크</h1>
-        <span style={{ fontSize: 12.5, fontWeight: 800, color: "#fff", background: RED, borderRadius: 8, padding: "6px 10px" }}>{weekday}요일</span>
-      </div>
-      <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
-        className="w-full px-3 py-3 rounded-xl text-base outline-none mt-2" style={{ border: `1px solid ${LINE}` }} />
-
-      <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl mt-3 mb-3" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-        {SESSION_ORDER.map((key) => (
-          <button key={key} onClick={() => setSession(key)} className="px-4 py-3 rounded-xl text-sm font-semibold transition-all"
-            style={{ background: session === key ? NAVY : "transparent", color: session === key ? "#fff" : SUBINK }}>
-            {SESSIONS[key]}
-          </button>
-        ))}
-      </div>
-
-      <p style={{ color: SUBINK, fontSize: 13, marginBottom: 16 }}>
-        {weekday}요일 · {SESSIONS[session]} 대상 학생 {roster.length}명의 출석부입니다.
-      </p>
-
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5">
-        {STATUS_ORDER.map((s) => (
-          <div key={s} className="rounded-xl px-3 py-3" style={{ background: STATUS[s].soft }}>
-            <div style={{ fontSize: 11, color: SUBINK, fontWeight: 700 }}>{s}</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: STATUS[s].color }}>{counts[s]}명</div>
-          </div>
-        ))}
-        <div className="rounded-xl px-3 py-3" style={{ background: "#f0f0ee" }}>
-          <div style={{ fontSize: 11, color: SUBINK, fontWeight: 700 }}>미체크</div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: SUBINK }}>{uncheckedCount}명</div>
-        </div>
-      </div>
-
-      {loading ? (
-        <div style={{ color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" }}>불러오는 중...</div>
-      ) : roster.length === 0 ? (
-        <div className="rounded-2xl p-10 text-center" style={{ background: "#fff", border: `1px solid ${LINE}`, color: SUBINK }}>
-          {weekday}요일 {SESSIONS[session]}에 배정된 학생이 없습니다.
-        </div>
-      ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-          {roster.map((s, idx) => {
+    const current = sessionAttendance[session] || {};
+    const setStatus = async (studentId, status) => {
+        const isActive = current[studentId] === status;
+        // optimistic update
+        setSessionAttendance((prev) => {
+            const rec = { ...prev[session] };
+            if (isActive)
+                delete rec[studentId];
+            else
+                rec[studentId] = status;
+            return { ...prev, [session]: rec };
+        });
+        try {
+            await setAttendanceRow(selectedDate, session, studentId, status, isActive);
+        }
+        catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const counts = STATUS_ORDER.reduce((acc, s) => { acc[s] = roster.filter((st) => current[st.id] === s).length; return acc; }, {});
+    const uncheckedCount = roster.filter((st) => !current[st.id]).length;
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
+            React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uCD9C\uC11D\uCCB4\uD06C"),
+            React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: "#fff", background: RED, borderRadius: 8, padding: "6px 10px" } },
+                weekday,
+                "\uC694\uC77C")),
+        React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none mt-2", style: { border: `1px solid ${LINE}` } }),
+        React.createElement("div", { className: "grid grid-cols-2 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } }, SESSION_ORDER.map((key) => (React.createElement("button", { key: key, onClick: () => setSession(key), className: "px-4 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: session === key ? NAVY : "transparent", color: session === key ? "#fff" : SUBINK } }, SESSIONS[key])))),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } },
+            weekday,
+            "\uC694\uC77C \u00B7 ",
+            SESSIONS[session],
+            " \uB300\uC0C1 \uD559\uC0DD ",
+            roster.length,
+            "\uBA85\uC758 \uCD9C\uC11D\uBD80\uC785\uB2C8\uB2E4."),
+        React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5" },
+            STATUS_ORDER.map((s) => (React.createElement("div", { key: s, className: "rounded-xl px-3 py-3", style: { background: STATUS[s].soft } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, s),
+                React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: STATUS[s].color } },
+                    counts[s],
+                    "\uBA85")))),
+            React.createElement("div", { className: "rounded-xl px-3 py-3", style: { background: "#f0f0ee" } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "\uBBF8\uCCB4\uD06C"),
+                React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: SUBINK } },
+                    uncheckedCount,
+                    "\uBA85"))),
+        loading ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : roster.length === 0 ? (React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } },
+            weekday,
+            "\uC694\uC77C ",
+            SESSIONS[session],
+            "\uC5D0 \uBC30\uC815\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")) : (React.createElement("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } }, roster.map((s, idx) => {
             const st = current[s.id];
-            return (
-              <div key={s.id} className="px-4 sm:px-5 py-3.5" style={{ borderBottom: idx === roster.length - 1 ? "none" : `1px solid ${LINE}` }}>
-                <div className="flex items-center gap-3 min-w-0 mb-2.5">
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: st ? STATUS[st].soft : NAVY_SOFT, color: st ? STATUS[st].color : NAVY, fontWeight: 800, fontSize: 13 }} className="flex items-center justify-center flex-shrink-0">
-                    {s.name.slice(0, 1)}
-                  </div>
-                  <div className="min-w-0">
-                    <div style={{ fontWeight: 700, fontSize: 14.5 }}>{s.name}</div>
-                    <div style={{ fontSize: 12, color: SUBINK }}>
-                      {s.class || "반 미지정"}{session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`}
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {STATUS_ORDER.map((stt) => (
-                    <StampButton key={stt} status={stt} active={st === stt} onClick={() => setStatus(s.id, stt)} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+            return (React.createElement("div", { key: s.id, className: "px-4 sm:px-5 py-3.5", style: { borderBottom: idx === roster.length - 1 ? "none" : `1px solid ${LINE}` } },
+                React.createElement("div", { className: "flex items-center gap-3 min-w-0 mb-2.5" },
+                    React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: st ? STATUS[st].soft : NAVY_SOFT, color: st ? STATUS[st].color : NAVY, fontWeight: 800, fontSize: 13 }, className: "flex items-center justify-center flex-shrink-0" }, s.name.slice(0, 1)),
+                    React.createElement("div", { className: "min-w-0" },
+                        React.createElement("div", { style: { fontWeight: 700, fontSize: 14.5 } }, s.name),
+                        React.createElement("div", { style: { fontSize: 12, color: SUBINK } },
+                            s.class || "반 미지정",
+                            session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`))),
+                React.createElement("div", { className: "grid grid-cols-4 gap-1.5" }, STATUS_ORDER.map((stt) => (React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))))));
+        })))));
 }
-
 // ---------- Student manager ----------
 function emptyForm() {
-  return { id: null, name: "", class: "", school: "", grade: "", days: [], phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr() };
+    return { id: null, name: "", class: "", school: "", grade: "", days: [], phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr() };
 }
 function StudentManager({ students, reload }) {
-  const [form, setForm] = useState(emptyForm());
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const openNew = () => { setForm(emptyForm()); setShowForm(true); };
-  const openEdit = (s) => { setForm({ ...s, clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "" }); setShowForm(true); };
-  const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
-  const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
-
-  const save = async () => {
-    if (!form.name.trim()) return;
-    setSaving(true);
-    try { await upsertStudent(form); await reload(); setShowForm(false); setForm(emptyForm()); }
-    catch (e) { alert("저장 중 오류가 발생했습니다: " + e.message); }
-    setSaving(false);
-  };
-  const remove = async (id) => {
-    if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다.")) return;
-    try { await deleteStudentRow(id); await reload(); } catch (e) { alert("삭제 중 오류: " + e.message); }
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-1">
-        <h1 style={{ fontSize: 20, fontWeight: 800 }}>학생관리</h1>
-        <button onClick={openNew} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: NAVY, color: "#fff" }}>+ 학생 추가</button>
-      </div>
-      <p style={{ color: SUBINK, fontSize: 13, marginBottom: 16 }}>학생별 반과 등원 요일을 등록하면 출석체크 화면에 자동으로 반영됩니다.</p>
-
-      {showForm && (
-        <div className="rounded-2xl p-5 mb-5" style={{ background: "#fff", border: `1.5px solid ${NAVY}` }}>
-          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 14 }}>{form.id ? "학생 정보 수정" : "새 학생 등록"}</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              ["이름", "name", "예: 김올곧"], ["반", "class", "예: 중2 심화반"],
-              ["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"],
-              ["연락처", "phone", "학부모 연락처"], ["메모", "memo", "특이사항 (선택)"],
-            ].map(([label, key, ph]) => (
-              <div key={key}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: SUBINK }}>{label}</label>
-                <input value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} placeholder={ph} />
-              </div>
-            ))}
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, color: SUBINK }}>등록일</label>
-              <input type="date" value={form.enrollDate} onChange={(e) => setForm({ ...form, enrollDate: e.target.value })}
-                className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}` }} />
-              <div style={{ fontSize: 10.5, color: SUBINK, marginTop: 3 }}>이 날짜 이전 출석부에는 표시되지 않아요.</div>
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <label style={{ fontSize: 12, fontWeight: 700, color: SUBINK }}>등원 요일</label>
-            <div className="flex gap-2 mt-1.5 flex-wrap">
-              {WEEKDAYS_MON_FIRST.map((d) => (
-                <button key={d} onClick={() => toggleDay(d)} className="w-10 h-10 rounded-lg text-sm font-bold"
-                  style={{ background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` }}>
-                  {d}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: PURPLE_SOFT }}>
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: PURPLE }}>클리닉 대상</div>
-              <div style={{ fontSize: 11, color: SUBINK }}>꺼두면 클리닉 출석부에서 이 학생은 제외됩니다.</div>
-            </div>
-            <button onClick={() => setForm({ ...form, clinic: !form.clinic })}
-              style={{ width: 44, height: 26, borderRadius: 999, background: form.clinic ? PURPLE : "#d8d5e2", position: "relative", flexShrink: 0 }}>
-              <span style={{ position: "absolute", top: 3, left: form.clinic ? 22 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 150ms ease" }} />
-            </button>
-          </div>
-
-          {form.clinic && (
-            <div className="mt-3 rounded-lg p-3" style={{ background: PURPLE_SOFT }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: PURPLE }}>클리닉 요일</label>
-              <div style={{ fontSize: 11, color: SUBINK, marginBottom: 8 }}>비워두면 등원 요일과 동일하게 처리됩니다.</div>
-              <div className="flex gap-2 flex-wrap">
-                {WEEKDAYS_MON_FIRST.map((d) => (
-                  <button key={d} onClick={() => toggleClinicDay(d)} className="w-10 h-10 rounded-lg text-sm font-bold"
-                    style={{ background: form.clinicDays.includes(d) ? PURPLE : "#fff", color: form.clinicDays.includes(d) ? "#fff" : INK, border: `1px solid ${form.clinicDays.includes(d) ? PURPLE : LINE}` }}>
-                    {d}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3">
-                <label style={{ fontSize: 12, fontWeight: 700, color: PURPLE }}>클리닉 시간 (선택)</label>
-                <input type="text" value={form.clinicTime} onChange={(e) => setForm({ ...form, clinicTime: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={{ border: `1px solid ${LINE}`, background: "#fff" }} placeholder="예: 19:00~20:30" />
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2 mt-4">
-            <button onClick={save} disabled={saving} className="px-5 py-2 rounded-lg text-sm font-bold" style={{ background: RED, color: "#fff", opacity: saving ? 0.6 : 1 }}>
-              {saving ? "저장 중..." : "저장"}
-            </button>
-            <button onClick={() => { setShowForm(false); setForm(emptyForm()); }} className="px-5 py-2 rounded-lg text-sm font-bold" style={{ background: "#f0f0ee", color: SUBINK }}>취소</button>
-          </div>
-        </div>
-      )}
-
-      {students.length === 0 ? (
-        <div className="rounded-2xl p-10 text-center" style={{ background: "#fff", border: `1px solid ${LINE}`, color: SUBINK }}>등록된 학생이 없습니다.</div>
-      ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-          {students.map((s, idx) => (
-            <div key={s.id} className="flex items-center justify-between gap-3 px-5 py-3.5 flex-wrap" style={{ borderBottom: idx === students.length - 1 ? "none" : `1px solid ${LINE}` }}>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span style={{ fontWeight: 800, fontSize: 14.5 }}>{s.name}</span>
-                  <span style={{ fontSize: 12, color: SUBINK, fontWeight: 600 }}>{s.class || "반 미지정"}</span>
-                  {(s.school || s.grade) && <span style={{ fontSize: 11.5, color: SUBINK }}>{s.school}{s.school && s.grade ? " · " : ""}{s.grade ? `${s.grade}학년` : ""}</span>}
-                </div>
-                <div className="flex items-center gap-3 mt-1 flex-wrap">
-                  <div className="flex gap-1">
-                    {WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => (
-                      <span key={d} style={{ fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" }}>{d}</span>
-                    ))}
-                    {s.days.length === 0 && <span style={{ fontSize: 11.5, color: SUBINK }}>요일 미지정</span>}
-                  </div>
-                  {!s.clinic && <span style={{ fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" }}>클리닉 제외</span>}
-                  {s.clinic && s.clinicDays.length > 0 && (
-                    <span style={{ fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" }}>
-                      클리닉 {s.clinicDays.join("·")}{s.clinicTime ? ` ${s.clinicTime}` : ""}
-                    </span>
-                  )}
-                  {s.phone && <span style={{ fontSize: 11.5, color: SUBINK }}>📞 {s.phone}</span>}
-                  {s.enrollDate && <span style={{ fontSize: 10.5, color: SUBINK }}>등록일 {s.enrollDate}</span>}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button onClick={() => openEdit(s)} className="p-2 rounded-lg" style={{ background: NAVY_SOFT, color: NAVY }}>✎</button>
-                <button onClick={() => remove(s.id)} className="p-2 rounded-lg" style={{ background: RED_SOFT, color: RED }}>🗑</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    const [form, setForm] = useState(emptyForm());
+    const [showForm, setShowForm] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const openNew = () => { setForm(emptyForm()); setShowForm(true); };
+    const openEdit = (s) => { setForm({ ...s, clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "" }); setShowForm(true); };
+    const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
+    const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
+    const save = async () => {
+        if (!form.name.trim())
+            return;
+        setSaving(true);
+        try {
+            await upsertStudent(form);
+            await reload();
+            setShowForm(false);
+            setForm(emptyForm());
+        }
+        catch (e) {
+            alert("저장 중 오류가 발생했습니다: " + e.message);
+        }
+        setSaving(false);
+    };
+    const remove = async (id) => {
+        if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다."))
+            return;
+        try {
+            await deleteStudentRow(id);
+            await reload();
+        }
+        catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
+            React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD559\uC0DD\uAD00\uB9AC"),
+            React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ \uD559\uC0DD \uCD94\uAC00")),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uD559\uC0DD\uBCC4 \uBC18\uACFC \uB4F1\uC6D0 \uC694\uC77C\uC744 \uB4F1\uB85D\uD558\uBA74 \uCD9C\uC11D\uCCB4\uD06C \uD654\uBA74\uC5D0 \uC790\uB3D9\uC73C\uB85C \uBC18\uC601\uB429\uB2C8\uB2E4."),
+        showForm && (React.createElement("div", { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${NAVY}` } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "학생 정보 수정" : "새 학생 등록"),
+            React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+                [
+                    ["이름", "name", "예: 김올곧"], ["반", "class", "예: 중2 심화반"],
+                    ["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"],
+                    ["연락처", "phone", "학부모 연락처"], ["메모", "memo", "특이사항 (선택)"],
+                ].map(([label, key, ph]) => (React.createElement("div", { key: key },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
+                    React.createElement("input", { value: form[key], onChange: (e) => setForm({ ...form, [key]: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: ph })))),
+                React.createElement("div", null,
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uB85D\uC77C"),
+                    React.createElement("input", { type: "date", value: form.enrollDate, onChange: (e) => setForm({ ...form, enrollDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uC774 \uB0A0\uC9DC \uC774\uC804 \uCD9C\uC11D\uBD80\uC5D0\uB294 \uD45C\uC2DC\uB418\uC9C0 \uC54A\uC544\uC694."))),
+            React.createElement("div", { className: "mt-3" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uC6D0 \uC694\uC77C"),
+                React.createElement("div", { className: "flex gap-2 mt-1.5 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => (React.createElement("button", { key: d, onClick: () => toggleDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` } }, d))))),
+            React.createElement("div", { className: "mt-3 flex items-center justify-between rounded-lg px-3 py-2.5", style: { background: PURPLE_SOFT } },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uB300\uC0C1"),
+                    React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "\uAEBC\uB450\uBA74 \uD074\uB9AC\uB2C9 \uCD9C\uC11D\uBD80\uC5D0\uC11C \uC774 \uD559\uC0DD\uC740 \uC81C\uC678\uB429\uB2C8\uB2E4.")),
+                React.createElement("button", { onClick: () => setForm({ ...form, clinic: !form.clinic }), style: { width: 44, height: 26, borderRadius: 999, background: form.clinic ? PURPLE : "#d8d5e2", position: "relative", flexShrink: 0 } },
+                    React.createElement("span", { style: { position: "absolute", top: 3, left: form.clinic ? 22 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 150ms ease" } }))),
+            form.clinic && (React.createElement("div", { className: "mt-3 rounded-lg p-3", style: { background: PURPLE_SOFT } },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC694\uC77C"),
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginBottom: 8 } }, "\uBE44\uC6CC\uB450\uBA74 \uB4F1\uC6D0 \uC694\uC77C\uACFC \uB3D9\uC77C\uD558\uAC8C \uCC98\uB9AC\uB429\uB2C8\uB2E4."),
+                React.createElement("div", { className: "flex gap-2 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => (React.createElement("button", { key: d, onClick: () => toggleClinicDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.clinicDays.includes(d) ? PURPLE : "#fff", color: form.clinicDays.includes(d) ? "#fff" : INK, border: `1px solid ${form.clinicDays.includes(d) ? PURPLE : LINE}` } }, d)))),
+                React.createElement("div", { className: "mt-3" },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC2DC\uAC04 (\uC120\uD0DD)"),
+                    React.createElement("input", { type: "text", value: form.clinicTime, onChange: (e) => setForm({ ...form, clinicTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" }, placeholder: "\uC608: 19:00~20:30" })))),
+            React.createElement("div", { className: "flex gap-2 mt-4" },
+                React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: RED, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+                React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")))),
+        students.length === 0 ? (React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")) : (React.createElement("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } }, students.map((s, idx) => (React.createElement("div", { key: s.id, className: "flex items-center justify-between gap-3 px-5 py-3.5 flex-wrap", style: { borderBottom: idx === students.length - 1 ? "none" : `1px solid ${LINE}` } },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                    React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, s.name),
+                    React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, s.class || "반 미지정"),
+                    (s.school || s.grade) && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } },
+                        s.school,
+                        s.school && s.grade ? " · " : "",
+                        s.grade ? `${s.grade}학년` : "")),
+                React.createElement("div", { className: "flex items-center gap-3 mt-1 flex-wrap" },
+                    React.createElement("div", { className: "flex gap-1" },
+                        WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => (React.createElement("span", { key: d, style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, d))),
+                        s.days.length === 0 && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "\uC694\uC77C \uBBF8\uC9C0\uC815")),
+                    !s.clinic && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 \uC81C\uC678"),
+                    s.clinic && s.clinicDays.length > 0 && (React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" } },
+                        "\uD074\uB9AC\uB2C9 ",
+                        s.clinicDays.join("·"),
+                        s.clinicTime ? ` ${s.clinicTime}` : "")),
+                    s.phone && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } },
+                        "\uD83D\uDCDE ",
+                        s.phone),
+                    s.enrollDate && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } },
+                        "\uB4F1\uB85D\uC77C ",
+                        s.enrollDate))),
+            React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" },
+                React.createElement("button", { onClick: () => openEdit(s), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
+                React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")))))))));
 }
-
 // ============================================================
 // Root
 // ============================================================
 function Root() {
-  const [session, setSession] = useState(null);
-  const [checked, setChecked] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  if (!checked) {
-    return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 }}>불러오는 중...</div>;
-  }
-  return session ? <MainApp session={session} /> : <LoginScreen />;
+    const [session, setSession] = useState(null);
+    const [checked, setChecked] = useState(false);
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
+        const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+        return () => sub.subscription.unsubscribe();
+    }, []);
+    if (!checked) {
+        return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
+    }
+    return session ? React.createElement(MainApp, { session: session }) : React.createElement(LoginScreen, null);
 }
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Root, null));
 
-ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
 </script>
 </body>
 </html>
