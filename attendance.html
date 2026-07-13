@@ -236,7 +236,7 @@ function MainApp({ session }) {
     useEffect(() => { reloadStudents().then(() => setStudentsLoaded(true)); }, []);
     // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
     useEffect(() => {
-        const channel = supabase
+        const channel = supabaseClient
             .channel("attn_students_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_students" }, () => {
             reloadStudents();
@@ -288,7 +288,7 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     useEffect(() => { loadNotices(); }, []);
     // realtime: 다른 사람이 일정/공지를 추가·삭제하면 자동 반영
     useEffect(() => {
-        const channel = supabase
+        const channel = supabaseClient
             .channel("attn_dashboard_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_events" }, () => loadEvents())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_notices" }, () => loadNotices())
@@ -396,7 +396,7 @@ function Attendance({ students, selectedDate, setSelectedDate }) {
     useEffect(() => { load(); }, [selectedDate]);
     // realtime: 다른 사람이 같은 날짜에 체크한 출석이 바로 반영됨
     useEffect(() => {
-        const channel = supabase
+        const channel = supabaseClient
             .channel(`attn_attendance_${selectedDate}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .subscribe();
