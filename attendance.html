@@ -312,12 +312,12 @@ function MainApp({ session }) {
                 visibleTabs.map((t) => (React.createElement(TabButton, { key: t.key, active: tab === t.key, onClick: () => setTab(t.key) }, t.label))))),
         React.createElement("div", { className: "max-w-5xl mx-auto px-3 sm:px-6 pt-5" }, !studentsLoaded ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : (React.createElement(React.Fragment, null,
             tab === "attendance" && (React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate })),
-            tab === "dashboard" && (React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance") })),
+            tab === "dashboard" && (React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector })),
             tab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: session.user.email }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents }))))));
 }
 // ---------- Dashboard ----------
-function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttendance }) {
+function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttendance, isDirector }) {
     const cells = useMemo(() => buildMonthGrid(month), [month]);
     const [events, setEvents] = useState({});
     const [notices, setNotices] = useState([]);
@@ -410,7 +410,7 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
         React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 1 } }, "\uD83D\uDCE3 \uACF5\uC9C0\uC0AC\uD56D"),
             React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 12 } }, "\uD55C \uC904\uC529 \uAE30\uB85D\uD574\uB450\uB294 \uC6D0\uB0B4 \uACF5\uC9C0 \uB85C\uADF8\uC785\uB2C8\uB2E4."),
-            React.createElement("div", { className: "flex gap-2" },
+            isDirector && React.createElement("div", { className: "flex gap-2" },
                 React.createElement("input", { value: newNotice, onChange: (e) => setNewNotice(e.target.value), onKeyDown: (e) => e.key === "Enter" && addNotice(), placeholder: "\uACF5\uC9C0 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uACE0 Enter", className: "flex-1 px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
                 React.createElement("button", { onClick: addNotice, className: "px-4 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "\uB4F1\uB85D")),
             React.createElement("div", { className: "mt-4 flex flex-col" },
@@ -419,7 +419,7 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     React.createElement("div", { className: "flex items-center gap-3 min-w-0" },
                         React.createElement("span", { style: { fontSize: 11, color: "#fff", background: NAVY, borderRadius: 6, padding: "2px 7px", fontWeight: 700, flexShrink: 0 } }, n.date),
                         React.createElement("span", { style: { fontSize: 13.5, fontWeight: 500 } }, n.text)),
-                    React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1"))))))));
+                    isDirector && React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1"))))))));
 }
 // ---------- Work notices (업무공지) ----------
 function emptyWorkNoticeForm() {
