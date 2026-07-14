@@ -51,8 +51,23 @@ const STATUS = {
     결석: { color: RED, soft: RED_SOFT },
 };
 const STATUS_ORDER = ["출석", "지각", "조퇴", "결석"];
-const SESSIONS = { regular: "정규수업", clinic: "클리닉" };
-const SESSION_ORDER = ["regular", "clinic"];
+function groupByClass(list) {
+    const groups = {};
+    list.forEach((s) => {
+        const key = s.class && s.class.trim() ? s.class.trim() : "반 미지정";
+        (groups[key] = groups[key] || []).push(s);
+    });
+    const keys = Object.keys(groups).sort((a, b) => {
+        if (a === "반 미지정")
+            return 1;
+        if (b === "반 미지정")
+            return -1;
+        return a.localeCompare(b, "ko");
+    });
+    return keys.map((k) => ({ className: k, list: groups[k] }));
+}
+const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강·임시" };
+const SESSION_ORDER = ["regular", "clinic", "extra"];
 function fmt(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
@@ -216,6 +231,25 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
             throw error;
     }
 }
+// ---------- 보강/임시(extra) 명단 ----------
+async function fetchExtraRoster(date) {
+    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id").eq("attn_date", date);
+    if (error)
+        throw error;
+    return data.map((r) => r.student_id);
+}
+async function addExtraRosterRow(date, studentId, addedBy) {
+    const { error } = await supabaseClient.from("attn_extra_roster").upsert({ attn_date: date, student_id: studentId, added_by: addedBy }, { onConflict: "attn_date,student_id" });
+    if (error)
+        throw error;
+}
+async function removeExtraRosterRow(date, studentId) {
+    const { error } = await supabaseClient.from("attn_extra_roster").delete().eq("attn_date", date).eq("student_id", studentId);
+    if (error)
+        throw error;
+    // 같이 남아있던 그날의 출석 기록도 정리
+    await supabaseClient.from("attn_attendance").delete().eq("attn_date", date).eq("session", "extra").eq("student_id", studentId);
+}
 // ---------- small atoms ----------
 function TabButton({ active, onClick, children }) {
     return (React.createElement("button", { onClick: onClick, className: "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0", style: { background: active ? NAVY : "transparent", color: active ? "#fff" : SUBINK } }, children));
@@ -313,7 +347,7 @@ function MainApp({ session }) {
             React.createElement("div", { className: "flex items-center gap-1.5 p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto", style: { background: "#fff", border: `1px solid ${LINE}` } },
                 visibleTabs.map((t) => (React.createElement(TabButton, { key: t.key, active: tab === t.key, onClick: () => setTab(t.key) }, t.label))))),
         React.createElement("div", { className: "max-w-5xl mx-auto px-3 sm:px-6 pt-5" }, !studentsLoaded ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : (React.createElement(React.Fragment, null,
-            tab === "attendance" && (React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate })),
+            tab === "attendance" && (React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email })),
             tab === "dashboard" && (React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector })),
             tab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: session.user.email }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents }))))));
@@ -628,65 +662,67 @@ function WorkNotices({ isDirector, authorEmail }) {
 }
 
 // ---------- Attendance ----------
-function Attendance({ students, selectedDate, setSelectedDate }) {
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
     const [session, setSession] = useState("regular");
-    const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {} });
+    const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {}, extra: {} });
+    const [extraIds, setExtraIds] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [addQuery, setAddQuery] = useState("");
+    const [showAddPicker, setShowAddPicker] = useState(false);
     const weekday = korWeekdayOf(selectedDate);
     const load = async () => {
         setLoading(true);
         try {
-            setSessionAttendance(await fetchAttendanceForDate(selectedDate));
-        }
-        catch (e) {
+            const [att, extra] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate)]);
+            setSessionAttendance(att);
+            setExtraIds(extra);
+        } catch (e) {
             console.error(e);
         }
         setLoading(false);
     };
     const loadQuiet = async () => {
         try {
-            setSessionAttendance(await fetchAttendanceForDate(selectedDate));
-        }
-        catch (e) {
+            const [att, extra] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate)]);
+            setSessionAttendance(att);
+            setExtraIds(extra);
+        } catch (e) {
             console.error(e);
         }
     };
-    useEffect(() => { load(); }, [selectedDate]);
-    // realtime: 다른 사람이 같은 날짜에 체크한 출석이 바로 반영됨
+    useEffect(() => { load(); setShowAddPicker(false); setAddQuery(""); }, [selectedDate]);
+    // realtime: 다른 사람이 같은 날짜에 체크한 출석/보강명단이 바로 반영됨
     useEffect(() => {
         const channel = supabaseClient
             .channel(`attn_attendance_${selectedDate}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_extra_roster", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
-    const roster = students.filter((s) => {
-        if (s.enrollDate && selectedDate < s.enrollDate)
-            return false;
-        if (session === "clinic") {
-            if (!s.clinic)
-                return false;
-            const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
-            return clinicDays.includes(weekday);
-        }
-        return s.days.includes(weekday);
-    });
+    const roster = session === "extra"
+        ? students.filter((s) => extraIds.includes(s.id))
+        : students.filter((s) => {
+            if (s.enrollDate && selectedDate < s.enrollDate) return false;
+            if (session === "clinic") {
+                if (!s.clinic) return false;
+                const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
+                return clinicDays.includes(weekday);
+            }
+            return s.days.includes(weekday);
+        });
     const current = sessionAttendance[session] || {};
     const setStatus = async (studentId, status) => {
         const isActive = current[studentId]?.status === status;
-        // optimistic update
         setSessionAttendance((prev) => {
             const rec = { ...prev[session] };
-            if (isActive)
-                delete rec[studentId];
-            else
-                rec[studentId] = { status, reason: rec[studentId]?.reason || "" };
+            if (isActive) delete rec[studentId];
+            else rec[studentId] = { status, reason: rec[studentId]?.reason || "" };
             return { ...prev, [session]: rec };
         });
         try {
             await setAttendanceRow(selectedDate, session, studentId, status, isActive);
-        }
-        catch (e) {
+        } catch (e) {
             console.error(e);
             load();
         }
@@ -695,58 +731,140 @@ function Attendance({ students, selectedDate, setSelectedDate }) {
         setSessionAttendance((prev) => ({ ...prev, [session]: { ...prev[session], [studentId]: { ...prev[session][studentId], reason } } }));
         try {
             await setAttendanceReason(selectedDate, session, studentId, reason);
-        }
-        catch (e) {
+        } catch (e) {
             console.error(e);
             load();
         }
     };
-    const counts = STATUS_ORDER.reduce((acc, s) => { acc[s] = roster.filter((st) => current[st.id]?.status === s).length; return acc; }, {});
-    const uncheckedCount = roster.filter((st) => !current[st.id]?.status).length;
-    return (React.createElement("div", null,
-        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
-            React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uCD9C\uC11D\uCCB4\uD06C"),
-            React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: "#fff", background: RED, borderRadius: 8, padding: "6px 10px" } },
-                weekday,
-                "\uC694\uC77C")),
-        React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none mt-2", style: { border: `1px solid ${LINE}` } }),
-        React.createElement("div", { className: "grid grid-cols-2 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } }, SESSION_ORDER.map((key) => (React.createElement("button", { key: key, onClick: () => setSession(key), className: "px-4 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: session === key ? NAVY : "transparent", color: session === key ? "#fff" : SUBINK } }, SESSIONS[key])))),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } },
-            weekday,
-            "\uC694\uC77C \u00B7 ",
-            SESSIONS[session],
-            " \uB300\uC0C1 \uD559\uC0DD ",
-            roster.length,
-            "\uBA85\uC758 \uCD9C\uC11D\uBD80\uC785\uB2C8\uB2E4."),
-        React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5" },
-            STATUS_ORDER.map((s) => (React.createElement("div", { key: s, className: "rounded-xl px-3 py-3", style: { background: STATUS[s].soft } },
-                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, s),
-                React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: STATUS[s].color } },
-                    counts[s],
-                    "\uBA85")))),
-            React.createElement("div", { className: "rounded-xl px-3 py-3", style: { background: "#f0f0ee" } },
-                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "\uBBF8\uCCB4\uD06C"),
-                React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: SUBINK } },
-                    uncheckedCount,
-                    "\uBA85"))),
-        loading ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : roster.length === 0 ? (React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } },
-            weekday,
-            "\uC694\uC77C ",
-            SESSIONS[session],
-            "\uC5D0 \uBC30\uC815\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")) : (React.createElement("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } }, roster.map((s, idx) => {
-            const st = current[s.id]?.status;
-            const reason = current[s.id]?.reason || "";
-            return (React.createElement("div", { key: s.id, className: "px-4 sm:px-5 py-3.5", style: { borderBottom: idx === roster.length - 1 ? "none" : `1px solid ${LINE}` } },
-                React.createElement("div", { className: "flex items-center gap-3 min-w-0 mb-2.5" },
-                    React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: st ? STATUS[st].soft : NAVY_SOFT, color: st ? STATUS[st].color : NAVY, fontWeight: 800, fontSize: 13 }, className: "flex items-center justify-center flex-shrink-0" }, s.name.slice(0, 1)),
-                    React.createElement("div", { className: "min-w-0" },
-                        React.createElement("div", { style: { fontWeight: 700, fontSize: 14.5 } }, s.name),
-                        React.createElement("div", { style: { fontSize: 12, color: SUBINK } },
-                            s.class || "반 미지정",
-                            session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`))),
-                React.createElement("div", { className: "grid grid-cols-4 gap-1.5" }, STATUS_ORDER.map((stt) => (React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) })))),
-                (st === "결석" || st === "지각") && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })));
-        })))));
+    const addToExtra = async (studentId) => {
+        setExtraIds((prev) => (prev.includes(studentId) ? prev : [...prev, studentId]));
+        setAddQuery("");
+        setShowAddPicker(false);
+        try {
+            await addExtraRosterRow(selectedDate, studentId, authorEmail);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const removeFromExtra = async (studentId) => {
+        if (!confirm("오늘 보강·임시 명단에서 이 학생을 제거할까요? 오늘 기록한 출석 정보도 함께 삭제됩니다.")) return;
+        setExtraIds((prev) => prev.filter((id) => id !== studentId));
+        try {
+            await removeExtraRosterRow(selectedDate, studentId);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const counts = STATUS_ORDER.reduce((acc, st) => { acc[st] = roster.filter((s) => current[s.id]?.status === st).length; return acc; }, {});
+    const uncheckedCount = roster.filter((s) => !current[s.id]?.status).length;
+    const groups = groupByClass(roster);
+    const header = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uCD9C\uC11D\uCCB4\uD06C"),
+        React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: "#fff", background: RED, borderRadius: 8, padding: "6px 10px" } }, weekday, "\uC694\uC77C")
+    );
+    const dateInput = React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none mt-2", style: { border: `1px solid ${LINE}` } });
+    const sessionTabs = React.createElement(
+        "div",
+        { className: "grid grid-cols-3 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        SESSION_ORDER.map((key) => React.createElement("button", { key: key, onClick: () => setSession(key), className: "px-3 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: session === key ? NAVY : "transparent", color: session === key ? "#fff" : SUBINK } }, SESSIONS[key]))
+    );
+    const subLine = React.createElement(
+        "p",
+        { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } },
+        weekday, "\uC694\uC77C \u00B7 ", SESSIONS[session], " \uB300\uC0C1 \uD559\uC0DD ", roster.length, "\uBA85\uC758 \uCD9C\uC11D\uBD80\uC785\uB2C8\uB2E4."
+    );
+    const statCards = React.createElement(
+        "div",
+        { className: "grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5" },
+        STATUS_ORDER.map((s) => React.createElement(
+            "div",
+            { key: s, className: "rounded-xl px-3 py-3", style: { background: STATUS[s].soft } },
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, s),
+            React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: STATUS[s].color } }, counts[s], "\uBA85")
+        )),
+        React.createElement(
+            "div",
+            { className: "rounded-xl px-3 py-3", style: { background: "#f0f0ee" } },
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "\uBBF8\uCCB4\uD06C"),
+            React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: SUBINK } }, uncheckedCount, "\uBA85")
+        )
+    );
+    let addPicker = null;
+    if (session === "extra") {
+        const q = addQuery.trim();
+        const candidates = q === "" ? [] : students.filter((s) => !extraIds.includes(s.id) && s.name.includes(q)).slice(0, 8);
+        addPicker = React.createElement(
+            "div",
+            { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            !showAddPicker
+                ? React.createElement("button", { onClick: () => setShowAddPicker(true), className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff" } }, "+ \uBCF4\uAC15\u00B7\uC784\uC2DC \uD559\uC0DD \uCD94\uAC00")
+                : React.createElement(
+                    "div",
+                    null,
+                    React.createElement("input", { autoFocus: true, value: addQuery, onChange: (e) => setAddQuery(e.target.value), placeholder: "\uD559\uC0DD \uC774\uB984 \uAC80\uC0C9", className: "w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${PURPLE}` } }),
+                    q !== "" && candidates.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "6px 2px" } }, "\uC77C\uCE58\uD558\uB294 \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."),
+                    React.createElement("div", { className: "flex flex-col gap-1" }, candidates.map((s) => React.createElement(
+                        "button",
+                        { key: s.id, onClick: () => addToExtra(s.id), className: "text-left px-3 py-2 rounded-lg text-sm", style: { background: PURPLE_SOFT, color: INK } },
+                        React.createElement("span", { style: { fontWeight: 700 } }, s.name),
+                        React.createElement("span", { style: { color: SUBINK, fontSize: 12 } }, " \u00B7 ", s.class || "\uBC18 \uBBF8\uC9C0\uC815")
+                    ))),
+                    React.createElement("button", { onClick: () => { setShowAddPicker(false); setAddQuery(""); }, className: "text-xs mt-2", style: { color: SUBINK } }, "\uCDE8\uC18C")
+                )
+        );
+    }
+    const AttendanceRow = ({ s, isLast }) => {
+        const st = current[s.id]?.status;
+        const reason = current[s.id]?.reason || "";
+        return React.createElement(
+            "div",
+            { className: "px-4 sm:px-5 py-3.5", style: { borderBottom: isLast ? "none" : `1px solid ${LINE}` } },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-3 min-w-0 mb-2.5" },
+                React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: st ? STATUS[st].soft : NAVY_SOFT, color: st ? STATUS[st].color : NAVY, fontWeight: 800, fontSize: 13 }, className: "flex items-center justify-center flex-shrink-0" }, s.name.slice(0, 1)),
+                React.createElement(
+                    "div",
+                    { className: "min-w-0 flex-1" },
+                    React.createElement("div", { style: { fontWeight: 700, fontSize: 14.5 } }, s.name),
+                    React.createElement("div", { style: { fontSize: 12, color: SUBINK } }, s.class || "\uBC18 \uBBF8\uC9C0\uC815", session === "clinic" && s.clinicTime && ` \u00B7 \uD074\ub9AC\ub2c9 ${s.clinicTime}`)
+                ),
+                session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "\uBAA9\uB85D\uC5D0\uC11C \uC81C\uAC70" }, "\u2715 \uC81C\uAC70")
+            ),
+            React.createElement("div", { className: "grid grid-cols-4 gap-1.5" }, STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
+            (st === "결석" || st === "지각") && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })
+        );
+    };
+    let listBody;
+    if (loading) {
+        listBody = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
+    } else if (roster.length === 0) {
+        const emptyMsg = session === "extra"
+            ? "\uC624\uB298 \ucd94\uAC00\ub41c \ubcf4\uac15\u00b7\uc784\uc2dc \ud559\uc0dd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4. \uc704 \ubc84\ud2bc\uc73c\ub85c \ud559\uc0dd\uc744 \ucd94\uac00\ud574\ubcf4\uc138\uc694."
+            : `${weekday}\uc694\uc77C ${SESSIONS[session]}\uc5D0 \uBC30\uC815\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.`;
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, emptyMsg);
+    } else {
+        listBody = React.createElement(
+            "div",
+            { className: "flex flex-col gap-4" },
+            groups.map((g) => React.createElement(
+                "div",
+                { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                React.createElement(
+                    "div",
+                    { className: "px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: PAPER, borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5 } }, g.className),
+                    React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, g.list.length, "\uBA85")
+                ),
+                g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1 }))
+            ))
+        );
+    }
+    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, addPicker, listBody);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 function ReasonField({ status, initialValue, onSave }) {
