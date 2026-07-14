@@ -35,6 +35,8 @@ const AMBER = "#b8790a";
 const AMBER_SOFT = "#faf0da";
 const PURPLE = "#6b4fa0";
 const PURPLE_SOFT = "#efe9f8";
+const TEAL = "#0f7a6c";
+const TEAL_SOFT = "#e2f3f0";
 const PAPER = "#faf9f6";
 const INK = "#20242e";
 const SUBINK = "#6b7080";
@@ -167,18 +169,18 @@ async function deleteNoticeRow(id) {
         throw error;
 }
 async function fetchWorkNotices() {
-    const { data, error } = await supabaseClient.from("attn_work_notices").select("*").order("pinned", { ascending: false }).order("created_at", { ascending: false });
+    const { data, error } = await supabaseClient.from("attn_work_notices").select("*").order("pinned", { ascending: false }).order("notice_date", { ascending: false }).order("created_at", { ascending: false });
     if (error)
         throw error;
-    return data.map((r) => ({ id: r.id, title: r.title, content: r.content, pinned: !!r.pinned, author: r.author || "", createdAt: r.created_at }));
+    return data.map((r) => ({ id: r.id, title: r.title, content: r.content, pinned: !!r.pinned, author: r.author || "", noticeDate: r.notice_date, createdAt: r.created_at }));
 }
-async function addWorkNoticeRow(title, content, pinned, author) {
-    const { error } = await supabaseClient.from("attn_work_notices").insert({ title, content, pinned, author });
+async function addWorkNoticeRow(title, content, pinned, author, noticeDate) {
+    const { error } = await supabaseClient.from("attn_work_notices").insert({ title, content, pinned, author, notice_date: noticeDate });
     if (error)
         throw error;
 }
-async function updateWorkNoticeRow(id, title, content, pinned) {
-    const { error } = await supabaseClient.from("attn_work_notices").update({ title, content, pinned }).eq("id", id);
+async function updateWorkNoticeRow(id, title, content, pinned, noticeDate) {
+    const { error } = await supabaseClient.from("attn_work_notices").update({ title, content, pinned, notice_date: noticeDate }).eq("id", id);
     if (error)
         throw error;
 }
@@ -422,8 +424,8 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     isDirector && React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1"))))))));
 }
 // ---------- Work notices (업무공지) ----------
-function emptyWorkNoticeForm() {
-    return { id: null, title: "", content: "", pinned: false };
+function emptyWorkNoticeForm(date) {
+    return { id: null, title: "", content: "", pinned: false, noticeDate: date || todayStr() };
 }
 function WorkNotices({ isDirector, authorEmail }) {
     const [notices, setNotices] = useState([]);
@@ -431,12 +433,15 @@ function WorkNotices({ isDirector, authorEmail }) {
     const [form, setForm] = useState(emptyWorkNoticeForm());
     const [showForm, setShowForm] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [month, setMonth] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState(todayStr());
+    const cells = useMemo(() => buildMonthGrid(month), [month]);
+    const today = todayStr();
     const load = async () => {
         setLoading(true);
         try {
             setNotices(await fetchWorkNotices());
-        }
-        catch (e) {
+        } catch (e) {
             console.error(e);
         }
         setLoading(false);
@@ -449,74 +454,179 @@ function WorkNotices({ isDirector, authorEmail }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    const openNew = () => { setForm(emptyWorkNoticeForm()); setShowForm(true); };
-    const openEdit = (n) => { setForm({ id: n.id, title: n.title, content: n.content, pinned: n.pinned }); setShowForm(true); };
+    const byDate = useMemo(() => {
+        const m = {};
+        notices.forEach((n) => { (m[n.noticeDate] = m[n.noticeDate] || []).push(n); });
+        return m;
+    }, [notices]);
+    const selNotices = byDate[selectedDate] || [];
+    const openNew = () => { setForm(emptyWorkNoticeForm(selectedDate)); setShowForm(true); };
+    const openEdit = (n) => { setForm({ id: n.id, title: n.title, content: n.content, pinned: n.pinned, noticeDate: n.noticeDate || selectedDate }); setShowForm(true); };
     const save = async () => {
-        if (!form.title.trim() || !form.content.trim())
-            return;
+        if (!form.title.trim() || !form.content.trim()) return;
         setSaving(true);
         try {
-            if (form.id)
-                await updateWorkNoticeRow(form.id, form.title.trim(), form.content.trim(), form.pinned);
-            else
-                await addWorkNoticeRow(form.title.trim(), form.content.trim(), form.pinned, authorEmail);
+            if (form.id) {
+                await updateWorkNoticeRow(form.id, form.title.trim(), form.content.trim(), form.pinned, form.noticeDate);
+            } else {
+                await addWorkNoticeRow(form.title.trim(), form.content.trim(), form.pinned, authorEmail, form.noticeDate);
+            }
             await load();
             setShowForm(false);
-            setForm(emptyWorkNoticeForm());
-        }
-        catch (e) {
+            setForm(emptyWorkNoticeForm(selectedDate));
+        } catch (e) {
             alert("저장 중 오류가 발생했습니다: " + e.message);
         }
         setSaving(false);
     };
     const remove = async (id) => {
-        if (!confirm("이 공지를 삭제할까요?"))
-            return;
+        if (!confirm("이 공지를 삭제할까요?")) return;
         try {
             await deleteWorkNoticeRow(id);
             await load();
-        }
-        catch (e) {
+        } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
     };
     const fmtDateTime = (iso) => {
         try {
             return new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-        }
-        catch (e) {
+        } catch (e) {
             return "";
         }
     };
-    return (React.createElement("div", null,
-        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
-            React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD83D\uDCCB \uC5C5\uBB34\uACF5\uC9C0"),
-            isDirector && React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ \uACF5\uC9C0 \uC791\uC131")),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uC870\uAD50\uC0D8\uB4E4\uC5D0\uAC8C \uC804\uB2EC\uD560 \uC5C5\uBB34\uB0B4\uC6A9\uACFC \uB9E4\uB274\uC5BC\uC744 \uAE30\uB85D\uD574\uB450\uB294 \uACF5\uAC04\uC785\uB2C8\uB2E4."),
-        showForm && (React.createElement("div", { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${NAVY}` } },
-            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "\uACF5\uC9C0 \uC218\uC815" : "\uC0C8 \uACF5\uC9C0 \uC791\uC131"),
-            React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: "\uC81C\uBAA9", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}` } }),
-            React.createElement("textarea", { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), placeholder: "\uB0B4\uC6A9 (\uB9E4\uB274\uC5BC, \uC9C0\uCE68 \uB4F1)", rows: 6, className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
-            React.createElement("label", { className: "flex items-center gap-2 mt-3 text-sm", style: { color: SUBINK, fontWeight: 600 } },
-                React.createElement("input", { type: "checkbox", checked: form.pinned, onChange: (e) => setForm({ ...form, pinned: e.target.checked }) }),
-                "\uC0C1\uB2E8 \uACE0\uC815"),
-            React.createElement("div", { className: "flex gap-2 mt-4" },
-                React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: RED, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
-                React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkNoticeForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")))),
-        loading ? (React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")) : notices.length === 0 ? (React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uC5C5\uBB34\uACF5\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")) : (React.createElement("div", { className: "flex flex-col gap-3" }, notices.map((n) => (React.createElement("div", { key: n.id, className: "rounded-2xl p-5", style: { background: "#fff", border: n.pinned ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
-            React.createElement("div", { className: "flex items-start justify-between gap-3" },
-                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
-                    n.pinned && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: RED_SOFT, color: RED, borderRadius: 5, padding: "1.5px 6px" } }, "\uACE0\uC815"),
-                    React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, n.title)),
-                isDirector && React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" },
-                    React.createElement("button", { onClick: () => openEdit(n), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
-                    React.createElement("button", { onClick: () => remove(n.id), className: "p-1.5 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1"))),
-            React.createElement("div", { style: { fontSize: 13.5, color: INK, marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
-            React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 10 } },
-                n.author,
-                n.author ? " \u00B7 " : "",
-                fmtDateTime(n.createdAt)))))))));
+    const headerRow = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD83D\uDCCB \uC5C5\uBB34\uACF5\uC9C0"),
+        isDirector && !showForm && React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: TEAL, color: "#fff" } }, "+ \uACF5\uC9C0 \uC791\uC131")
+    );
+    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uC870\uAD50\uC0D8\uB4E4\uC5D0\uAC8C \uC804\uB2EC\uD560 \uC5C5\uBB34\uB0B4\uC6A9\uACFC \uB9E4\uB274\uC5BC\uC744 \uB0A0\uC9DC\uBCC4\uB85C \uAE30\uB85D\uD574\uB450\uB294 \uACF5\uAC04\uC785\uB2C8\uB2E4.");
+    const noticeForm = showForm && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${TEAL}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "\uACF5\uC9C0 \uC218\uC815" : "\uC0C8 \uACF5\uC9C0 \uC791\uC131"),
+        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB0A0\uC9DC"),
+        React.createElement("input", { type: "date", value: form.noticeDate, onChange: (e) => setForm({ ...form, noticeDate: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1 mb-2", style: { border: `1px solid ${LINE}` } }),
+        React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: "\uC81C\uBAA9", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}` } }),
+        React.createElement("textarea", { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), placeholder: "\uB0B4\uC6A9 (\uB9E4\uB274\uC5BC, \uC9C0\uCE68 \uB4F1)", rows: 6, className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
+        React.createElement(
+            "label",
+            { className: "flex items-center gap-2 mt-3 text-sm", style: { color: SUBINK, fontWeight: 600 } },
+            React.createElement("input", { type: "checkbox", checked: form.pinned, onChange: (e) => setForm({ ...form, pinned: e.target.checked }) }),
+            "\uC0C1\uB2E8 \uACE0\uC815 (\uB0A0\uC9DC\uC640 \uC0C1\uAD00\uC5C6\uC774 \uD56D\uC0C1 \uB9E8 \uC704\uC5D0)"
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: TEAL, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
+            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkNoticeForm(selectedDate)); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")
+        )
+    );
+    const calendarCells = cells.map((d, i) => {
+        if (!d) return React.createElement("div", { key: i });
+        const ds = fmt(d);
+        const isToday = ds === today;
+        const isSel = ds === selectedDate;
+        const dayNotices = byDate[ds] || [];
+        const tags = dayNotices.slice(0, 2).map((n) => React.createElement("span", { key: n.id, style: { fontSize: 9.5, background: TEAL, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, n.title));
+        const more = dayNotices.length > 2 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } }, "+", dayNotices.length - 2, "\uAC1C \uB354\uBCF4\uAE30");
+        return React.createElement(
+            "button",
+            { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? TEAL_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
+            React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
+            React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" }, tags, more)
+        );
+    });
+    const calendarCard = React.createElement(
+        "div",
+        { className: "lg:col-span-2 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between px-5 py-4", style: { borderBottom: `1px solid ${LINE}` } },
+            React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u25C0"),
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 16 } }, monthLabel(month)),
+            React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u25B6")
+        ),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-7 px-3 pt-3", style: { gap: 4 } },
+            ["\uC77C", "\uC6D4", "\uD654", "\uC218", "\uBAA9", "\uAE08", "\uD1A0"].map((w, i) => React.createElement("div", { key: w, className: "text-center text-xs font-bold pb-2", style: { color: i === 0 ? RED : i === 6 ? NAVY : SUBINK } }, w))
+        ),
+        React.createElement("div", { className: "grid grid-cols-7 px-3 pb-4", style: { gap: 4 } }, calendarCells)
+    );
+    const selDateItems = selNotices.length === 0
+        ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "10px 0" } }, "\uC774 \uB0A0\uC9DC\uC5D0 \uB4F1\uB85D\uB41C \uC5C5\uBB34\uACF5\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")
+        : selNotices.map((n) => React.createElement(
+            "div",
+            { key: n.id, className: "rounded-lg px-3 py-2", style: { background: TEAL_SOFT } },
+            React.createElement(
+                "div",
+                { className: "flex items-center justify-between gap-2" },
+                React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: TEAL } }, n.title),
+                isDirector && React.createElement("button", { onClick: () => openEdit(n), style: { color: TEAL, fontSize: 12 } }, "\u270E")
+            )
+        ));
+    const selDateCard = React.createElement(
+        "div",
+        { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
+        React.createElement("div", { style: { fontSize: 13, color: SUBINK, fontWeight: 600 } }, "\uC120\uD0DD\uD55C \uB0A0\uC9DC"),
+        React.createElement(
+            "div",
+            { style: { fontSize: 17, fontWeight: 800, marginTop: 2 } },
+            selectedDate,
+            " ",
+            React.createElement("span", { style: { color: TEAL } }, "(", korWeekdayOf(selectedDate), ")")
+        ),
+        React.createElement("div", { className: "mt-3 flex flex-col gap-2" }, selDateItems)
+    );
+    const calendarSection = React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6" }, calendarCard, selDateCard);
+    const NoticeCard = ({ n }) => React.createElement(
+        "div",
+        { className: "rounded-2xl p-5", style: { background: "#fff", border: n.pinned ? `1.5px solid ${TEAL}` : `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-start justify-between gap-3" },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                n.pinned && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: TEAL_SOFT, color: TEAL, borderRadius: 5, padding: "1.5px 6px" } }, "\uACE0\uC815"),
+                React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, n.noticeDate),
+                React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, n.title)
+            ),
+            isDirector && React.createElement(
+                "div",
+                { className: "flex items-center gap-1 flex-shrink-0" },
+                React.createElement("button", { onClick: () => openEdit(n), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u270E"),
+                React.createElement("button", { onClick: () => remove(n.id), className: "p-1.5 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
+            )
+        ),
+        React.createElement("div", { style: { fontSize: 13.5, color: INK, marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
+        React.createElement(
+            "div",
+            { style: { fontSize: 11, color: SUBINK, marginTop: 10 } },
+            n.author,
+            n.author ? " \u00B7 " : "",
+            fmtDateTime(n.createdAt)
+        )
+    );
+    let listBody;
+    if (loading) {
+        listBody = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
+    } else if (notices.length === 0) {
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uC5C5\uBB34\uACF5\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.");
+    } else {
+        listBody = React.createElement("div", { className: "flex flex-col gap-3" }, notices.map((n) => React.createElement(NoticeCard, { key: n.id, n: n })));
+    }
+    const fullListSection = React.createElement(
+        "div",
+        { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "\uC804\uCCB4 \uC5C5\uBB34\uACF5\uC9C0 \uBAA9\uB85D"),
+        listBody
+    );
+    return React.createElement("div", null, headerRow, subText, noticeForm, calendarSection, fullListSection);
 }
+
 // ---------- Attendance ----------
 function Attendance({ students, selectedDate, setSelectedDate }) {
     const [session, setSession] = useState("regular");
@@ -635,15 +745,16 @@ function Attendance({ students, selectedDate, setSelectedDate }) {
                             s.class || "반 미지정",
                             session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`))),
                 React.createElement("div", { className: "grid grid-cols-4 gap-1.5" }, STATUS_ORDER.map((stt) => (React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) })))),
-                st === "결석" && React.createElement(AbsenceReasonField, { key: `${selectedDate}-${session}-${s.id}`, initialValue: reason, onSave: (val) => saveReason(s.id, val) })));
+                (st === "결석" || st === "지각") && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })));
         })))));
 }
-// 결석 사유 입력칸: 결석으로 표시된 학생 카드 아래에만 나타남
-function AbsenceReasonField({ initialValue, onSave }) {
+// 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
+function ReasonField({ status, initialValue, onSave }) {
     const [value, setValue] = useState(initialValue);
+    const placeholder = status === "지각" ? "\uC9C0\uAC01 \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)" : "\uACB0\uC11D \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)";
     return (React.createElement("input", { type: "text", value: value, onChange: (e) => setValue(e.target.value), onBlur: () => { if (value !== initialValue)
             onSave(value); }, onKeyDown: (e) => { if (e.key === "Enter")
-            e.target.blur(); }, placeholder: "\uACB0\uC11D \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)", className: "w-full mt-2 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS["결석"].color}`, background: STATUS["결석"].soft, color: INK } }));
+            e.target.blur(); }, placeholder: placeholder, className: "w-full mt-2 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS[status].color}`, background: STATUS[status].soft, color: INK } }));
 }
 // ---------- Student manager ----------
 function emptyForm() {
