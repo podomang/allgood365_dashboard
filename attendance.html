@@ -37,6 +37,8 @@ const PURPLE = "#6d4fa8";
 const PURPLE_SOFT = "#f0ecf9";
 const TEAL = "#0f7a6c";
 const TEAL_SOFT = "#e2f3f0";
+const SKY = "#0369a1";
+const SKY_SOFT = "#e3f0f9";
 const PAPER = "#f7f8fa";
 const INK = "#111827";
 const SUBINK = "#6b7280";
@@ -49,8 +51,9 @@ const STATUS = {
     지각: { color: AMBER, soft: AMBER_SOFT },
     조퇴: { color: PURPLE, soft: PURPLE_SOFT },
     결석: { color: RED, soft: RED_SOFT },
+    일정변경: { color: SKY, soft: SKY_SOFT },
 };
-const STATUS_ORDER = ["출석", "지각", "조퇴", "결석"];
+const STATUS_ORDER = ["출석", "지각", "조퇴", "결석", "일정변경"];
 function groupByClass(list) {
     const groups = {};
     list.forEach((s) => {
@@ -81,7 +84,7 @@ function groupByTime(list, timeField) {
     });
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
-const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강·임시" };
+const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강" };
 const SESSION_ORDER = ["regular", "clinic", "extra"];
 function fmt(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
@@ -248,7 +251,7 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
             throw error;
     }
 }
-// ---------- 보강/임시(extra) 명단 ----------
+// ---------- 보강(extra) 명단 ----------
 async function fetchExtraRoster(date) {
     const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time").eq("attn_date", date);
     if (error)
@@ -827,7 +830,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
         }
     };
     const removeFromExtra = async (studentId) => {
-        if (!confirm("오늘 보강·임시 명단에서 이 학생을 제거할까요? 오늘 기록한 출석 정보도 함께 삭제됩니다.")) return;
+        if (!confirm("오늘 보강 명단에서 이 학생을 제거할까요? 오늘 기록한 출석 정보도 함께 삭제됩니다.")) return;
         setExtraTimes((prev) => { const next = { ...prev }; delete next[studentId]; return next; });
         try {
             await removeExtraRosterRow(selectedDate, studentId);
@@ -869,7 +872,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
     );
     const statCards = React.createElement(
         "div",
-        { className: "grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5" },
+        { className: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mb-5" },
         STATUS_ORDER.map((s) => React.createElement(
             "div",
             { key: s, className: "rounded-xl px-3 py-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -901,7 +904,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
             "div",
             { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
             !showAddPicker
-                ? React.createElement("button", { onClick: () => setShowAddPicker(true), className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff" } }, "+ \uBCF4\uAC15\u00B7\uC784\uC2DC \uD559\uC0DD \uCD94\uAC00")
+                ? React.createElement("button", { onClick: () => setShowAddPicker(true), className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff" } }, "+ \uBCF4\uAC15 \uD559\uC0DD \uCD94\uAC00")
                 : React.createElement(
                     "div",
                     null,
@@ -943,7 +946,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
                 React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
                 session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "\uBAA9\uB85D\uC5D0\uC11C \uC81C\uAC70" }, "\u2715")
             ),
-            (st === "결석" || st === "지각") && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })
+            (st && st !== "출석") && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })
         );
     };
     let listBody;
@@ -951,7 +954,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
         listBody = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
     } else if (roster.length === 0) {
         const emptyMsg = session === "extra"
-            ? "\uC624\uB298 \ucd94\uAC00\ub41c \ubcf4\uac15\u00b7\uc784\uc2dc \ud559\uc0dd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4. \uc704 \ubc84\ud2bc\uc73c\ub85c \ud559\uc0dd\uc744 \ucd94\uac00\ud574\ubcf4\uc138\uc694."
+            ? "\uC624\uB298 \ucd94\uAC00\ub41c \ubcf4\uac15 \ud559\uc0dd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4. \uc704 \ubc84\ud2bc\uc73c\ub85c \ud559\uc0dd\uc744 \ucd94\uac00\ud574\ubcf4\uc138\uc694."
             : `${weekday}\uc694\uc77C ${SESSIONS[session]}\uc5D0 \uBC30\uC815\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.`;
         listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, emptyMsg);
     } else if (session === "extra") {
@@ -982,7 +985,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 function ReasonField({ status, initialValue, onSave }) {
     const [value, setValue] = useState(initialValue);
-    const placeholder = status === "지각" ? "\uC9C0\uAC01 \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)" : "\uACB0\uC11D \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)";
+    const placeholder = status === "\uC77C\uC815\uBCC0\uACBD" ? "\uC77C\uC815\uBCC0\uACBD \uB0B4\uC6A9 \uC785\uB825 (\uC120\uD0DD, \uC608: 7/18 \uBCF4\uAC15\uC73C\uB85C \uC774\uB3D9)" : `${status} \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)`;
     return (React.createElement("input", { type: "text", value: value, onChange: (e) => setValue(e.target.value), onBlur: () => { if (value !== initialValue)
             onSave(value); }, onKeyDown: (e) => { if (e.key === "Enter")
             e.target.blur(); }, placeholder: placeholder, className: "w-full mt-2 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS[status].color}`, background: STATUS[status].soft, color: INK } }));
