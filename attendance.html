@@ -66,6 +66,21 @@ function groupByClass(list) {
     });
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
+function groupByTime(list, timeField) {
+    const groups = {};
+    list.forEach((s) => {
+        const key = s[timeField] && s[timeField].trim() ? s[timeField].trim() : "\uC2DC\uAC04 \uBBF8\uC9C0\uC815";
+        (groups[key] = groups[key] || []).push(s);
+    });
+    const keys = Object.keys(groups).sort((a, b) => {
+        if (a === "\uC2DC\uAC04 \uBBF8\uC9C0\uC815")
+            return 1;
+        if (b === "\uC2DC\uAC04 \uBBF8\uC9C0\uC815")
+            return -1;
+        return a.localeCompare(b);
+    });
+    return keys.map((k) => ({ className: k, list: groups[k] }));
+}
 const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강·임시" };
 const SESSION_ORDER = ["regular", "clinic", "extra"];
 function fmt(d) {
@@ -96,6 +111,7 @@ function mapStudent(row) {
         id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
         days: row.days || [], phone: row.phone || "", memo: row.memo || "",
         clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
+        regularTime: row.regular_time || "",
         enrollDate: row.enroll_date || "",
     };
 }
@@ -104,6 +120,7 @@ function mapStudentRoster(row) {
         id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
         days: row.days || [],
         clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
+        regularTime: row.regular_time || "",
         enrollDate: row.enroll_date || "",
     };
 }
@@ -124,7 +141,7 @@ async function upsertStudent(form) {
     const payload = {
         name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
         phone: form.phone, memo: form.memo, clinic: form.clinic, clinic_days: form.clinicDays,
-        clinic_time: form.clinicTime, enroll_date: form.enrollDate || null,
+        clinic_time: form.clinicTime, regular_time: form.regularTime || null, enroll_date: form.enrollDate || null,
     };
     if (form.id) {
         const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", form.id);
@@ -721,6 +738,7 @@ function WorkNotices({ isDirector, authorEmail }) {
 // ---------- Attendance ----------
 function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
     const [session, setSession] = useState("regular");
+    const [groupMode, setGroupMode] = useState("class");
     const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {}, extra: {} });
     const [extraTimes, setExtraTimes] = useState({});
     const [loading, setLoading] = useState(true);
@@ -829,7 +847,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
     };
     const counts = STATUS_ORDER.reduce((acc, st) => { acc[st] = roster.filter((s) => current[s.id]?.status === st).length; return acc; }, {});
     const uncheckedCount = roster.filter((s) => !current[s.id]?.status).length;
-    const groups = groupByClass(roster);
+    const groups = groupMode === "time"
+        ? groupByTime(roster, session === "clinic" ? "clinicTime" : "regularTime")
+        : groupByClass(roster);
     const header = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
@@ -862,6 +882,16 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
             React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "\uBBF8\uCCB4\uD06C"),
             React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: SUBINK } }, uncheckedCount, "\uBA85")
         )
+    );
+    const groupToggle = session !== "extra" && React.createElement(
+        "div",
+        { className: "flex items-center gap-2 mb-4" },
+        React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
+        ["class", "time"].map((m) => React.createElement(
+            "button",
+            { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
+            m === "class" ? "\uBC18\uBCC4" : "\uC2DC\uAC04\uBCC4"
+        ))
     );
     let addPicker = null;
     if (session === "extra") {
@@ -902,7 +932,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
                     "div",
                     { className: "min-w-0", style: { flex: "1 1 120px" } },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
-                    React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, s.class || "\uBC18 \uBBF8\uC9C0\uC815", session === "clinic" && s.clinicTime && ` \u00B7 \uD074\ub9AC\ub2c9 ${s.clinicTime}`)
+                    React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, s.class || "\uBC18 \uBBF8\uC9C0\uC815", session === "clinic" && s.clinicTime && ` \u00B7 \uD074\ub9AC\ub2c9 ${s.clinicTime}`, session === "regular" && s.regularTime && ` \u00B7 ${s.regularTime}`)
                 ),
                 session === "extra" && React.createElement(
                     "div",
@@ -947,7 +977,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
             ))
         );
     }
-    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, addPicker, listBody);
+    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, groupToggle, addPicker, listBody);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 function ReasonField({ status, initialValue, onSave }) {
@@ -959,26 +989,29 @@ function ReasonField({ status, initialValue, onSave }) {
 }
 // ---------- Student manager ----------
 function emptyForm() {
-    return { id: null, name: "", class: "", school: "", grade: "", days: [], phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr() };
+    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr() };
+}
+function parseClassString(classStr) {
+    const str = (classStr || "").trim();
+    if (str.startsWith("중등과정")) return { courseLevel: "중등과정", courseName: str.slice(4).trim() };
+    if (str.startsWith("고등과정")) return { courseLevel: "고등과정", courseName: str.slice(4).trim() };
+    return { courseLevel: "", courseName: str };
 }
 function StudentManager({ onChanged }) {
     const [students, setStudents] = useState([]);
     const [loaded, setLoaded] = useState(false);
     const [form, setForm] = useState(emptyForm());
-    const [showForm, setShowForm] = useState(false);
+    const [editTarget, setEditTarget] = useState(null); // null | "new" | studentId
     const [saving, setSaving] = useState(false);
     const reload = async () => {
         try {
             setStudents(await fetchStudents());
-        }
-        catch (e) {
+        } catch (e) {
             console.error(e);
         }
-        if (onChanged)
-            onChanged();
+        if (onChanged) onChanged();
     };
     useEffect(() => { reload().then(() => setLoaded(true)); }, []);
-    // realtime: 다른 사람(원장)이 학생 정보를 추가/수정/삭제하면 자동 반영
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_students_manager_changes")
@@ -986,104 +1019,197 @@ function StudentManager({ onChanged }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    const openNew = () => { setForm(emptyForm()); setShowForm(true); };
-    const openEdit = (s) => { setForm({ ...s, clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "" }); setShowForm(true); };
+    const openNew = () => { setForm(emptyForm()); setEditTarget("new"); };
+    const openEdit = (s) => {
+        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "" });
+        setEditTarget(s.id);
+    };
+    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); };
     const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
     const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
     const save = async () => {
-        if (!form.name.trim())
-            return;
+        if (!form.name.trim()) return;
         setSaving(true);
         try {
-            await upsertStudent(form);
+            const composedClass = [form.courseLevel, form.courseName.trim()].filter(Boolean).join(" ");
+            await upsertStudent({ ...form, class: composedClass });
             await reload();
-            setShowForm(false);
-            setForm(emptyForm());
-        }
-        catch (e) {
+            closeForm();
+        } catch (e) {
             alert("저장 중 오류가 발생했습니다: " + e.message);
         }
         setSaving(false);
     };
     const remove = async (id) => {
-        if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다."))
-            return;
+        if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다.")) return;
         try {
             await deleteStudentRow(id);
             await reload();
-        }
-        catch (e) {
+        } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
     };
     if (!loaded) {
         return React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
     }
-    return (React.createElement("div", null,
-        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
-            React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD559\uC0DD\uAD00\uB9AC"),
-            React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ \uD559\uC0DD \uCD94\uAC00")),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uD559\uC0DD\uBCC4 \uBC18\uACFC \uB4F1\uC6D0 \uC694\uC77C\uC744 \uB4F1\uB85D\uD558\uBA74 \uCD9C\uC11D\uCCB4\uD06C \uD654\uBA74\uC5D0 \uC790\uB3D9\uC73C\uB85C \uBC18\uC601\uB429\uB2C8\uB2E4."),
-        showForm && (React.createElement("div", { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${NAVY}` } },
-            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "학생 정보 수정" : "새 학생 등록"),
-            React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
-                [
-                    ["이름", "name", "예: 김올곧"], ["반", "class", "예: 중2 심화반"],
-                    ["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"],
-                    ["연락처", "phone", "학부모 연락처"], ["메모", "memo", "특이사항 (선택)"],
-                ].map(([label, key, ph]) => (React.createElement("div", { key: key },
-                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
-                    React.createElement("input", { value: form[key], onChange: (e) => setForm({ ...form, [key]: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: ph })))),
-                React.createElement("div", null,
-                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uB85D\uC77C"),
-                    React.createElement("input", { type: "date", value: form.enrollDate, onChange: (e) => setForm({ ...form, enrollDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
-                    React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uC774 \uB0A0\uC9DC \uC774\uC804 \uCD9C\uC11D\uBD80\uC5D0\uB294 \uD45C\uC2DC\uB418\uC9C0 \uC54A\uC544\uC694."))),
-            React.createElement("div", { className: "mt-3" },
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uC6D0 \uC694\uC77C"),
-                React.createElement("div", { className: "flex gap-2 mt-1.5 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => (React.createElement("button", { key: d, onClick: () => toggleDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` } }, d))))),
-            React.createElement("div", { className: "mt-3 flex items-center justify-between rounded-lg px-3 py-2.5", style: { background: PURPLE_SOFT } },
-                React.createElement("div", null,
-                    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uB300\uC0C1"),
-                    React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "\uAEBC\uB450\uBA74 \uD074\uB9AC\uB2C9 \uCD9C\uC11D\uBD80\uC5D0\uC11C \uC774 \uD559\uC0DD\uC740 \uC81C\uC678\uB429\uB2C8\uB2E4.")),
-                React.createElement("button", { onClick: () => setForm({ ...form, clinic: !form.clinic }), style: { width: 44, height: 26, borderRadius: 999, background: form.clinic ? PURPLE : "#d8d5e2", position: "relative", flexShrink: 0 } },
-                    React.createElement("span", { style: { position: "absolute", top: 3, left: form.clinic ? 22 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 150ms ease" } }))),
-            form.clinic && (React.createElement("div", { className: "mt-3 rounded-lg p-3", style: { background: PURPLE_SOFT } },
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC694\uC77C"),
-                React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginBottom: 8 } }, "\uBE44\uC6CC\uB450\uBA74 \uB4F1\uC6D0 \uC694\uC77C\uACFC \uB3D9\uC77C\uD558\uAC8C \uCC98\uB9AC\uB429\uB2C8\uB2E4."),
-                React.createElement("div", { className: "flex gap-2 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => (React.createElement("button", { key: d, onClick: () => toggleClinicDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.clinicDays.includes(d) ? PURPLE : "#fff", color: form.clinicDays.includes(d) ? "#fff" : INK, border: `1px solid ${form.clinicDays.includes(d) ? PURPLE : LINE}` } }, d)))),
-                React.createElement("div", { className: "mt-3" },
-                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC2DC\uAC04 (\uC120\uD0DD)"),
-                    React.createElement("input", { type: "text", value: form.clinicTime, onChange: (e) => setForm({ ...form, clinicTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" }, placeholder: "\uC608: 19:00~20:30" })))),
-            React.createElement("div", { className: "flex gap-2 mt-4" },
-                React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
-                React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")))),
-        students.length === 0 ? (React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")) : (React.createElement("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } }, students.map((s, idx) => (React.createElement("div", { key: s.id, className: "flex items-center justify-between gap-3 px-5 py-3.5 flex-wrap", style: { borderBottom: idx === students.length - 1 ? "none" : `1px solid ${LINE}` } },
-            React.createElement("div", { className: "min-w-0" },
-                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
-                    React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, s.name),
-                    React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, s.class || "반 미지정"),
-                    (s.school || s.grade) && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } },
-                        s.school,
-                        s.school && s.grade ? " · " : "",
-                        s.grade ? `${s.grade}학년` : "")),
-                React.createElement("div", { className: "flex items-center gap-3 mt-1 flex-wrap" },
-                    React.createElement("div", { className: "flex gap-1" },
-                        WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => (React.createElement("span", { key: d, style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, d))),
-                        s.days.length === 0 && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "\uC694\uC77C \uBBF8\uC9C0\uC815")),
-                    !s.clinic && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 \uC81C\uC678"),
-                    s.clinic && s.clinicDays.length > 0 && (React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" } },
-                        "\uD074\uB9AC\uB2C9 ",
-                        s.clinicDays.join("·"),
-                        s.clinicTime ? ` ${s.clinicTime}` : "")),
-                    s.phone && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } },
-                        "\uD83D\uDCDE ",
-                        s.phone),
-                    s.enrollDate && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } },
-                        "\uB4F1\uB85D\uC77C ",
-                        s.enrollDate))),
-            React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" },
-                React.createElement("button", { onClick: () => openEdit(s), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
-                React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")))))))));
+    const header = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD559\uC0DD\uAD00\uB9AC"),
+        React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ \uD559\uC0DD \uCD94\uAC00")
+    );
+    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uD559\uC0DD\uBCC4 \uBC18\uACFC \uB4F1\uC6D0 \uC694\uC77C\uC744 \uB4F1\uB85D\uD558\uBA74 \uCD9C\uC11D\uCCB4\uD06C \uD654\uBA74\uC5D0 \uC790\uB3D9\uC73C\uB85C \uBC18\uC601\uB429\uB2C8\uB2E4.");
+    const StudentForm = () => React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-4", style: { background: "#fff", border: `1.5px solid ${NAVY}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "\uD559\uC0DD \uC815\uBCF4 \uC218\uC815" : "\uC0C8 \uD559\uC0DD \uB4F1\uB85D"),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uC774\uB984"),
+                React.createElement("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC608: \uAE40\uC62C\uACF3" })
+            ),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uBC18"),
+                React.createElement(
+                    "div",
+                    { className: "flex gap-2 mt-1" },
+                    React.createElement(
+                        "select",
+                        { value: form.courseLevel, onChange: (e) => setForm({ ...form, courseLevel: e.target.value }), className: "px-2 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, flex: "0 0 110px" } },
+                        React.createElement("option", { value: "" }, "\uC120\uD0DD"),
+                        React.createElement("option", { value: "\uC911\uB4F1\uACFC\uC815" }, "\uC911\uB4F1\uACFC\uC815"),
+                        React.createElement("option", { value: "\uACE0\uB4F1\uACFC\uC815" }, "\uACE0\uB4F1\uACFC\uC815")
+                    ),
+                    React.createElement("input", { value: form.courseName, onChange: (e) => setForm({ ...form, courseName: e.target.value }), className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC218\uAC15\uACFC\uC815 (\uC608: \uC2EC\uD654\uBC18, 4\uC2DC)" })
+                )
+            ),
+            [["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"], ["연락처", "phone", "학부모 연락처"], ["메모", "memo", "특이사항 (선택)"]].map(([label, key, ph]) => React.createElement(
+                "div",
+                { key: key },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
+                React.createElement("input", { value: form[key], onChange: (e) => setForm({ ...form, [key]: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: ph })
+            )),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uB85D\uC77C"),
+                React.createElement("input", { type: "date", value: form.enrollDate, onChange: (e) => setForm({ ...form, enrollDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uC774 \uB0A0\uC9DC \uC774\uC804 \uCD9C\uC11D\uBD80\uC5D0\uB294 \uD45C\uC2DC\uB418\uC9C0 \uC54A\uC544\uC694.")
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "mt-3" },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uC6D0 \uC694\uC77C"),
+            React.createElement("div", { className: "flex gap-2 mt-1.5 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", { key: d, onClick: () => toggleDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` } }, d))),
+            React.createElement(
+                "div",
+                { className: "mt-2", style: { maxWidth: 220 } },
+                React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "\uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
+                React.createElement("input", { type: "text", value: form.regularTime, onChange: (e) => setForm({ ...form, regularTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC608: 16:00~18:00" })
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "mt-3 flex items-center justify-between rounded-lg px-3 py-2.5", style: { background: PURPLE_SOFT } },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uB300\uC0C1"),
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "\uAEBC\uB450\uBA74 \uD074\uB9AC\uB2C9 \uCD9C\uC11D\uBD80\uC5D0\uC11C \uC774 \uD559\uC0DD\uC740 \uC81C\uC678\uB429\uB2C8\uB2E4.")
+            ),
+            React.createElement(
+                "button",
+                { onClick: () => setForm({ ...form, clinic: !form.clinic }), style: { width: 44, height: 26, borderRadius: 999, background: form.clinic ? PURPLE : "#d8d5e2", position: "relative", flexShrink: 0 } },
+                React.createElement("span", { style: { position: "absolute", top: 3, left: form.clinic ? 22 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 150ms ease" } })
+            )
+        ),
+        form.clinic && React.createElement(
+            "div",
+            { className: "mt-3 rounded-lg p-3", style: { background: PURPLE_SOFT } },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC694\uC77C"),
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginBottom: 8 } }, "\uBE44\uC6CC\uB450\uBA74 \uB4F1\uC6D0 \uC694\uC77C\uACFC \uB3D9\uC77C\uD558\uAC8C \uCC98\uB9AC\uB429\uB2C8\uB2E4."),
+            React.createElement("div", { className: "flex gap-2 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", { key: d, onClick: () => toggleClinicDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.clinicDays.includes(d) ? PURPLE : "#fff", color: form.clinicDays.includes(d) ? "#fff" : INK, border: `1px solid ${form.clinicDays.includes(d) ? PURPLE : LINE}` } }, d))),
+            React.createElement(
+                "div",
+                { className: "mt-3" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC2DC\uAC04 (\uC120\uD0DD)"),
+                React.createElement("input", { type: "text", value: form.clinicTime, onChange: (e) => setForm({ ...form, clinicTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" }, placeholder: "\uC608: 19:00~20:30" })
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
+            React.createElement("button", { onClick: closeForm, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")
+        )
+    );
+    const StudentRow = ({ s }) => React.createElement(
+        "div",
+        { className: "flex items-center justify-between gap-3 px-5 py-3.5 flex-wrap" },
+        React.createElement(
+            "div",
+            { className: "min-w-0" },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, s.name),
+                React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, s.class || "\uBC18 \uBBF8\uC9C0\uC815"),
+                (s.school || s.grade) && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, s.school, s.school && s.grade ? " \u00B7 " : "", s.grade ? `${s.grade}\uD559\uB144` : "")
+            ),
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-3 mt-1 flex-wrap" },
+                React.createElement(
+                    "div",
+                    { className: "flex gap-1" },
+                    WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => React.createElement("span", { key: d, style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, d)),
+                    s.days.length === 0 && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "\uC694\uC77C \uBBF8\uC9C0\uC815"),
+                    s.regularTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, s.regularTime)
+                ),
+                !s.clinic && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 \uC81C\uC678"),
+                s.clinic && s.clinicDays.length > 0 && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 ", s.clinicDays.join("\u00B7"), s.clinicTime ? ` ${s.clinicTime}` : ""),
+                s.phone && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "\uD83D\uDCDE ", s.phone),
+                s.enrollDate && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "\uB4F1\uB85D\uC77C ", s.enrollDate)
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-1 flex-shrink-0" },
+            React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
+            React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
+        )
+    );
+    const listBody = students.length === 0
+        ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
+        : React.createElement(
+            "div",
+            { className: "flex flex-col gap-2.5" },
+            students.map((s) => React.createElement(
+                React.Fragment,
+                { key: s.id },
+                React.createElement(
+                    "div",
+                    { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    React.createElement(StudentRow, { s: s })
+                ),
+                editTarget === s.id && React.createElement(StudentForm, null)
+            ))
+        );
+    return React.createElement(
+        "div",
+        null,
+        header,
+        subText,
+        editTarget === "new" && React.createElement(StudentForm, null),
+        listBody
+    );
 }
 // ============================================================
 // Root
