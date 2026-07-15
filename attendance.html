@@ -85,21 +85,44 @@ function groupByTime(list, timeField) {
     });
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
+function schoolLevelOf(s) {
+    const level = parseClassString(s.class).courseLevel;
+    if (level === "중등과정")
+        return "\uC911";
+    if (level === "고등과정")
+        return "\uACE0";
+    const school = s.school || "";
+    if (school.includes("\uCD08\uB4F1"))
+        return "\uCD08";
+    if (school.includes("\uC911\uD559") || /\uC911$/.test(school))
+        return "\uC911";
+    if (school.includes("\uACE0\uB4F1") || /\uACE0$/.test(school))
+        return "\uACE0";
+    return "";
+}
 function groupByGrade(list) {
-    const groups = {};
+    const buckets = {};
     list.forEach((s) => {
-        const g = s.grade && String(s.grade).trim();
-        const key = g ? `${g}\uD559\uB144` : "\uD559\uB144 \uBBF8\uC9C0\uC815";
-        (groups[key] = groups[key] || []).push(s);
+        const gradeNum = s.grade && String(s.grade).trim();
+        const lvl = schoolLevelOf(s);
+        const key = gradeNum ? `${lvl}${gradeNum}\uD559\uB144` : "\uD559\uB144 \uBBF8\uC9C0\uC815";
+        if (!buckets[key])
+            buckets[key] = { level: lvl, grade: gradeNum ? parseInt(gradeNum, 10) || 0 : 0, list: [] };
+        buckets[key].list.push(s);
     });
-    const keys = Object.keys(groups).sort((a, b) => {
+    const levelOrder = { "\uCD08": 0, "\uC911": 1, "\uACE0": 2, "": 3 };
+    const keys = Object.keys(buckets).sort((a, b) => {
         if (a === "\uD559\uB144 \uBBF8\uC9C0\uC815")
             return 1;
         if (b === "\uD559\uB144 \uBBF8\uC9C0\uC815")
             return -1;
-        return a.localeCompare(b, "ko", { numeric: true });
+        const A = buckets[a], B = buckets[b];
+        const lo = (levelOrder[A.level] ?? 3) - (levelOrder[B.level] ?? 3);
+        if (lo !== 0)
+            return lo;
+        return A.grade - B.grade;
     });
-    return keys.map((k) => ({ className: k, list: groups[k] }));
+    return keys.map((k) => ({ className: k, list: buckets[k].list }));
 }
 function groupBySchool(list) {
     const groups = {};
