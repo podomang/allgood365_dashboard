@@ -422,6 +422,8 @@ function MainApp({ session }) {
     const [studentsLoaded, setStudentsLoaded] = useState(false);
     const [selectedDate, setSelectedDate] = useState(todayStr());
     const [month, setMonth] = useState(new Date());
+    const [attSession, setAttSession] = useState("regular");
+    const [attGroupMode, setAttGroupMode] = useState("time");
     const reloadStudents = async () => {
         try {
             setStudents(await fetchStudentsRoster());
@@ -497,7 +499,7 @@ function MainApp({ session }) {
         : React.createElement(
             React.Fragment,
             null,
-            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email }),
+            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector }),
             tab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: session.user.email }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents })
@@ -632,6 +634,9 @@ function WorkNotices({ isDirector, authorEmail }) {
     const [saving, setSaving] = useState(false);
     const [month, setMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(todayStr());
+    const [subTab, setSubTab] = useState("general");
+    const [expandedIds, setExpandedIds] = useState([]);
+    const toggleExpand = (id) => setExpandedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const cells = useMemo(() => buildMonthGrid(month), [month]);
     const today = todayStr();
     const load = async () => {
@@ -723,23 +728,35 @@ function WorkNotices({ isDirector, authorEmail }) {
             React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkNoticeForm(selectedDate)); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")
         )
     );
-    const renderGeneralNoticeItem = (n) => React.createElement(
-        "div",
-        { key: n.id, className: "rounded-xl p-3.5", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        React.createElement(
+    const renderGeneralNoticeItem = (n) => {
+        const isOpen = expandedIds.includes(n.id);
+        return React.createElement(
             "div",
-            { className: "flex items-start justify-between gap-3" },
-            React.createElement("span", { style: { fontWeight: 800, fontSize: 14, color: INK } }, n.title),
-            isDirector && React.createElement(
+            { key: n.id, className: "rounded-xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement(
+                "button",
+                { onClick: () => toggleExpand(n.id), className: "w-full flex items-center justify-between gap-3 px-3.5 py-3 text-left" },
+                React.createElement(
+                    "div",
+                    { className: "flex items-center gap-2 min-w-0" },
+                    React.createElement("span", { style: { fontSize: 12, color: SUBINK, flexShrink: 0 } }, isOpen ? "\u25BE" : "\u25B8"),
+                    React.createElement("span", { style: { fontWeight: 800, fontSize: 14, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, n.title)
+                ),
+                isDirector && React.createElement(
+                    "div",
+                    { className: "flex items-center gap-1 flex-shrink-0", onClick: (e) => e.stopPropagation() },
+                    React.createElement("button", { onClick: () => openEdit(n), className: "p-1 rounded-lg", style: { background: AMBER_SOFT, color: AMBER } }, "\u270E"),
+                    React.createElement("button", { onClick: () => remove(n.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
+                )
+            ),
+            isOpen && React.createElement(
                 "div",
-                { className: "flex items-center gap-1 flex-shrink-0" },
-                React.createElement("button", { onClick: () => openEdit(n), className: "p-1 rounded-lg", style: { background: AMBER_SOFT, color: AMBER } }, "\u270E"),
-                React.createElement("button", { onClick: () => remove(n.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
+                { className: "px-3.5 pb-3.5", style: { borderTop: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { fontSize: 13, color: INK, marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
+                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 8 } }, fmtDateTime(n.createdAt))
             )
-        ),
-        React.createElement("div", { style: { fontSize: 13, color: INK, marginTop: 6, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
-        React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 8 } }, n.author, n.author ? " \u00B7 " : "", fmtDateTime(n.createdAt))
-    );
+        );
+    };
     const generalCard = React.createElement(
         "div",
         { className: "rounded-2xl p-5 mb-6", style: { background: AMBER_SOFT, border: `1.5px solid ${AMBER}` } },
@@ -835,8 +852,6 @@ function WorkNotices({ isDirector, authorEmail }) {
         React.createElement(
             "div",
             { style: { fontSize: 11, color: SUBINK, marginTop: 10 } },
-            n.author,
-            n.author ? " \u00B7 " : "",
             fmtDateTime(n.createdAt)
         )
     );
@@ -854,13 +869,35 @@ function WorkNotices({ isDirector, authorEmail }) {
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "\uB0A0\uC9DC\uBCC4 \uC5C5\uBB34\uACF5\uC9C0 \uC804\uCCB4"),
         listBody
     );
-    return React.createElement("div", null, headerRow, subText, noticeForm, generalCard, calendarSection, fullListSection);
+    const subTabBtn = (key, label) => React.createElement(
+        "button",
+        {
+            onClick: () => setSubTab(key),
+            className: "px-4 py-2 rounded-xl text-sm font-bold",
+            style: subTab === key
+                ? { background: key === "general" ? AMBER : TEAL, color: "#fff" }
+                : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` }
+        },
+        label
+    );
+    const subTabBar = React.createElement(
+        "div",
+        { className: "flex gap-2 mb-5" },
+        subTabBtn("general", "\uD83D\uDCCC \uC804\uCCB4\uACF5\uC9C0 (" + generalNotices.length + ")"),
+        subTabBtn("calendar", "\uD83D\uDCC5 \uB0A0\uC9DC\uBCC4 \uACF5\uC9C0")
+    );
+    const subTabContent = subTab === "general"
+        ? generalCard
+        : React.createElement(React.Fragment, null, calendarSection, fullListSection);
+    return React.createElement("div", null, headerRow, subText, noticeForm, subTabBar, subTabContent);
 }
 
 // ---------- Attendance ----------
-function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
-    const [session, setSession] = useState("regular");
-    const [groupMode, setGroupMode] = useState("time");
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode }) {
+    const session = attSession;
+    const setSession = setAttSession;
+    const groupMode = attGroupMode;
+    const setGroupMode = setAttGroupMode;
     const [showScheduleList, setShowScheduleList] = useState(false);
     const [editingScheduleId, setEditingScheduleId] = useState(null);
     const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {}, extra: {} });
