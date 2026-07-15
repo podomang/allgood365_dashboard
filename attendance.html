@@ -1552,6 +1552,10 @@ function StudentManager({ onChanged }) {
     const [historyTarget, setHistoryTarget] = useState(null); // 🔍 눌러서 이력을 보고 있는 학생 id
     const [historyRows, setHistoryRows] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
+    const [groupMode, setGroupMode] = useState("none"); // none | grade | school | class
+    const [searchQuery, setSearchQuery] = useState("");
+    const [collapsedGroups, setCollapsedGroups] = useState({});
+    const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
     const reload = async () => {
         try {
             setStudents(await fetchStudents());
@@ -1788,28 +1792,83 @@ function StudentManager({ onChanged }) {
                     ))
                 )
     );
-    const listBody = students.length === 0
-        ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
-        : React.createElement(
+    // \uD559\uC0DD \uD55C \uBA85 \uBD84(\uD589 + \uC774\uB825 \uD328\uB110 + \uC218\uC815 \uD3FC)\uC744 \uB80C\uB354\uB9C1. \uC804\uCCB4\uBCF4\uAE30/\uAC80\uC0C9/\uADF8\uB8F9\uBCF4\uAE30 \uC5B4\uB514\uC11C\uB4E0 \uC7AC\uC0AC\uC6A9.
+    const renderStudentBlock = (s) => React.createElement(
+        React.Fragment,
+        { key: s.id },
+        React.createElement(
             "div",
-            { className: "flex flex-col gap-2.5" },
-            students.map((s) => React.createElement(
-                React.Fragment,
-                { key: s.id },
-                React.createElement(
-                    "div",
-                    { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-                    renderStudentRow(s)
-                ),
-                historyTarget === s.id && renderHistoryPanel(),
-                editTarget === s.id && studentFormEl
+            { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            renderStudentRow(s)
+        ),
+        historyTarget === s.id && renderHistoryPanel(),
+        editTarget === s.id && studentFormEl
+    );
+    const GROUP_MODE_LABELS = { none: "\uC804\uCCB4\uBCF4\uAE30", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4" };
+    const groupToggle = React.createElement(
+        "div",
+        { className: "flex items-center gap-3 mb-4 flex-wrap" },
+        React.createElement(
+            "input",
+            {
+                value: searchQuery, onChange: (e) => setSearchQuery(e.target.value),
+                placeholder: "\uD559\uC0DD \uC774\uB984 \uAC80\uC0C9", className: "px-3 py-2 rounded-lg text-sm outline-none",
+                style: { border: `1px solid ${LINE}`, flex: "1 1 180px", maxWidth: 260 },
+            }
+        ),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-2 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
+            ["none", "grade", "school", "class"].map((m) => React.createElement(
+                "button",
+                { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
+                GROUP_MODE_LABELS[m]
             ))
+        )
+    );
+    const searchTrimmed = searchQuery.trim();
+    let listBody;
+    if (students.length === 0) {
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+    } else if (searchTrimmed !== "") {
+        // \uAC80\uC0C9 \uC911\uC5D0\uB294 \uADF8\uB8F9 \uAD6C\uC870\uB97C \uBB34\uC2DC\uD558\uACE0 \uC774\uB984\uC774 \uC77C\uCE58\uD558\uB294 \uD559\uC0DD\uB9CC \uD3C9\uD3C9\uD558\uAC8C \uBCF4\uC5EC\uC900\uB2E4.
+        const matches = students.filter((s) => s.name.includes(searchTrimmed));
+        listBody = matches.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uC77C\uCE58\uD558\uB294 \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
+            : React.createElement("div", { className: "flex flex-col gap-2.5" }, matches.map(renderStudentBlock));
+    } else if (groupMode === "none") {
+        listBody = React.createElement("div", { className: "flex flex-col gap-2.5" }, students.map(renderStudentBlock));
+    } else {
+        const groups = groupMode === "grade" ? groupByGrade(students) : groupMode === "school" ? groupBySchool(students) : groupByClass(students);
+        listBody = React.createElement(
+            "div",
+            { className: "flex flex-col gap-4" },
+            groups.map((g) => {
+                const collapsed = !!collapsedGroups[g.className];
+                return React.createElement(
+                    "div",
+                    { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    React.createElement(
+                        "button",
+                        { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: PAPER, borderBottom: collapsed ? "none" : `1px solid ${LINE}` } },
+                        React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5 } }, g.className),
+                        React.createElement("span", { className: "flex items-center gap-2" },
+                            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, g.list.length, "\uBA85"),
+                            React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
+                        )
+                    ),
+                    !collapsed && React.createElement("div", { className: "flex flex-col gap-2.5 p-3" }, g.list.map(renderStudentBlock))
+                );
+            })
         );
+    }
     return React.createElement(
         "div",
         null,
         header,
         subText,
+        groupToggle,
         editTarget === "new" && studentFormEl,
         listBody
     );
