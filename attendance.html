@@ -292,7 +292,7 @@ async function fetchAttendanceForDate(date) {
     const { data, error } = await supabaseClient.from("attn_attendance").select("*").eq("attn_date", date);
     if (error)
         throw error;
-    const result = { regular: {}, clinic: {} };
+    const result = { regular: {}, clinic: {}, extra: {} };
     data.forEach((r) => { result[r.session][r.student_id] = { status: r.status, reason: r.reason || "", targetDate: r.target_date || "", targetTime: r.target_time || "" }; });
     return result;
 }
