@@ -54,11 +54,20 @@ const STATUS = {
     일정변경: { color: SKY, soft: SKY_SOFT },
 };
 const STATUS_ORDER = ["출석", "지각", "조퇴", "결석", "일정변경"];
+// class 필드 원문(예: "중학과정 중3-2 시작", "고등과정 미적분1")에서 앞쪽 "OO과정" 표기를
+// 떼어내고, 남은 텍스트의 첫 단어를 반명으로 간주해서 추출한다. 같은 반이어도 뒤에 붙는
+// 메모(시작/복습, 과목명 등)가 서로 달라 문자열 전체가 다를 수 있어, 첫 단어만 기준으로 삼는다.
+function extractClassName(classStr) {
+    const raw = (classStr || "").trim();
+    if (!raw)
+        return "";
+    const withoutLevel = raw.replace(/^(초등|중등|중학|고등)(?:학교)?과정\s*/, "");
+    return withoutLevel.split(/[\s,]+/)[0] || "";
+}
 function groupByClass(list) {
     const groups = {};
     list.forEach((s) => {
-        const level = parseClassString(s.class).courseLevel;
-        const key = level || "반 미지정";
+        const key = extractClassName(s.class) || "반 미지정";
         (groups[key] = groups[key] || []).push(s);
     });
     const keys = Object.keys(groups).sort((a, b) => {
@@ -1068,7 +1077,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         ? groupByGrade(roster)
         : groupMode === "school"
             ? groupBySchool(roster)
-            : groupByTime(roster, session === "clinic" ? "clinicTime" : "regularTime");
+            : groupMode === "class"
+                ? groupByClass(roster)
+                : groupByTime(roster, session === "clinic" ? "clinicTime" : "regularTime");
     const header = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
@@ -1125,12 +1136,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             ))
         )
     );
-    const GROUP_MODE_LABELS = { time: "\uC2DC\uAC04\uBCC4", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4" };
+    const GROUP_MODE_LABELS = { time: "\uC2DC\uAC04\uBCC4", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4" };
     const groupToggle = session !== "extra" && React.createElement(
         "div",
         { className: "flex items-center gap-2 mb-4 flex-wrap" },
         React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
-        ["time", "grade", "school"].map((m) => React.createElement(
+        ["time", "grade", "school", "class"].map((m) => React.createElement(
             "button",
             { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
             GROUP_MODE_LABELS[m]
@@ -1350,7 +1361,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, planNote, saveN
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
                 React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
-                React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, s.class || "반 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`)
+                React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (s.school || s.grade) ? `${s.school || ""}${s.school && s.grade ? " · " : ""}${s.grade ? s.grade + "학년" : ""}` : "학교/학년 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`)
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
             showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: `${noteLabel} 추가` }, "📝"),
