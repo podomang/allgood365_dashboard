@@ -342,6 +342,20 @@ async function setExtraPlanNote(date, studentId, note) {
     if (error)
         throw error;
 }
+// 정규/클리닉 세션의 당일 수업계획 메모 (attn_session_notes). 출석 체크 여부와 무관하게 독립적으로 저장됨.
+async function fetchSessionNotesForDate(date) {
+    const { data, error } = await supabaseClient.from("attn_session_notes").select("session, student_id, plan_note").eq("attn_date", date);
+    if (error)
+        throw error;
+    const result = { regular: {}, clinic: {}, extra: {} };
+    data.forEach((r) => { result[r.session] = result[r.session] || {}; result[r.session][r.student_id] = r.plan_note || ""; });
+    return result;
+}
+async function upsertSessionNote(date, session, studentId, note) {
+    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, plan_note: note || null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+    if (error)
+        throw error;
+}
 async function removeExtraRosterRow(date, studentId) {
     const { error } = await supabaseClient.from("attn_extra_roster").delete().eq("attn_date", date).eq("student_id", studentId);
     if (error)
@@ -907,6 +921,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [editingScheduleId, setEditingScheduleId] = useState(null);
     const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {}, extra: {} });
     const [extraMeta, setExtraMeta] = useState({});
+    const [sessionNotes, setSessionNotes] = useState({ regular: {}, clinic: {}, extra: {} });
     const [loading, setLoading] = useState(true);
     const [addQuery, setAddQuery] = useState("");
     const [showAddPicker, setShowAddPicker] = useState(false);
@@ -914,9 +929,10 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const load = async () => {
         setLoading(true);
         try {
-            const [att, extra] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate)]);
+            const [att, extra, notes] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
+            setSessionNotes(notes);
         } catch (e) {
             console.error(e);
         }
@@ -924,21 +940,23 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     };
     const loadQuiet = async () => {
         try {
-            const [att, extra] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate)]);
+            const [att, extra, notes] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
+            setSessionNotes(notes);
         } catch (e) {
             console.error(e);
         }
     };
     useEffect(() => { load(); setShowAddPicker(false); setAddQuery(""); setEditingScheduleId(null); }, [selectedDate]);
     useEffect(() => { setEditingScheduleId(null); }, [session]);
-    // realtime: 다른 사람이 같은 날짜에 체크한 출석/보강명단이 바로 반영됨
+    // realtime: 다른 사람이 같은 날짜에 체크한 출석/보강명단/수업계획이 바로 반영됨
     useEffect(() => {
         const channel = supabaseClient
             .channel(`attn_attendance_${selectedDate}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_extra_roster", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_session_notes", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
@@ -1031,6 +1049,19 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             load();
         }
     };
+    // 정규/클리닉 세션의 당일 수업계획 메모 저장 (attn_session_notes)
+    const saveSessionNote = async (studentId, note) => {
+        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: note } }));
+        try {
+            await upsertSessionNote(selectedDate, session, studentId, note);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    // 보강은 attn_extra_roster.plan_note, 정규/클리닉은 attn_session_notes 로 저장 위치가 다름 - 화면에서는 하나로 통일해서 사용
+    const noteForStudent = (id) => session === "extra" ? ((extraMeta[id] && extraMeta[id].note) || "") : ((sessionNotes[session] && sessionNotes[session][id]) || "");
+    const saveNoteForStudent = (id, note) => session === "extra" ? saveExtraNote(id, note) : saveSessionNote(id, note);
     const counts = STATUS_ORDER.reduce((acc, st) => { acc[st] = roster.filter((s) => current[s.id]?.status === st).length; return acc; }, {});
     const uncheckedCount = roster.filter((s) => !current[s.id]?.status).length;
     const groups = groupMode === "grade"
@@ -1141,7 +1172,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, saveExtraNote: saveExtraNote, removeFromExtra: removeFromExtra }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, planNote: noteForStudent(s.id), saveNote: saveNoteForStudent, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra }))
         );
     } else {
         listBody = React.createElement(
@@ -1156,7 +1187,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                     React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5 } }, g.className),
                     React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, g.list.length, "\uBA85")
                 ),
-                g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, saveExtraNote: saveExtraNote, removeFromExtra: removeFromExtra }))
+                g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, planNote: noteForStudent(s.id), saveNote: saveNoteForStudent, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra }))
             ))
         );
     }
@@ -1297,16 +1328,17 @@ function ExtraTimeControl({ initialValue, onSave }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, setStatus, saveReason, saveScheduleChange, saveExtraTime, saveExtraNote, removeFromExtra }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, planNote, saveNote, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
     const targetTime = current[s.id]?.targetTime || "";
     const scheduledTime = (extraMeta[s.id] && extraMeta[s.id].time) || "";
-    const planNote = (extraMeta[s.id] && extraMeta[s.id].note) || "";
     const [noteEditing, setNoteEditing] = useState(false);
-    const showNoteLine = session === "extra" && (planNote || noteEditing);
-    const showNoteInlinePencil = session === "extra" && !planNote && !noteEditing;
+    const notesEnabled = session === "extra" || session === "clinic";
+    const noteLabel = session === "extra" ? "보강계획" : "수업계획";
+    const showNoteLine = notesEnabled && (planNote || noteEditing);
+    const showNoteInlinePencil = notesEnabled && !planNote && !noteEditing;
     return React.createElement(
         "div",
         { className: "px-4 sm:px-5 py-3", style: { borderBottom: isLast ? "none" : `1px solid ${LINE}` } },
@@ -1321,7 +1353,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, setStatus, save
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, s.class || "반 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`)
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
-            showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: "보강계획 추가" }, "📝"),
+            showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: `${noteLabel} 추가` }, "📝"),
             React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
             session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "목록에서 제거" }, "✕")
         ),
@@ -1330,18 +1362,19 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, setStatus, save
         showNoteLine && (noteEditing
             ? React.createElement(ExtraNoteField, {
                 initialValue: planNote,
-                onSave: async (val) => { await saveExtraNote(s.id, val); setNoteEditing(false); },
+                placeholder: `${noteLabel} 입력 (예: 3단원 인수분해 복습)`,
+                onSave: async (val) => { await saveNote(s.id, val); setNoteEditing(false); },
                 onCancel: () => setNoteEditing(false),
             })
             : React.createElement(
                 "div",
                 { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
                 React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "2px 7px" } }, planNote),
-                React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: "보강계획 수정" }, "📝")
+                React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: `${noteLabel} 수정` }, "📝")
             ))
     );
 }
-function ExtraNoteField({ initialValue, onSave, onCancel }) {
+function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
     const [value, setValue] = useState(initialValue);
     const [saving, setSaving] = useState(false);
     const save = async () => {
@@ -1357,7 +1390,7 @@ function ExtraNoteField({ initialValue, onSave, onCancel }) {
         "div",
         { className: "mt-2 flex gap-2 flex-wrap" },
         React.createElement("input", { type: "text", value: value, onChange: (e) => setValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
-                save(); }, placeholder: "\uBCF4\uAC15\uACC4\uD68D \uC785\uB825 (\uC608: 3\uB2E8\uC6D0 \uC778\uC218\uBD84\uD574 \uBCF5\uC2B5)", className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${PURPLE}`, background: PURPLE_SOFT, color: INK } }),
+                save(); }, placeholder: placeholder || "\uBCF4\uAC15\uACC4\uD68D \uC785\uB825 (\uC608: 3\uB2E8\uC6D0 \uC778\uC218\uBD84\uD574 \uBCF5\uC2B5)", className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${PURPLE}`, background: PURPLE_SOFT, color: INK } }),
         React.createElement("button", { onClick: save, disabled: saving, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
         onCancel && React.createElement("button", { onClick: onCancel, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
     );
