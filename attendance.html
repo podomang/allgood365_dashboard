@@ -1051,7 +1051,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
                 session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "\uBAA9\uB85D\uC5D0\uC11C \uC81C\uAC70" }, "\u2715")
             ),
             st === "\uC77C\uC815\uBCC0\uACBD" && React.createElement(ScheduleChangeBlock, { key: `${selectedDate}-${session}-${s.id}-sc`, targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note) }),
-            st && st !== "출석" && st !== "\uC77C\uC815\uBCC0\uACBD" && React.createElement(ReasonField, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })
+            st && st !== "출석" && st !== "\uC77C\uC815\uBCC0\uACBD" && React.createElement(ReasonBlock, { key: `${selectedDate}-${session}-${s.id}-${st}`, status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) })
         );
     };
     let listBody;
@@ -1088,12 +1088,44 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail }) {
     return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
-function ReasonField({ status, initialValue, onSave }) {
+// 결석/지각/조퇴 사유: 값이 있으면 평소엔 배지로 접혀있고, 연필을 눌러야 편집창이 열림
+function ReasonBlock({ status, initialValue, onSave }) {
+    const [editing, setEditing] = useState(!initialValue);
+    if (!editing) {
+        return React.createElement(
+            "div",
+            { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: STATUS[status].soft, color: STATUS[status].color, borderRadius: 5, padding: "2px 7px" } }, initialValue),
+            React.createElement("button", { onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color: STATUS[status].color }, title: `${status} \uC0AC\uC720 \uC218\uC815` }, "\u270E")
+        );
+    }
+    return React.createElement(ReasonField, {
+        status: status, initialValue: initialValue,
+        onSave: async (val) => { await onSave(val); setEditing(false); },
+        onCancel: initialValue ? () => setEditing(false) : null,
+    });
+}
+function ReasonField({ status, initialValue, onSave, onCancel }) {
     const [value, setValue] = useState(initialValue);
+    const [saving, setSaving] = useState(false);
     const placeholder = `${status} \uC0AC\uC720 \uC785\uB825 (\uC120\uD0DD)`;
-    return (React.createElement("input", { type: "text", value: value, onChange: (e) => setValue(e.target.value), onBlur: () => { if (value !== initialValue)
-            onSave(value); }, onKeyDown: (e) => { if (e.key === "Enter")
-            e.target.blur(); }, placeholder: placeholder, className: "w-full mt-2 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS[status].color}`, background: STATUS[status].soft, color: INK } }));
+    const save = async () => {
+        setSaving(true);
+        try {
+            await onSave(value);
+        }
+        finally {
+            setSaving(false);
+        }
+    };
+    return React.createElement(
+        "div",
+        { className: "mt-2 flex gap-2 flex-wrap" },
+        React.createElement("input", { type: "text", value: value, onChange: (e) => setValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                save(); }, placeholder: placeholder, className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS[status].color}`, background: STATUS[status].soft, color: INK } }),
+        React.createElement("button", { onClick: save, disabled: saving, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: STATUS[status].color, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
+        onCancel && React.createElement("button", { onClick: onCancel, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
+    );
 }
 // 일정변경: 목적지 날짜/시간 + 메모. 저장하면 그 날짜의 보강 명단에 자동 등록됨
 // 일정변경 배지 + 연필(수정) 버튼. 값이 이미 있으면 평소엔 접혀있고, 연필을 눌러야 편집창이 열림
