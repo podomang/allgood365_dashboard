@@ -155,6 +155,34 @@ function fmt(d) {
     return `${y}-${m}-${day}`;
 }
 function todayStr() { return fmt(new Date()); }
+function addDays(dateStr, delta) {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    return fmt(d);
+}
+// 이력 리스트 중, 주어진 날짜에 유효했던 구간을 찾는다. 없으면 null.
+// (호출 쪽에서 정렬해서 넘겨준다는 가정에 기대지 않고, 여기서 한 번 더 오름차순 정렬해서 안전하게 처리한다.)
+function resolveHistoryAsOf(historyList, dateStr) {
+    if (!historyList || historyList.length === 0)
+        return null;
+    const sorted = historyList.slice().sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
+    let found = null;
+    for (const h of sorted) {
+        if (h.effectiveFrom <= dateStr)
+            found = h;
+        else
+            break;
+    }
+    return found;
+}
+// 학생 객체(s)에 특정 날짜 기준 이력 값을 덮어씌운다. 해당 날짜의 이력이 없으면(예: 이력 도입 전
+// 데이터이거나 기록이 아직 없는 학생) 학생의 현재 값을 그대로 사용한다.
+function applyHistoryAsOf(s, historyList, dateStr) {
+    const h = resolveHistoryAsOf(historyList, dateStr);
+    if (!h)
+        return s;
+    return { ...s, school: h.school, grade: h.grade, class: h.class, regularTime: h.regularTime, clinic: h.clinic, clinicTime: h.clinicTime, clinicDays: h.clinicDays, days: h.days };
+}
 function korWeekdayOf(dateStr) {
     return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
@@ -223,17 +251,75 @@ async function upsertStudent(form) {
         const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", form.id);
         if (error)
             throw error;
+        return form.id;
     }
     else {
-        const { error } = await supabaseClient.from("attn_students").insert(payload);
+        const { data, error } = await supabaseClient.from("attn_students").insert(payload).select("id").single();
         if (error)
             throw error;
+        return data.id;
     }
 }
 async function deleteStudentRow(id) {
     const { error } = await supabaseClient.from("attn_students").delete().eq("id", id);
     if (error)
         throw error;
+}
+// ---------- 학생 정보 변경 이력(타임라인) ----------
+// attn_student_history: 학생의 학교/학년/반/시간/클리닉 여부 등이 언제부터 언제까지
+// 어떤 값이었는지 구간(effective_from ~ effective_to)으로 기록해두는 테이블.
+// effective_to가 null이면 "아직도 유효한 가장 최근 정보"라는 뜻.
+function mapStudentHistory(row) {
+    return {
+        id: row.id, studentId: row.student_id, effectiveFrom: row.effective_from, effectiveTo: row.effective_to,
+        school: row.school || "", grade: row.grade || "", class: row.class || "",
+        regularTime: row.regular_time || "", clinic: row.clinic !== false,
+        clinicTime: row.clinic_time || "", clinicDays: row.clinic_days || [], days: row.days || [],
+    };
+}
+// 출석체크 화면에서 과거/미래 날짜를 정확히 표시하기 위해 전체 학생의 이력을 한 번에 불러온다.
+async function fetchAllStudentHistory() {
+    const { data, error } = await supabaseClient.from("attn_student_history").select("*").order("effective_from");
+    if (error)
+        throw error;
+    return data.map(mapStudentHistory);
+}
+// 학생관리의 "이력보기"에서 한 학생의 타임라인만 불러올 때 사용.
+async function fetchStudentHistoryRows(studentId) {
+    const { data, error } = await supabaseClient.from("attn_student_history").select("*").eq("student_id", studentId).order("effective_from");
+    if (error)
+        throw error;
+    return data.map(mapStudentHistory);
+}
+// 학생 정보를 수정할 때 호출. effectiveFrom(적용 시작일) 기준으로 이력 타임라인을 다시 계산해서 저장한다.
+// 같은 날짜에 이미 이력이 있으면 그 값을 새 값으로 덮어쓰고, 나머지 구간들의 종료일도 순서에 맞게 재정렬한다.
+// (오늘부터 적용은 물론, 미래 날짜 예약이나 과거 날짜 정정도 모두 이 로직 하나로 처리된다.)
+async function saveHistorySnapshot(studentId, effectiveFrom, snapshot) {
+    const existing = await fetchStudentHistoryRows(studentId);
+    const withoutSameDate = existing.filter((r) => r.effectiveFrom !== effectiveFrom);
+    const newRow = { effectiveFrom, effectiveTo: null, ...snapshot, isNew: true };
+    const merged = [...withoutSameDate.map((r) => ({ ...r, isNew: false })), newRow]
+        .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
+    for (let i = 0; i < merged.length; i++) {
+        merged[i].effectiveTo = i === merged.length - 1 ? null : addDays(merged[i + 1].effectiveFrom, -1);
+    }
+    for (const row of merged) {
+        const payload = {
+            effective_to: row.effectiveTo, school: row.school, grade: row.grade, class: row.class,
+            regular_time: row.regularTime, clinic: row.clinic, clinic_time: row.clinicTime,
+            clinic_days: row.clinicDays, days: row.days,
+        };
+        if (row.isNew) {
+            const { error } = await supabaseClient.from("attn_student_history").insert({ student_id: studentId, effective_from: row.effectiveFrom, ...payload });
+            if (error)
+                throw error;
+        }
+        else {
+            const { error } = await supabaseClient.from("attn_student_history").update(payload).eq("id", row.id);
+            if (error)
+                throw error;
+        }
+    }
 }
 async function fetchEventsForMonth(monthDate) {
     const year = monthDate.getFullYear(), month = monthDate.getMonth();
@@ -934,6 +1020,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [loading, setLoading] = useState(true);
     const [addQuery, setAddQuery] = useState("");
     const [showAddPicker, setShowAddPicker] = useState(false);
+    const [history, setHistory] = useState([]);
     const weekday = korWeekdayOf(selectedDate);
     const load = async () => {
         setLoading(true);
@@ -947,6 +1034,31 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         }
         setLoading(false);
     };
+    // 학생 정보 변경 이력: 반이동/시간변경 등이 있어도 과거 날짜를 조회하면 그 당시 정보가 정확히
+    // 보이도록, 전체 이력을 한 번 불러와두고 선택된 날짜에 맞는 값으로 매 번 다시 계산한다.
+    const loadHistory = async () => {
+        try {
+            setHistory(await fetchAllStudentHistory());
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { loadHistory(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_student_history_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_student_history" }, () => loadHistory())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const historyByStudent = useMemo(() => {
+        const map = {};
+        history.forEach((h) => { (map[h.studentId] = map[h.studentId] || []).push(h); });
+        return map;
+    }, [history]);
+    // selectedDate 기준으로 각 학생의 학교/학년/반/시간/클리닉 정보를 그 시점 이력으로 치환한 목록.
+    // 아래 명단 필터링·그룹핑·화면 표시가 전부 이 목록을 사용해야 과거 날짜가 정확히 보인다.
+    const resolvedStudents = useMemo(() => students.map((s) => applyHistoryAsOf(s, historyByStudent[s.id], selectedDate)), [students, historyByStudent, selectedDate]);
     const loadQuiet = async () => {
         try {
             const [att, extra, notes] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate)]);
@@ -970,12 +1082,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
     const roster = session === "extra"
-        ? students.filter((s) => Object.prototype.hasOwnProperty.call(extraMeta, s.id)).slice().sort((a, b) => {
+        ? resolvedStudents.filter((s) => Object.prototype.hasOwnProperty.call(extraMeta, s.id)).slice().sort((a, b) => {
             const ta = (extraMeta[a.id] && extraMeta[a.id].time) || "99:99";
             const tb = (extraMeta[b.id] && extraMeta[b.id].time) || "99:99";
             return ta.localeCompare(tb);
         })
-        : students.filter((s) => {
+        : resolvedStudents.filter((s) => {
             if (s.enrollDate && selectedDate < s.enrollDate) return false;
             if (session === "clinic") {
                 if (!s.clinic) return false;
@@ -1150,7 +1262,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     let addPicker = null;
     if (session === "extra") {
         const q = addQuery.trim();
-        const candidates = q === "" ? [] : students.filter((s) => !Object.prototype.hasOwnProperty.call(extraMeta, s.id) && s.name.includes(q)).slice(0, 8);
+        const candidates = q === "" ? [] : resolvedStudents.filter((s) => !Object.prototype.hasOwnProperty.call(extraMeta, s.id) && s.name.includes(q)).slice(0, 8);
         addPicker = React.createElement(
             "div",
             { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -1408,7 +1520,21 @@ function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
 }
 // ---------- Student manager ----------
 function emptyForm() {
-    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr() };
+    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr(), effectiveDate: todayStr() };
+}
+// 이력 비교에 쓰이는 항목(학교/학년/반/시간/클리닉 관련)만 뽑아낸다. 연락처·메모는 이력 대상이 아니다.
+function historyRelevantFields(f) {
+    return {
+        school: f.school || "", grade: f.grade || "",
+        class: [f.courseLevel, (f.courseName || "").trim()].filter(Boolean).join(" "),
+        regularTime: f.regularTime || "", clinic: f.clinic !== false,
+        clinicTime: f.clinicTime || "", clinicDays: (f.clinicDays || []).slice().sort(), days: (f.days || []).slice().sort(),
+    };
+}
+function historyFieldsEqual(a, b) {
+    return a.school === b.school && a.grade === b.grade && a.class === b.class && a.regularTime === b.regularTime
+        && a.clinic === b.clinic && a.clinicTime === b.clinicTime
+        && JSON.stringify(a.clinicDays) === JSON.stringify(b.clinicDays) && JSON.stringify(a.days) === JSON.stringify(b.days);
 }
 function parseClassString(classStr) {
     const str = (classStr || "").trim();
@@ -1420,8 +1546,12 @@ function StudentManager({ onChanged }) {
     const [students, setStudents] = useState([]);
     const [loaded, setLoaded] = useState(false);
     const [form, setForm] = useState(emptyForm());
+    const [baseline, setBaseline] = useState(null); // 편집 시작 시점의 이력 비교용 원본 값(school/grade/class/시간 등)
     const [editTarget, setEditTarget] = useState(null); // null | "new" | studentId
     const [saving, setSaving] = useState(false);
+    const [historyTarget, setHistoryTarget] = useState(null); // 🔍 눌러서 이력을 보고 있는 학생 id
+    const [historyRows, setHistoryRows] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const reload = async () => {
         try {
             setStudents(await fetchStudents());
@@ -1438,12 +1568,17 @@ function StudentManager({ onChanged }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    const openNew = () => { setForm(emptyForm()); setEditTarget("new"); };
+    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); };
     const openEdit = (s) => {
-        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "" });
+        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", effectiveDate: todayStr() });
+        setBaseline({
+            school: s.school || "", grade: s.grade || "", class: s.class || "",
+            regularTime: s.regularTime || "", clinic: s.clinic !== false, clinicTime: s.clinicTime || "",
+            clinicDays: (s.clinicDays || []).slice().sort(), days: (s.days || []).slice().sort(),
+        });
         setEditTarget(s.id);
     };
-    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); };
+    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); };
     const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
     const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
     const save = async () => {
@@ -1451,7 +1586,16 @@ function StudentManager({ onChanged }) {
         setSaving(true);
         try {
             const composedClass = [form.courseLevel, form.courseName.trim()].filter(Boolean).join(" ");
-            await upsertStudent({ ...form, class: composedClass });
+            const isNewStudent = !form.id;
+            const newFields = historyRelevantFields(form);
+            const studentId = await upsertStudent({ ...form, class: composedClass });
+            if (isNewStudent) {
+                // 새 학생은 등록일부터 이 정보였다고 첫 이력을 만들어둔다.
+                await saveHistorySnapshot(studentId, form.enrollDate || todayStr(), newFields);
+            } else if (baseline && !historyFieldsEqual(baseline, newFields)) {
+                // 반/학교/학년/시간/클리닉 관련 정보가 실제로 바뀐 경우에만 이력을 새로 남긴다.
+                await saveHistorySnapshot(studentId, form.effectiveDate || todayStr(), newFields);
+            }
             await reload();
             closeForm();
         } catch (e) {
@@ -1467,6 +1611,18 @@ function StudentManager({ onChanged }) {
         } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
+    };
+    const toggleHistory = async (id) => {
+        if (historyTarget === id) { setHistoryTarget(null); return; }
+        setHistoryTarget(id);
+        setHistoryLoading(true);
+        try {
+            setHistoryRows(await fetchStudentHistoryRows(id));
+        } catch (e) {
+            console.error(e);
+            setHistoryRows([]);
+        }
+        setHistoryLoading(false);
     };
     if (!loaded) {
         return React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
@@ -1520,6 +1676,13 @@ function StudentManager({ onChanged }) {
                 React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB4F1\uB85D\uC77C"),
                 React.createElement("input", { type: "date", value: form.enrollDate, onChange: (e) => setForm({ ...form, enrollDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
                 React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uC774 \uB0A0\uC9DC \uC774\uC804 \uCD9C\uC11D\uBD80\uC5D0\uB294 \uD45C\uC2DC\uB418\uC9C0 \uC54A\uC544\uC694.")
+            ),
+            form.id && React.createElement(
+                "div",
+                { style: { background: SKY_SOFT, borderRadius: 10, padding: "8px 10px" } },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SKY } }, "\uBC18/\uD559\uAD50/\uD559\uB144/\uC2DC\uAC04 \uBCC0\uACBD \uC801\uC6A9 \uC2DC\uC791\uC77C"),
+                React.createElement("input", { type: "date", value: form.effectiveDate, onChange: (e) => setForm({ ...form, effectiveDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" } }),
+                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uBC18/\uD559\uAD50/\uD559\uB144/\uC2DC\uAC04/\uD074\uB9AC\uB2C9\uC5EC\uBD80\uAC00 \uBC14\uB014 \uACBD\uC6B0\uC5D0\uB9CC \uC0AC\uC6A9\uB418\uC5B4\uC694. \uC624\uB298\uBD80\uD130\uBA74 \uC624\uB298 \uB0A0\uC9DC \uADF8\uB300\uB85C, \uBBF8\uB9AC \uC608\uC57D\uD558\uB824\uBA74 \uBBF8\uB798 \uB0A0\uC9DC\uB97C, \uC9C0\uB09C \uAE30\uB85D\uC744 \uC815\uC815\uD558\uB824\uBA74 \uACFC\uAC70 \uB0A0\uC9DC\uB97C \uC120\uD0DD\uD558\uC138\uC694. \uC9C0\uB09C \uCD9C\uC11D\uAE30\uB85D\uC740 \uADF8\uB300\uB85C \uB0A8\uACE0, \uC774 \uB0A0\uC9DC\uBD80\uD130\uC758 \uBA85\uB2E8\uC5D0\uB9CC \uC801\uC6A9\uB429\uB2C8\uB2E4.")
             )
         ),
         React.createElement(
@@ -1601,9 +1764,29 @@ function StudentManager({ onChanged }) {
         React.createElement(
             "div",
             { className: "flex items-center gap-1 flex-shrink-0" },
+            React.createElement("button", { onClick: () => toggleHistory(s.id), className: "p-2 rounded-lg", style: { background: historyTarget === s.id ? SKY_SOFT : PAPER, color: SKY }, title: "\uBCC0\uACBD \uC774\uB825 \uBCF4\uAE30" }, "\uD83D\uDD0D"),
             React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
             React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
         )
+    );
+    const renderHistoryPanel = () => React.createElement(
+        "div",
+        { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${SKY}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: SKY, marginBottom: 10 } }, "\uBCC0\uACBD \uC774\uB825"),
+        historyLoading
+            ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")
+            : historyRows.length === 0
+                ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "\uC544\uC9C1 \uAE30\uB85D\uB41C \uC774\uB825\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
+                : React.createElement(
+                    "div",
+                    { className: "flex flex-col gap-2" },
+                    historyRows.slice().reverse().map((h) => React.createElement(
+                        "div",
+                        { key: h.id, className: "rounded-lg px-3 py-2", style: { background: SKY_SOFT } },
+                        React.createElement("div", { style: { fontSize: 11.5, fontWeight: 800, color: SKY } }, h.effectiveFrom, " ~ ", h.effectiveTo || "\uD604\uC7AC"),
+                        React.createElement("div", { style: { fontSize: 12, color: INK, marginTop: 2 } }, [h.school, h.grade ? `${h.grade}\uD559\uB144` : "", h.class, h.regularTime, h.clinic ? (h.clinicDays.length ? `\uD074\uB9AC\uB2C9 ${h.clinicDays.join("\u00B7")}${h.clinicTime ? " " + h.clinicTime : ""}` : "\uD074\uB9AC\uB2C9") : "\uD074\uB9AC\uB2C9 \uC81C\uC678"].filter(Boolean).join(" \u00B7 "))
+                    ))
+                )
     );
     const listBody = students.length === 0
         ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
@@ -1618,6 +1801,7 @@ function StudentManager({ onChanged }) {
                     { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
                     renderStudentRow(s)
                 ),
+                historyTarget === s.id && renderHistoryPanel(),
                 editTarget === s.id && studentFormEl
             ))
         );
