@@ -95,18 +95,22 @@ function groupByTime(list, timeField) {
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
 function schoolLevelOf(s) {
+    // 실제 다니는 학교명이 학년 단계의 진짜 기준이라 항상 먼저 확인한다. "수강과정"(중등과정/고등과정)은
+    // 선행학습 반 이름일 뿐이라 실제 학교와 다를 수 있다 (예: 초등학교 6학년이 "중등과정 예비중" 반을
+    // 듣는 경우 - courseLevel을 먼저 보면 "중6학년"이라는 있을 수 없는 조합이 나와버린다).
+    const school = s.school || "";
+    if (school.includes("초등") || /초$/.test(school))
+        return "초";
+    if (school.includes("중학") || /중$/.test(school))
+        return "중";
+    if (school.includes("고등") || /고$/.test(school))
+        return "고";
+    // 학교명이 비어있거나 위 패턴과 안 맞을 때만 수강과정으로 대체 추정한다.
     const level = parseClassString(s.class).courseLevel;
     if (level === "중등과정")
-        return "\uC911";
+        return "중";
     if (level === "고등과정")
-        return "\uACE0";
-    const school = s.school || "";
-    if (school.includes("\uCD08\uB4F1"))
-        return "\uCD08";
-    if (school.includes("\uC911\uD559") || /\uC911$/.test(school))
-        return "\uC911";
-    if (school.includes("\uACE0\uB4F1") || /\uACE0$/.test(school))
-        return "\uACE0";
+        return "고";
     return "";
 }
 function groupByGrade(list) {
