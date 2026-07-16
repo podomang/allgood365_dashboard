@@ -387,6 +387,104 @@ async function deleteWorkNoticeRow(id) {
     if (error)
         throw error;
 }
+// ---------- 업무공지 읽음확인 ----------
+async function fetchNoticeReads(noticeIds) {
+    if (!noticeIds || !noticeIds.length) return [];
+    const { data, error } = await supabaseClient.from("attn_work_notice_reads").select("*").in("notice_id", noticeIds);
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, noticeId: r.notice_id, assistantId: r.assistant_id, readAt: r.read_at }));
+}
+async function markNoticeRead(noticeId, assistantId) {
+    const { error } = await supabaseClient.from("attn_work_notice_reads").upsert({ notice_id: noticeId, assistant_id: assistantId }, { onConflict: "notice_id,assistant_id" });
+    if (error) throw error;
+}
+// ---------- 연간 학사일정 (공휴일/명절/수능/학원휴무/학교일정) ----------
+async function fetchAcademicEventsForMonth(monthDate) {
+    const year = monthDate.getFullYear(), month = monthDate.getMonth();
+    const start = fmt(new Date(year, month, 1));
+    const end = fmt(new Date(year, month + 1, 0));
+    const { data, error } = await supabaseClient.from("attn_academic_events").select("*").gte("event_date", start).lte("event_date", end).order("event_date");
+    if (error) throw error;
+    return data.map(mapAcademicEvent);
+}
+async function fetchAllAcademicEvents() {
+    const { data, error } = await supabaseClient.from("attn_academic_events").select("*").order("event_date");
+    if (error) throw error;
+    return data.map(mapAcademicEvent);
+}
+function mapAcademicEvent(r) {
+    return { id: r.id, date: r.event_date, endDate: r.end_date, title: r.title, type: r.event_type, scope: r.scope, school: r.school, source: r.source };
+}
+async function addAcademicEventRow(payload) {
+    const { error } = await supabaseClient.from("attn_academic_events").insert({
+        event_date: payload.date, end_date: payload.endDate || null, title: payload.title,
+        event_type: payload.type, scope: payload.scope, school: payload.scope === "학교" ? payload.school : null,
+    });
+    if (error) throw error;
+}
+async function deleteAcademicEventRow(id) {
+    const { error } = await supabaseClient.from("attn_academic_events").delete().eq("id", id);
+    if (error) throw error;
+}
+const ACADEMIC_EVENT_COLORS = {
+    공휴일: RED, 명절: RED, 수능: PURPLE, 학원휴무: SKY, 학교일정: AMBER, 기타: SUBINK,
+};
+// ---------- 조교명단 ----------
+async function fetchAssistants() {
+    const { data, error } = await supabaseClient.from("attn_assistants").select("*").order("name");
+    if (error) throw error;
+    return data.map(mapAssistant);
+}
+function mapAssistant(r) {
+    return { id: r.id, name: r.name, subject: r.subject || "", phone: r.phone || "", status: r.status || "재직", email: r.email, memo: r.memo || "" };
+}
+async function addAssistantRow(payload) {
+    const { error } = await supabaseClient.from("attn_assistants").insert({ name: payload.name, subject: payload.subject, phone: payload.phone, status: payload.status, email: payload.email, memo: payload.memo });
+    if (error) throw error;
+}
+async function updateAssistantRow(id, payload) {
+    const { error } = await supabaseClient.from("attn_assistants").update({ name: payload.name, subject: payload.subject, phone: payload.phone, status: payload.status, email: payload.email, memo: payload.memo }).eq("id", id);
+    if (error) throw error;
+}
+async function deleteAssistantRow(id) {
+    const { error } = await supabaseClient.from("attn_assistants").delete().eq("id", id);
+    if (error) throw error;
+}
+// ---------- 근무일정 ----------
+async function fetchWorkSchedules() {
+    const { data, error } = await supabaseClient.from("attn_work_schedules").select("*");
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, assistantId: r.assistant_id, day: r.day_of_week, start: (r.start_time || "").slice(0, 5), end: (r.end_time || "").slice(0, 5), note: r.note || "" }));
+}
+async function addWorkScheduleRow(assistantId, day, start, end, note) {
+    const { error } = await supabaseClient.from("attn_work_schedules").insert({ assistant_id: assistantId, day_of_week: day, start_time: start, end_time: end, note: note || "" });
+    if (error) throw error;
+}
+async function deleteWorkScheduleRow(id) {
+    const { error } = await supabaseClient.from("attn_work_schedules").delete().eq("id", id);
+    if (error) throw error;
+}
+// ---------- 출퇴근기록 ----------
+async function fetchAssistantAttendance(startDate, endDate) {
+    let q = supabaseClient.from("attn_assistant_attendance").select("*").order("work_date", { ascending: false });
+    if (startDate) q = q.gte("work_date", startDate);
+    if (endDate) q = q.lte("work_date", endDate);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, assistantId: r.assistant_id, date: r.work_date, checkIn: r.check_in, checkOut: r.check_out }));
+}
+async function checkInToday(assistantId) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").insert({ assistant_id: assistantId, work_date: todayStr(), check_in: new Date().toISOString() });
+    if (error) throw error;
+}
+async function checkOutToday(rowId) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").update({ check_out: new Date().toISOString() }).eq("id", rowId);
+    if (error) throw error;
+}
+async function correctAttendanceRow(id, checkIn, checkOut) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").update({ check_in: checkIn, check_out: checkOut }).eq("id", id);
+    if (error) throw error;
+}
 async function fetchAttendanceForDate(date) {
     const { data, error } = await supabaseClient.from("attn_attendance").select("*").eq("attn_date", date);
     if (error)
@@ -527,8 +625,8 @@ function LoginScreen() {
 // ============================================================
 const TAB_DEFS = [
     { key: "dashboard", label: "대시보드", icon: "\uD83C\uDFE0" },
-    { key: "notices", label: "업무공지", icon: "\uD83D\uDCCB" },
     { key: "attendance", label: "출석체크", icon: "\u2705" },
+    { key: "assistants", label: "스태프룸", icon: "\uD83E\uDDD1\u200D\uD83C\uDFEB" },
     { key: "students", label: "학생관리", icon: "\uD83D\uDC65", directorOnly: true },
 ];
 function MainApp({ session }) {
@@ -538,6 +636,7 @@ function MainApp({ session }) {
     const [tab, setTab] = useState("attendance");
     const [students, setStudents] = useState([]);
     const [studentsLoaded, setStudentsLoaded] = useState(false);
+    const [assistants, setAssistants] = useState([]);
     const [selectedDate, setSelectedDate] = useState(todayStr());
     const [month, setMonth] = useState(new Date());
     const [attSession, setAttSession] = useState("regular");
@@ -550,7 +649,16 @@ function MainApp({ session }) {
             console.error(e);
         }
     };
+    const reloadAssistants = async () => {
+        try {
+            setAssistants(await fetchAssistants());
+        }
+        catch (e) {
+            console.error(e);
+        }
+    };
     useEffect(() => { reloadStudents().then(() => setStudentsLoaded(true)); }, []);
+    useEffect(() => { reloadAssistants(); }, []);
     useEffect(() => { if (tab === "students" && !isDirector)
         setTab("attendance"); }, [tab, isDirector]);
     // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
@@ -563,6 +671,17 @@ function MainApp({ session }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    // realtime: 조교명단이 바뀌면 자동 반영 (내 로그인 계정 매칭에도 영향)
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_assistants_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistants" }, () => {
+            reloadAssistants();
+        })
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const myAssistant = useMemo(() => assistants.find((a) => a.email === session.user.email) || null, [assistants, session.user.email]);
     const sidebar = React.createElement(
         "aside",
         { className: "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 z-20", style: { background: "#fff", borderRight: `1px solid ${LINE}` } },
@@ -619,7 +738,7 @@ function MainApp({ session }) {
             null,
             tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector }),
-            tab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: session.user.email }),
+            tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents })
         );
     return React.createElement(
@@ -640,8 +759,10 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     const cells = useMemo(() => buildMonthGrid(month), [month]);
     const [events, setEvents] = useState({});
     const [notices, setNotices] = useState([]);
+    const [academicEvents, setAcademicEvents] = useState([]);
     const [newEvent, setNewEvent] = useState("");
     const [newNotice, setNewNotice] = useState("");
+    const [showAcademicManager, setShowAcademicManager] = useState(false);
     const today = todayStr();
     const loadEvents = async () => { try {
         setEvents(await fetchEventsForMonth(month));
@@ -655,18 +776,43 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     catch (e) {
         console.error(e);
     } };
+    const loadAcademicEvents = async () => { try {
+        setAcademicEvents(await fetchAcademicEventsForMonth(month));
+    }
+    catch (e) {
+        console.error(e);
+    } };
     useEffect(() => { loadEvents(); }, [month]);
     useEffect(() => { loadNotices(); }, []);
-    // realtime: 다른 사람이 일정/공지를 추가·삭제하면 자동 반영
+    useEffect(() => { loadAcademicEvents(); }, [month]);
+    // realtime: 다른 사람이 일정/공지/학사일정을 추가·삭제하면 자동 반영
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_dashboard_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_events" }, () => loadEvents())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_notices" }, () => loadNotices())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events" }, () => loadAcademicEvents())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [month]);
+    // 연간 학사일정(공휴일/명절/수능/학원휴무/학교일정)을 날짜별로 펼쳐서 캘린더 마커로 사용
+    // (attn_academic_events는 앱 전체 캘린더가 공유하는 공용 소스)
+    const acadByDate = useMemo(() => {
+        const m = {};
+        academicEvents.forEach((ev) => {
+            const start = ev.date, end = ev.endDate || ev.date;
+            let cur = start;
+            let guard = 0;
+            while (cur <= end && guard < 60) {
+                (m[cur] = m[cur] || []).push(ev);
+                cur = addDays(cur, 1);
+                guard++;
+            }
+        });
+        return m;
+    }, [academicEvents]);
     const selEvents = events[selectedDate] || [];
+    const selAcadEvents = acadByDate[selectedDate] || [];
     const addEvent = async () => {
         if (!newEvent.trim())
             return;
@@ -692,6 +838,10 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u25C0"),
                     React.createElement("div", { style: { fontWeight: 800, fontSize: 16 } }, monthLabel(month)),
                     React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u25B6")),
+                React.createElement("div", { className: "flex flex-wrap gap-x-3 gap-y-1 px-5 pb-2", style: { borderBottom: `1px solid ${LINE}` } },
+                    Object.keys(ACADEMIC_EVENT_COLORS).map((k) => React.createElement("div", { key: k, className: "flex items-center gap-1" },
+                        React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[k], display: "inline-block" } }),
+                        React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, k)))),
                 React.createElement("div", { className: "grid grid-cols-7 px-3 pt-3", style: { gap: 4 } }, ["일", "월", "화", "수", "목", "금", "토"].map((w, i) => (React.createElement("div", { key: w, className: "text-center text-xs font-bold pb-2", style: { color: i === 0 ? RED : i === 6 ? NAVY : SUBINK } }, w)))),
                 React.createElement("div", { className: "grid grid-cols-7 px-3 pb-4", style: { gap: 4 } }, cells.map((d, i) => {
                     if (!d)
@@ -699,13 +849,15 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     const ds = fmt(d);
                     const isToday = ds === today, isSel = ds === selectedDate;
                     const evs = events[ds] || [];
+                    const acadEvs = acadByDate[ds] || [];
                     return (React.createElement("button", { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
                         React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
                         React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" },
+                            acadEvs.slice(0, 1).map((e) => (React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
                             evs.slice(0, 2).map((e) => (React.createElement("span", { key: e.id, style: { fontSize: 9.5, background: NAVY, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
-                            evs.length > 2 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
+                            (evs.length + acadEvs.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
                                 "+",
-                                evs.length - 2,
+                                (evs.length + acadEvs.length) - 3,
                                 "\uAC1C \uB354\uBCF4\uAE30"))));
                 }))),
             React.createElement("div", { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
@@ -720,6 +872,11 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                 React.createElement("div", { className: "flex gap-2 mt-4" },
                     React.createElement("input", { value: newEvent, onChange: (e) => setNewEvent(e.target.value), onKeyDown: (e) => e.key === "Enter" && addEvent(), placeholder: "\uC77C\uC815 \uCD94\uAC00 (\uC608: \uC911\uAC04\uACE0\uC0AC)", className: "flex-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
                     React.createElement("button", { onClick: addEvent, className: "px-3 rounded-lg", style: { background: NAVY, color: "#fff" } }, "+")),
+                selAcadEvents.length > 0 && React.createElement("div", { className: "flex flex-col gap-1.5 mt-3" },
+                    selAcadEvents.map((e) => React.createElement("div", { key: "acad" + e.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg", style: { background: (ACADEMIC_EVENT_COLORS[e.type] || SUBINK) + "1a" } },
+                        React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, flexShrink: 0 } }),
+                        React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[e.type] || SUBINK } }, e.title),
+                        e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "(" + e.school + ")")))),
                 React.createElement("div", { className: "mt-3 flex flex-col gap-2" },
                     selEvents.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "10px 0" } }, "\uB4F1\uB85D\uB41C \uC77C\uC815\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."),
                     selEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center justify-between px-3 py-2 rounded-lg", style: { background: NAVY_SOFT } },
@@ -738,13 +895,20 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     React.createElement("div", { className: "flex items-center gap-3 min-w-0" },
                         React.createElement("span", { style: { fontSize: 11, color: "#fff", background: NAVY, borderRadius: 6, padding: "2px 7px", fontWeight: 700, flexShrink: 0 } }, n.date),
                         React.createElement("span", { style: { fontSize: 13.5, fontWeight: 500 } }, n.text)),
-                    isDirector && React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1"))))))));
+                    isDirector && React.createElement("button", { onClick: () => removeNotice(n.id), style: { color: SUBINK, flexShrink: 0 } }, "\uD83D\uDDD1")))))),
+        isDirector && React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2", style: { marginBottom: showAcademicManager ? 14 : 0 } },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "🗓️ 연간 학사일정 관리"),
+                    React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginTop: 1 } }, "공휴일·명절·수능·학원휴무 등 연간 일정을 등록하면 대시보드·업무공지 캘린더에 자동으로 표시됩니다.")),
+                React.createElement("button", { onClick: () => setShowAcademicManager((v) => !v), className: "px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0", style: { background: showAcademicManager ? PAPER : NAVY, color: showAcademicManager ? SUBINK : "#fff" } }, showAcademicManager ? "접기" : "펼치기")),
+            showAcademicManager && React.createElement(AcademicEventsManager, null))));
 }
 // ---------- Work notices (업무공지) ----------
 function emptyWorkNoticeForm(date) {
     return { id: null, title: "", content: "", pinned: false, noticeDate: date || todayStr() };
 }
-function WorkNotices({ isDirector, authorEmail }) {
+function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
     const [notices, setNotices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState(emptyWorkNoticeForm());
@@ -754,26 +918,60 @@ function WorkNotices({ isDirector, authorEmail }) {
     const [selectedDate, setSelectedDate] = useState(todayStr());
     const [subTab, setSubTab] = useState("general");
     const [expandedIds, setExpandedIds] = useState([]);
+    const [reads, setReads] = useState([]);
+    const [academicEvents, setAcademicEvents] = useState([]);
     const toggleExpand = (id) => setExpandedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const cells = useMemo(() => buildMonthGrid(month), [month]);
     const today = todayStr();
     const load = async () => {
         setLoading(true);
         try {
-            setNotices(await fetchWorkNotices());
+            const rows = await fetchWorkNotices();
+            setNotices(rows);
+            setReads(await fetchNoticeReads(rows.map((r) => r.id)));
         } catch (e) {
             console.error(e);
         }
         setLoading(false);
     };
+    const loadAcademicEvents = async () => { try {
+        setAcademicEvents(await fetchAcademicEventsForMonth(month));
+    }
+    catch (e) {
+        console.error(e);
+    } };
     useEffect(() => { load(); }, []);
+    useEffect(() => { loadAcademicEvents(); }, [month]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_work_notices_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notices" }, () => load())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notice_reads" }, () => load())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events" }, () => loadAcademicEvents())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
-    }, []);
+    }, [month]);
+    const activeAssistantCount = useMemo(() => (assistants || []).filter((a) => a.status === "재직").length, [assistants]);
+    const readCountFor = (noticeId) => new Set(reads.filter((r) => r.noticeId === noticeId).map((r) => r.assistantId)).size;
+    const haveIRead = (noticeId) => !!myAssistant && reads.some((r) => r.noticeId === noticeId && r.assistantId === myAssistant.id);
+    const markRead = async (noticeId) => {
+        if (!myAssistant) return;
+        try {
+            await markNoticeRead(noticeId, myAssistant.id);
+            await load();
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    const acadByDate = useMemo(() => {
+        const m = {};
+        academicEvents.forEach((ev) => {
+            const start = ev.date, end = ev.endDate || ev.date;
+            let cur = start, guard = 0;
+            while (cur <= end && guard < 60) { (m[cur] = m[cur] || []).push(ev); cur = addDays(cur, 1); guard++; }
+        });
+        return m;
+    }, [academicEvents]);
     const generalNotices = useMemo(() => notices.filter((n) => n.pinned), [notices]);
     const dateNotices = useMemo(() => notices.filter((n) => !n.pinned), [notices]);
     const byDate = useMemo(() => {
@@ -871,7 +1069,11 @@ function WorkNotices({ isDirector, authorEmail }) {
                 "div",
                 { className: "px-3.5 pb-3.5", style: { borderTop: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { fontSize: 13, color: INK, marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
-                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 8 } }, fmtDateTime(n.createdAt))
+                React.createElement("div", { className: "flex items-center justify-between mt-2" },
+                    React.createElement("div", { style: { fontSize: 10.5, color: SUBINK } }, fmtDateTime(n.createdAt)),
+                    isDirector
+                        ? React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: TEAL, background: TEAL_SOFT, borderRadius: 6, padding: "2px 7px" } }, "\uC77D\uC74C " + readCountFor(n.id) + "/" + activeAssistantCount)
+                        : myAssistant && React.createElement("button", { onClick: () => markRead(n.id), disabled: haveIRead(n.id), className: "text-[10.5px] font-bold rounded-lg", style: { padding: "3px 8px", background: haveIRead(n.id) ? TEAL_SOFT : TEAL, color: haveIRead(n.id) ? TEAL : "#fff" } }, haveIRead(n.id) ? "\uD655\uC778\uD568 \u2713" : "\uC77D\uC74C \uD655\uC778"))
             )
         );
     };
@@ -894,13 +1096,15 @@ function WorkNotices({ isDirector, authorEmail }) {
         const isToday = ds === today;
         const isSel = ds === selectedDate;
         const dayNotices = byDate[ds] || [];
+        const dayAcad = acadByDate[ds] || [];
+        const acadTags = dayAcad.slice(0, 1).map((e) => React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title));
         const tags = dayNotices.slice(0, 2).map((n) => React.createElement("span", { key: n.id, style: { fontSize: 9.5, background: TEAL, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, n.title));
-        const more = dayNotices.length > 2 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } }, "+", dayNotices.length - 2, "\uAC1C \uB354\uBCF4\uAE30");
+        const more = (dayNotices.length + dayAcad.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } }, "+", (dayNotices.length + dayAcad.length) - 3, "\uAC1C \uB354\uBCF4\uAE30");
         return React.createElement(
             "button",
             { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? TEAL_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
             React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
-            React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" }, tags, more)
+            React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" }, acadTags, tags, more)
         );
     });
     const calendarCard = React.createElement(
@@ -969,8 +1173,11 @@ function WorkNotices({ isDirector, authorEmail }) {
         React.createElement("div", { style: { fontSize: 13.5, color: INK, marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
         React.createElement(
             "div",
-            { style: { fontSize: 11, color: SUBINK, marginTop: 10 } },
-            fmtDateTime(n.createdAt)
+            { className: "flex items-center justify-between mt-2.5" },
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, fmtDateTime(n.createdAt)),
+            isDirector
+                ? React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: TEAL, background: TEAL_SOFT, borderRadius: 6, padding: "2px 7px" } }, "\uC77D\uC74C " + readCountFor(n.id) + "/" + activeAssistantCount)
+                : myAssistant && React.createElement("button", { onClick: () => markRead(n.id), disabled: haveIRead(n.id), className: "text-[10.5px] font-bold rounded-lg", style: { padding: "3px 8px", background: haveIRead(n.id) ? TEAL_SOFT : TEAL, color: haveIRead(n.id) ? TEAL : "#fff" } }, haveIRead(n.id) ? "\uD655\uC778\uD568 \u2713" : "\uC77D\uC74C \uD655\uC778")
         )
     );
     let listBody;
@@ -1914,6 +2121,599 @@ function StudentManager({ onChanged }) {
 // ============================================================
 // Root
 // ============================================================
+
+// ============================================================
+// 스태프룸 (Assistant Management)
+// ============================================================
+function labeledInput(label, value, onChange, type) {
+    return React.createElement(
+        "div",
+        null,
+        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
+        React.createElement("input", { type: type || "text", value: value, onChange: (e) => onChange(e.target.value), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+    );
+}
+const ASSISTANT_SUBTABS_DIRECTOR = [
+    { key: "notices", label: "업무공지" },
+    { key: "roster", label: "조교명단" },
+    { key: "schedule", label: "근무일정" },
+    { key: "attendance", label: "출퇴근기록" },
+];
+const ASSISTANT_SUBTABS_STAFF = [
+    { key: "notices", label: "업무공지" },
+    { key: "schedule", label: "내 근무일정" },
+    { key: "attendance", label: "출퇴근" },
+];
+function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssistant, myEmail }) {
+    const subtabs = isDirector ? ASSISTANT_SUBTABS_DIRECTOR : ASSISTANT_SUBTABS_STAFF;
+    const [subTab, setSubTab] = useState(subtabs[0].key);
+    useEffect(() => { if (!subtabs.find((t) => t.key === subTab)) setSubTab(subtabs[0].key); }, [isDirector]);
+    const subTabBar = React.createElement(
+        "div",
+        { className: "flex gap-2 mb-5 flex-wrap" },
+        subtabs.map((t) => React.createElement(
+            "button",
+            {
+                key: t.key,
+                onClick: () => setSubTab(t.key),
+                className: "px-4 py-2 rounded-xl text-sm font-bold",
+                style: subTab === t.key ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` },
+            },
+            t.label
+        ))
+    );
+    return React.createElement(
+        "div",
+        null,
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800, marginBottom: 2 } }, "🧑‍🏫 스태프룸"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, isDirector ? "업무공지·조교명단·근무일정·출퇴근을 관리합니다." : "업무공지를 확인하고 내 근무일정과 출퇴근을 기록합니다."),
+        subTabBar,
+        !isDirector && !myAssistant && React.createElement(
+            "div",
+            { className: "rounded-2xl p-5 mb-5", style: { background: AMBER_SOFT, color: AMBER, fontSize: 13, fontWeight: 600 } },
+            "아직 이 계정(" + myEmail + ")이 조교명단에 등록되지 않았습니다. 원장님께 등록을 요청해주세요."
+        ),
+        subTab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: myEmail, assistants: assistants, myAssistant: myAssistant }),
+        subTab === "roster" && isDirector && React.createElement(AssistantRoster, { assistants: assistants, reloadAssistants: reloadAssistants }),
+        subTab === "schedule" && React.createElement(WorkScheduleManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant }),
+        subTab === "attendance" && React.createElement(AssistantAttendanceManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant })
+    );
+}
+// ---------- 조교명단 ----------
+function emptyAssistantForm() {
+    return { id: null, name: "", subject: "", phone: "", status: "재직", email: "", memo: "" };
+}
+const ASSISTANT_STATUS_COLORS = { 재직: TEAL, 휴직: AMBER, 퇴사: SUBINK };
+function AssistantRoster({ assistants, reloadAssistants }) {
+    const [form, setForm] = useState(emptyAssistantForm());
+    const [showForm, setShowForm] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const openNew = () => { setForm(emptyAssistantForm()); setShowForm(true); };
+    const openEdit = (a) => { setForm({ id: a.id, name: a.name, subject: a.subject, phone: a.phone, status: a.status, email: a.email, memo: a.memo }); setShowForm(true); };
+    const save = async () => {
+        if (!form.name.trim() || !form.email.trim()) { alert("이름과 이메일은 필수입니다."); return; }
+        setSaving(true);
+        try {
+            if (form.id) await updateAssistantRow(form.id, form);
+            else await addAssistantRow(form);
+            await reloadAssistants();
+            setShowForm(false);
+            setForm(emptyAssistantForm());
+        } catch (e) {
+            alert("저장 중 오류가 발생했습니다: " + e.message);
+        }
+        setSaving(false);
+    };
+    const remove = async (id) => {
+        if (!confirm("이 조교를 삭제할까요? 근무일정·출퇴근기록도 함께 삭제됩니다.")) return;
+        try {
+            await deleteAssistantRow(id);
+            await reloadAssistants();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const formCard = showForm && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "조교 정보 수정" : "새 조교 추가"),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+            labeledInput("이름", form.name, (v) => setForm({ ...form, name: v })),
+            labeledInput("담당과목/반", form.subject, (v) => setForm({ ...form, subject: v })),
+            labeledInput("연락처", form.phone, (v) => setForm({ ...form, phone: v })),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "재직상태"),
+                React.createElement(
+                    "select",
+                    { value: form.status, onChange: (e) => setForm({ ...form, status: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } },
+                    ["재직", "휴직", "퇴사"].map((s) => React.createElement("option", { key: s, value: s }, s))
+                )
+            ),
+            React.createElement(
+                "div",
+                { className: "sm:col-span-2" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "로그인 이메일 (조교 본인 계정과 연결됩니다)"),
+                React.createElement("input", { type: "email", value: form.email, onChange: (e) => setForm({ ...form, email: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+            )
+        ),
+        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK, display: "block", marginTop: 10 } }, "메모"),
+        React.createElement("textarea", { value: form.memo, onChange: (e) => setForm({ ...form, memo: e.target.value }), rows: 2, className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyAssistantForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+        )
+    );
+    const cards = assistants.map((a) => React.createElement(
+        "div",
+        { key: a.id, className: "rounded-2xl p-4 flex items-center justify-between gap-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "min-w-0" },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-2" },
+                React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, a.name),
+                React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, borderRadius: 5, padding: "1.5px 6px", background: (ASSISTANT_STATUS_COLORS[a.status] || SUBINK) + "1a", color: ASSISTANT_STATUS_COLORS[a.status] || SUBINK } }, a.status)
+            ),
+            React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, [a.subject, a.phone, a.email].filter(Boolean).join(" · "))
+        ),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-1 flex-shrink-0" },
+            React.createElement("button", { onClick: () => openEdit(a), className: "p-1.5 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎"),
+            React.createElement("button", { onClick: () => remove(a.id), className: "p-1.5 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+        )
+    ));
+    return React.createElement(
+        "div",
+        null,
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between mb-4" },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "조교명단 (" + assistants.length + "명)"),
+            !showForm && React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff" } }, "+ 조교 추가")
+        ),
+        formCard,
+        assistants.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "등록된 조교가 없습니다.")
+            : React.createElement("div", { className: "flex flex-col gap-2" }, cards)
+    );
+}
+// ---------- 근무일정 ----------
+function emptyScheduleForm() {
+    return { assistantId: "", day: "월", start: "14:00", end: "18:00", note: "" };
+}
+function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
+    const [schedules, setSchedules] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [form, setForm] = useState(emptyScheduleForm());
+    const [saving, setSaving] = useState(false);
+    const load = async () => {
+        setLoading(true);
+        try {
+            setSchedules(await fetchWorkSchedules());
+        } catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_work_schedules_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_schedules" }, () => load())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const visibleSchedules = isDirector ? schedules : schedules.filter((s) => myAssistant && s.assistantId === myAssistant.id);
+    const relevantAssistants = isDirector ? assistants : (myAssistant ? [myAssistant] : []);
+    const add = async () => {
+        if (!form.assistantId) { alert("조교를 선택해주세요."); return; }
+        setSaving(true);
+        try {
+            await addWorkScheduleRow(form.assistantId, form.day, form.start, form.end, form.note);
+            setForm({ ...emptyScheduleForm(), assistantId: form.assistantId });
+            await load();
+        } catch (e) {
+            alert("저장 중 오류: " + e.message);
+        }
+        setSaving(false);
+    };
+    const remove = async (id) => {
+        try {
+            await deleteWorkScheduleRow(id);
+            await load();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const addForm = isDirector && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "근무일정 추가"),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-2 sm:grid-cols-5 gap-3" },
+            React.createElement(
+                "select",
+                { value: form.assistantId, onChange: (e) => setForm({ ...form, assistantId: e.target.value }), className: "px-3 py-2 rounded-lg text-sm outline-none col-span-2 sm:col-span-1", style: { border: `1px solid ${LINE}` } },
+                React.createElement("option", { value: "" }, "조교 선택"),
+                assistants.map((a) => React.createElement("option", { key: a.id, value: a.id }, a.name))
+            ),
+            React.createElement(
+                "select",
+                { value: form.day, onChange: (e) => setForm({ ...form, day: e.target.value }), className: "px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } },
+                JS_DAY_TO_KOR.map((d) => React.createElement("option", { key: d, value: d }, d))
+            ),
+            React.createElement("input", { type: "time", value: form.start, onChange: (e) => setForm({ ...form, start: e.target.value }), className: "px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+            React.createElement("input", { type: "time", value: form.end, onChange: (e) => setForm({ ...form, end: e.target.value }), className: "px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+            React.createElement("button", { onClick: add, disabled: saving, className: "px-3 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, "+ 추가")
+        ),
+        React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), placeholder: "메모 (선택)", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-3", style: { border: `1px solid ${LINE}` } })
+    );
+    const grid = React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "overflow-x-auto" },
+            React.createElement(
+                "table",
+                { className: "w-full text-sm", style: { borderCollapse: "collapse" } },
+                React.createElement(
+                    "thead",
+                    null,
+                    React.createElement(
+                        "tr",
+                        null,
+                        React.createElement("th", { className: "text-left px-4 py-3", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 12, minWidth: 90 } }, "조교"),
+                        JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-left px-3 py-3", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 12, minWidth: 108 } }, d))
+                    )
+                ),
+                React.createElement(
+                    "tbody",
+                    null,
+                    relevantAssistants.map((a) => React.createElement(
+                        "tr",
+                        { key: a.id },
+                        React.createElement("td", { className: "px-4 py-3 align-top", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 700 } }, a.name),
+                        JS_DAY_TO_KOR.map((d) => {
+                            const entries = visibleSchedules.filter((s) => s.assistantId === a.id && s.day === d);
+                            return React.createElement(
+                                "td",
+                                { key: d, className: "px-3 py-2 align-top", style: { borderBottom: `1px solid ${LINE}` } },
+                                React.createElement(
+                                    "div",
+                                    { className: "flex flex-col gap-1" },
+                                    entries.length === 0 && React.createElement("span", { style: { fontSize: 11, color: "#c7c9ce" } }, "-"),
+                                    entries.map((s) => React.createElement(
+                                        "div",
+                                        { key: s.id, className: "flex items-center gap-1 rounded-lg px-2 py-1", style: { background: PURPLE_SOFT, fontSize: 11.5 } },
+                                        React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.start + "-" + s.end),
+                                        isDirector && React.createElement("button", { onClick: () => remove(s.id), style: { color: SUBINK, marginLeft: 2 } }, "✕")
+                                    ))
+                                )
+                            );
+                        })
+                    ))
+                )
+            )
+        )
+    );
+    return React.createElement(
+        "div",
+        null,
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, isDirector ? "조교별 근무일정" : "내 근무일정"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다." : "본인 근무일정만 조회할 수 있습니다."),
+        addForm,
+        loading
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+            : (relevantAssistants.length === 0
+                ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.")
+                : grid)
+    );
+}
+// ---------- 출퇴근기록 ----------
+function fmtTime(iso) {
+    if (!iso) return "-";
+    try {
+        return new Date(iso).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+    } catch (e) {
+        return "-";
+    }
+}
+function workedHours(checkIn, checkOut) {
+    if (!checkIn || !checkOut) return "-";
+    const ms = new Date(checkOut) - new Date(checkIn);
+    if (ms <= 0) return "-";
+    const h = Math.floor(ms / 3600000), m = Math.round((ms % 3600000) / 60000);
+    return h + "시간 " + m + "분";
+}
+function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [editingId, setEditingId] = useState(null);
+    const [editIn, setEditIn] = useState("");
+    const [editOut, setEditOut] = useState("");
+    const load = async () => {
+        setLoading(true);
+        try {
+            const start = isDirector ? addDays(todayStr(), -30) : null;
+            setRows(await fetchAssistantAttendance(start, null));
+        } catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, [isDirector]);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_assistant_attendance_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistant_attendance" }, () => load())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, [isDirector]);
+    const nameOf = (id) => (assistants.find((a) => a.id === id) || {}).name || "?";
+    const myToday = myAssistant ? rows.find((r) => r.assistantId === myAssistant.id && r.date === todayStr()) : null;
+    const doCheckIn = async () => {
+        try {
+            await checkInToday(myAssistant.id);
+            await load();
+        } catch (e) {
+            alert("출근 기록 중 오류: " + e.message);
+        }
+    };
+    const doCheckOut = async () => {
+        try {
+            await checkOutToday(myToday.id);
+            await load();
+        } catch (e) {
+            alert("퇴근 기록 중 오류: " + e.message);
+        }
+    };
+    const startEdit = (r) => { setEditingId(r.id); setEditIn(r.checkIn ? r.checkIn.slice(0, 16) : ""); setEditOut(r.checkOut ? r.checkOut.slice(0, 16) : ""); };
+    const saveEdit = async (id) => {
+        try {
+            await correctAttendanceRow(id, editIn ? new Date(editIn).toISOString() : null, editOut ? new Date(editOut).toISOString() : null);
+            setEditingId(null);
+            await load();
+        } catch (e) {
+            alert("정정 중 오류: " + e.message);
+        }
+    };
+    const selfPanel = !isDirector && myAssistant && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-6", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 2 } }, "오늘 (" + todayStr() + ") 출퇴근"),
+        React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, marginBottom: 14 } }, "출근/퇴근은 당일에만 기록할 수 있고, 지난 기록은 원장님만 수정할 수 있습니다."),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-4" },
+            React.createElement(
+                "div",
+                { className: "flex-1 rounded-xl p-3 text-center", style: { background: PAPER } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "출근"),
+                React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginTop: 2 } }, fmtTime(myToday && myToday.checkIn))
+            ),
+            React.createElement(
+                "div",
+                { className: "flex-1 rounded-xl p-3 text-center", style: { background: PAPER } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "퇴근"),
+                React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginTop: 2 } }, fmtTime(myToday && myToday.checkOut))
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            !myToday && React.createElement("button", { onClick: doCheckIn, className: "flex-1 py-3 rounded-xl text-sm font-bold", style: { background: TEAL, color: "#fff" } }, "출근하기"),
+            myToday && !myToday.checkOut && React.createElement("button", { onClick: doCheckOut, className: "flex-1 py-3 rounded-xl text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "퇴근하기"),
+            myToday && myToday.checkOut && React.createElement("div", { className: "flex-1 py-3 rounded-xl text-sm font-bold text-center", style: { background: TEAL_SOFT, color: TEAL } }, "오늘 근무 완료")
+        )
+    );
+    const visibleRows = isDirector ? rows : rows.filter((r) => myAssistant && r.assistantId === myAssistant.id);
+    const listCard = React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement("div", { className: "px-5 py-4", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 800, fontSize: 15 } }, isDirector ? "전체 출퇴근기록 (최근 30일)" : "내 출퇴근기록"),
+        loading
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+            : visibleRows.length === 0
+                ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "기록이 없습니다.")
+                : React.createElement(
+                    "div",
+                    null,
+                    visibleRows.map((r) => React.createElement(
+                        "div",
+                        { key: r.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+                        React.createElement(
+                            "div",
+                            { className: "flex items-center gap-3 min-w-0" },
+                            isDirector && React.createElement("span", { style: { fontWeight: 700, fontSize: 13, minWidth: 56 } }, nameOf(r.assistantId)),
+                            React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, minWidth: 88 } }, r.date)
+                        ),
+                        editingId === r.id
+                            ? React.createElement(
+                                "div",
+                                { className: "flex items-center gap-2 flex-wrap" },
+                                React.createElement("input", { type: "datetime-local", value: editIn, onChange: (e) => setEditIn(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                                React.createElement("input", { type: "datetime-local", value: editOut, onChange: (e) => setEditOut(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                                React.createElement("button", { onClick: () => saveEdit(r.id), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff" } }, "저장"),
+                                React.createElement("button", { onClick: () => setEditingId(null), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+                            )
+                            : React.createElement(
+                                "div",
+                                { className: "flex items-center gap-3" },
+                                React.createElement("span", { style: { fontSize: 12.5 } }, "출근 " + fmtTime(r.checkIn)),
+                                React.createElement("span", { style: { fontSize: 12.5 } }, "퇴근 " + fmtTime(r.checkOut)),
+                                React.createElement("span", { style: { fontSize: 12.5, color: TEAL, fontWeight: 700 } }, workedHours(r.checkIn, r.checkOut)),
+                                isDirector && React.createElement("button", { onClick: () => startEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎")
+                            )
+                    ))
+                )
+    );
+    return React.createElement(
+        "div",
+        null,
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, "출퇴근기록"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교 출퇴근기록을 조회하고, 필요 시 정정할 수 있습니다." : "출근/퇴근 버튼으로 오늘 기록을 남기세요."),
+        selfPanel,
+        !isDirector && !myAssistant && React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "이 계정이 조교명단에 아직 연결되지 않았습니다."),
+        (isDirector || myAssistant) && listCard
+    );
+}
+// ---------- 연간 학사일정 관리 ----------
+function emptyAcademicEventForm() {
+    return { id: null, date: todayStr(), endDate: "", title: "", type: "기타", scope: "전체", school: "" };
+}
+const ACADEMIC_EVENT_TYPES = ["공휴일", "명절", "수능", "학원휴무", "학교일정", "기타"];
+function AcademicEventsManager() {
+    const [events, setEvents] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [form, setForm] = useState(emptyAcademicEventForm());
+    const [showForm, setShowForm] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const load = async () => {
+        setLoading(true);
+        try {
+            setEvents(await fetchAllAcademicEvents());
+        } catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_academic_events_mgmt_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events" }, () => load())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const save = async () => {
+        if (!form.title.trim()) { alert("일정 제목을 입력해주세요."); return; }
+        if (form.scope === "학교" && !form.school.trim()) { alert("적용 학교를 입력해주세요."); return; }
+        setSaving(true);
+        try {
+            await addAcademicEventRow(form);
+            setForm(emptyAcademicEventForm());
+            setShowForm(false);
+            await load();
+        } catch (e) {
+            alert("저장 중 오류: " + e.message);
+        }
+        setSaving(false);
+    };
+    const remove = async (id) => {
+        if (!confirm("이 일정을 삭제할까요?")) return;
+        try {
+            await deleteAcademicEventRow(id);
+            await load();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const formCard = showForm && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "연간 학사일정 추가"),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "시작일"),
+                React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+            ),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종료일 (기간 일정이면 입력, 아니면 비워두세요)"),
+                React.createElement("input", { type: "date", value: form.endDate, onChange: (e) => setForm({ ...form, endDate: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+            ),
+            React.createElement(
+                "div",
+                { className: "sm:col-span-2" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "제목"),
+                React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: "예: 수능일, 설날, 여름방학", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+            ),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종류"),
+                React.createElement(
+                    "select",
+                    { value: form.type, onChange: (e) => setForm({ ...form, type: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } },
+                    ACADEMIC_EVENT_TYPES.map((t) => React.createElement("option", { key: t, value: t }, t))
+                )
+            ),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용범위"),
+                React.createElement(
+                    "select",
+                    { value: form.scope, onChange: (e) => setForm({ ...form, scope: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } },
+                    React.createElement("option", { value: "전체" }, "전체 공통"),
+                    React.createElement("option", { value: "학교" }, "특정 학교")
+                )
+            ),
+            form.scope === "학교" && React.createElement(
+                "div",
+                { className: "sm:col-span-2" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용 학교"),
+                React.createElement("input", { value: form.school, onChange: (e) => setForm({ ...form, school: e.target.value }), placeholder: "예: 경산여중", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyAcademicEventForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+        )
+    );
+    const rows = events.map((e) => React.createElement(
+        "div",
+        { key: e.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-3 min-w-0 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#fff", background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, borderRadius: 6, padding: "2px 7px", flexShrink: 0 } }, e.type),
+            React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, flexShrink: 0 } }, e.date + (e.endDate && e.endDate !== e.date ? " ~ " + e.endDate : "")),
+            React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700 } }, e.title),
+            e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "(" + e.school + ")")
+        ),
+        React.createElement("button", { onClick: () => remove(e.id), style: { color: SUBINK, flexShrink: 0 } }, "🗑")
+    ));
+    return React.createElement(
+        "div",
+        null,
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between mb-2" },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "연간 학사일정"),
+            !showForm && React.createElement("button", { onClick: () => setShowForm(true), className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff" } }, "+ 일정 추가")
+        ),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, "여기서 등록한 일정은 대시보드·업무공지 캘린더 등 앱 전체 캘린더에 자동으로 표시됩니다."),
+        formCard,
+        React.createElement(
+            "div",
+            { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            loading
+                ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+                : events.length === 0
+                    ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "등록된 학사일정이 없습니다.")
+                    : rows
+        )
+    );
+}
+
 function Root() {
     const [session, setSession] = useState(null);
     const [checked, setChecked] = useState(false);
