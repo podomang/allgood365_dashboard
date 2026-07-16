@@ -631,7 +631,7 @@ const TAB_DEFS = [
 ];
 const LAST_TAB_KEY = "attn_last_tab";
 function MainApp({ session }) {
-    const role = session.user.user_metadata && session.user.user_metadata.role === "director" ? "director" : "assistant";
+    const role = session.user.app_metadata && session.user.app_metadata.role === "director" ? "director" : "assistant";
     const isDirector = role === "director";
     const visibleTabs = TAB_DEFS.filter((t) => !t.directorOnly || isDirector);
     // 새로고침 시 보던 탭 유지: 같은 브라우저 탭에서 새로고침하면 sessionStorage에 저장된 탭으로 복원되고,
@@ -830,6 +830,8 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     }, [academicEvents]);
     const selEvents = events[selectedDate] || [];
     const selAcadEvents = acadByDate[selectedDate] || [];
+    const selJeolgi = selAcadEvents.find((e) => e.type === "절기");
+    const selOtherAcadEvents = selAcadEvents.filter((e) => e.type !== "절기");
     const addEvent = async () => {
         if (!newEvent.trim())
             return;
@@ -867,14 +869,18 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     const isToday = ds === today, isSel = ds === selectedDate;
                     const evs = events[ds] || [];
                     const acadEvs = acadByDate[ds] || [];
+                    const jeolgiEv = acadEvs.find((e) => e.type === "절기");
+                    const pillAcadEvs = acadEvs.filter((e) => e.type !== "절기");
                     return (React.createElement("button", { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
-                        React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
+                        React.createElement("div", { className: "flex items-center justify-between gap-1" },
+                            React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
+                            jeolgiEv && React.createElement("span", { style: { fontSize: 8.5, color: SUBINK, fontWeight: 600, flexShrink: 0 } }, jeolgiEv.title)),
                         React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" },
-                            acadEvs.slice(0, 1).map((e) => (React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
+                            pillAcadEvs.slice(0, 1).map((e) => (React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
                             evs.slice(0, 2).map((e) => (React.createElement("span", { key: e.id, style: { fontSize: 9.5, background: NAVY, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
-                            (evs.length + acadEvs.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
+                            (evs.length + pillAcadEvs.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
                                 "+",
-                                (evs.length + acadEvs.length) - 3,
+                                (evs.length + pillAcadEvs.length) - 3,
                                 "\uAC1C \uB354\uBCF4\uAE30"))));
                 }))),
             React.createElement("div", { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
@@ -885,12 +891,13 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     React.createElement("span", { style: { color: RED } },
                         "(",
                         korWeekdayOf(selectedDate),
-                        ")")),
-                React.createElement("div", { className: "flex gap-2 mt-4" },
+                        ")"),
+                    selJeolgi && React.createElement("span", { style: { color: SUBINK, fontSize: 12.5, fontWeight: 600, marginLeft: 6 } }, "· " + selJeolgi.title)),
+                isDirector && React.createElement("div", { className: "flex gap-2 mt-4" },
                     React.createElement("input", { value: newEvent, onChange: (e) => setNewEvent(e.target.value), onKeyDown: (e) => e.key === "Enter" && addEvent(), placeholder: "\uC77C\uC815 \uCD94\uAC00 (\uC608: \uC911\uAC04\uACE0\uC0AC)", className: "flex-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
                     React.createElement("button", { onClick: addEvent, className: "px-3 rounded-lg", style: { background: NAVY, color: "#fff" } }, "+")),
-                selAcadEvents.length > 0 && React.createElement("div", { className: "flex flex-col gap-1.5 mt-3" },
-                    selAcadEvents.map((e) => React.createElement("div", { key: "acad" + e.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg", style: { background: (ACADEMIC_EVENT_COLORS[e.type] || SUBINK) + "1a" } },
+                selOtherAcadEvents.length > 0 && React.createElement("div", { className: "flex flex-col gap-1.5 mt-3" },
+                    selOtherAcadEvents.map((e) => React.createElement("div", { key: "acad" + e.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg", style: { background: (ACADEMIC_EVENT_COLORS[e.type] || SUBINK) + "1a" } },
                         React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, flexShrink: 0 } }),
                         React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[e.type] || SUBINK } }, e.title),
                         e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "(" + e.school + ")")))),
@@ -898,7 +905,7 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     selEvents.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "10px 0" } }, "\uB4F1\uB85D\uB41C \uC77C\uC815\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."),
                     selEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center justify-between px-3 py-2 rounded-lg", style: { background: NAVY_SOFT } },
                         React.createElement("span", { style: { fontSize: 13, fontWeight: 600 } }, e.title),
-                        React.createElement("button", { onClick: () => removeEvent(e.id), style: { color: SUBINK } }, "\u2715"))))),
+                        isDirector && React.createElement("button", { onClick: () => removeEvent(e.id), style: { color: SUBINK } }, "\u2715"))))),
                 React.createElement("button", { onClick: goToAttendance, className: "w-full mt-4 py-2.5 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "\uC774 \uB0A0\uC9DC\uB85C \uCD9C\uC11D\uCCB4\uD06C \uD558\uB7EC\uAC00\uAE30"))),
         React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 1 } }, "\uD83D\uDCE3 \uACF5\uC9C0\uC0AC\uD56D"),
@@ -2639,7 +2646,7 @@ function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
 function emptyAcademicEventForm() {
     return { id: null, date: todayStr(), endDate: "", title: "", type: "기타", scope: "전체", school: "" };
 }
-const ACADEMIC_EVENT_TYPES = ["공휴일", "명절", "수능", "학원휴무", "학교일정", "기타"];
+const ACADEMIC_EVENT_TYPES = ["공휴일", "명절", "수능", "학원휴무", "학교일정", "절기", "기타"];
 function AcademicEventsManager() {
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
