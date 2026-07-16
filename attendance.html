@@ -1019,10 +1019,10 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
     const headerRow = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
-        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD83D\uDCCB \uC5C5\uBB34\uACF5\uC9C0"),
-        isDirector && !showForm && React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: TEAL, color: "#fff" } }, "+ \uACF5\uC9C0 \uC791\uC131")
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "\uC5C5\uBB34\uACF5\uC9C0"),
+        isDirector && !showForm && React.createElement("button", { onClick: openNew, className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL, color: "#fff" } }, "+ \uACF5\uC9C0 \uC791\uC131")
     );
-    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uC870\uAD50\uC0D8\uB4E4\uC5D0\uAC8C \uC804\uB2EC\uD560 \uC5C5\uBB34\uB0B4\uC6A9\uACFC \uB9E4\uB274\uC5BC\uC744 \uB0A0\uC9DC\uBCC4\uB85C \uAE30\uB85D\uD574\uB450\uB294 \uACF5\uAC04\uC785\uB2C8\uB2E4.");
+    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, "\uC870\uAD50\uC0D8\uB4E4\uC5D0\uAC8C \uC804\uB2EC\uD560 \uC5C5\uBB34\uB0B4\uC6A9\uACFC \uB9E4\uB274\uC5BC\uC744 \uB0A0\uC9DC\uBCC4\uB85C \uAE30\uB85D\uD574\uB450\uB294 \uACF5\uAC04\uC785\uB2C8\uB2E4.");
     const noticeForm = showForm && React.createElement(
         "div",
         { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${form.pinned ? AMBER : TEAL}` } },
@@ -1198,18 +1198,18 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
         "button",
         {
             onClick: () => setSubTab(key),
-            className: "px-4 py-2 rounded-xl text-sm font-bold",
+            className: "px-3.5 py-1.5 rounded-lg text-xs font-bold",
             style: subTab === key
-                ? { background: key === "general" ? AMBER : TEAL, color: "#fff" }
+                ? { background: TEAL, color: "#fff" }
                 : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` }
         },
         label
     );
     const subTabBar = React.createElement(
         "div",
-        { className: "flex gap-2 mb-5" },
-        subTabBtn("general", "\uD83D\uDCCC \uC804\uCCB4\uACF5\uC9C0 (" + generalNotices.length + ")"),
-        subTabBtn("calendar", "\uD83D\uDCC5 \uB0A0\uC9DC\uBCC4 \uACF5\uC9C0")
+        { className: "flex gap-2 mb-4" },
+        subTabBtn("general", "\uC804\uCCB4\uACF5\uC9C0 (" + generalNotices.length + ")"),
+        subTabBtn("calendar", "\uB0A0\uC9DC\uBCC4 \uACF5\uC9C0")
     );
     const subTabContent = subTab === "general"
         ? generalCard
@@ -2289,11 +2289,17 @@ function AssistantRoster({ assistants, reloadAssistants }) {
 function emptyScheduleForm() {
     return { assistantId: "", day: "월", start: "14:00", end: "18:00", note: "" };
 }
+function timeToMinutes(t) {
+    if (!t) return 0;
+    const parts = t.split(":");
+    return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+}
 function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     const [schedules, setSchedules] = useState([]);
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState(emptyScheduleForm());
     const [saving, setSaving] = useState(false);
+    const [viewMode, setViewMode] = useState("assistant"); // "assistant" | "time" (원장 전용 보기 전환)
     const load = async () => {
         setLoading(true);
         try {
@@ -2357,23 +2363,24 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
         ),
         React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), placeholder: "메모 (선택)", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-3", style: { border: `1px solid ${LINE}` } })
     );
+    // 조교별 보기: 좁고 촘촘하게(한눈에 들어오도록) 조정
     const grid = React.createElement(
         "div",
-        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, width: "fit-content", maxWidth: "100%" } },
         React.createElement(
             "div",
             { className: "overflow-x-auto" },
             React.createElement(
                 "table",
-                { className: "w-full text-sm", style: { borderCollapse: "collapse" } },
+                { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed" } },
                 React.createElement(
                     "thead",
                     null,
                     React.createElement(
                         "tr",
                         null,
-                        React.createElement("th", { className: "text-left px-4 py-3", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 12, minWidth: 90 } }, "조교"),
-                        JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-left px-3 py-3", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 12, minWidth: 108 } }, d))
+                        React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: 64 } }, "조교"),
+                        JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: 62 } }, d))
                     )
                 ),
                 React.createElement(
@@ -2382,21 +2389,22 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                     relevantAssistants.map((a) => React.createElement(
                         "tr",
                         { key: a.id },
-                        React.createElement("td", { className: "px-4 py-3 align-top", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 700 } }, a.name),
+                        React.createElement("td", { className: "px-2.5 py-2 align-top", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 700, fontSize: 12.5 } }, a.name),
                         JS_DAY_TO_KOR.map((d) => {
                             const entries = visibleSchedules.filter((s) => s.assistantId === a.id && s.day === d);
                             return React.createElement(
                                 "td",
-                                { key: d, className: "px-3 py-2 align-top", style: { borderBottom: `1px solid ${LINE}` } },
+                                { key: d, className: "px-1 py-1.5 align-top", style: { borderBottom: `1px solid ${LINE}` } },
                                 React.createElement(
                                     "div",
-                                    { className: "flex flex-col gap-1" },
-                                    entries.length === 0 && React.createElement("span", { style: { fontSize: 11, color: "#c7c9ce" } }, "-"),
+                                    { className: "flex flex-col items-center gap-1" },
+                                    entries.length === 0 && React.createElement("span", { style: { fontSize: 10, color: "#c7c9ce" } }, "-"),
                                     entries.map((s) => React.createElement(
                                         "div",
-                                        { key: s.id, className: "flex items-center gap-1 rounded-lg px-2 py-1", style: { background: PURPLE_SOFT, fontSize: 11.5 } },
-                                        React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.start + "-" + s.end),
-                                        isDirector && React.createElement("button", { onClick: () => remove(s.id), style: { color: SUBINK, marginLeft: 2 } }, "✕")
+                                        { key: s.id, className: "flex flex-col items-center gap-0.5 rounded-md px-1 py-0.5", style: { background: PURPLE_SOFT, fontSize: 9.5, lineHeight: 1.25 } },
+                                        React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.start),
+                                        React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.end),
+                                        isDirector && React.createElement("button", { onClick: () => remove(s.id), style: { color: SUBINK, fontSize: 9 } }, "✕")
                                     ))
                                 )
                             );
@@ -2405,6 +2413,85 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                 )
             )
         )
+    );
+    // 시간대별 보기: 왼쪽 열에 시간대, 칸 안에는 그 시간에 근무하는 조교 이름
+    const timeRange = (() => {
+        if (visibleSchedules.length === 0) return { startHour: 14, endHour: 22 };
+        let minM = Infinity, maxM = -Infinity;
+        visibleSchedules.forEach((s) => {
+            const sm = timeToMinutes(s.start), em = timeToMinutes(s.end);
+            if (sm < minM) minM = sm;
+            if (em > maxM) maxM = em;
+        });
+        return { startHour: Math.max(0, Math.floor(minM / 60)), endHour: Math.min(24, Math.ceil(maxM / 60)) };
+    })();
+    const timeSlots = [];
+    for (let h = timeRange.startHour; h < timeRange.endHour; h++) {
+        timeSlots.push({ startMin: h * 60, endMin: (h + 1) * 60, label: String(h).padStart(2, "0") + ":00" });
+    }
+    const namesInSlot = (day, slot) => {
+        const seen = new Set();
+        const names = [];
+        visibleSchedules
+            .filter((s) => s.day === day && timeToMinutes(s.start) < slot.endMin && timeToMinutes(s.end) > slot.startMin)
+            .forEach((s) => {
+                const nm = (assistants.find((a) => a.id === s.assistantId) || {}).name;
+                if (nm && !seen.has(nm)) { seen.add(nm); names.push(nm); }
+            });
+        return names;
+    };
+    const timeGrid = React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, ...(timeSlots.length === 0 ? {} : { width: "fit-content", maxWidth: "100%" }) } },
+        timeSlots.length === 0
+            ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 20px" } }, "등록된 근무일정이 없습니다.")
+            : React.createElement(
+                "div",
+                { className: "overflow-x-auto" },
+                React.createElement(
+                    "table",
+                    { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed" } },
+                    React.createElement(
+                        "thead",
+                        null,
+                        React.createElement(
+                            "tr",
+                            null,
+                            React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: 64 } }, "시간대"),
+                            JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: 62 } }, d))
+                        )
+                    ),
+                    React.createElement(
+                        "tbody",
+                        null,
+                        timeSlots.map((slot) => React.createElement(
+                            "tr",
+                            { key: slot.label },
+                            React.createElement("td", { className: "px-2.5 py-2 align-top", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 700, fontSize: 11.5, color: SUBINK } }, slot.label),
+                            JS_DAY_TO_KOR.map((d) => {
+                                const names = namesInSlot(d, slot);
+                                return React.createElement(
+                                    "td",
+                                    { key: d, className: "px-1 py-1.5 align-top", style: { borderBottom: `1px solid ${LINE}` } },
+                                    React.createElement(
+                                        "div",
+                                        { className: "flex flex-col items-center gap-0.5" },
+                                        names.length === 0
+                                            ? React.createElement("span", { style: { fontSize: 10, color: "#c7c9ce" } }, "-")
+                                            : names.map((nm) => React.createElement("span", { key: nm, className: "rounded-md px-1 py-0.5", style: { background: TEAL_SOFT, color: TEAL, fontSize: 10, fontWeight: 700 } }, nm))
+                                    )
+                                );
+                            })
+                        ))
+                    )
+                )
+            )
+    );
+    const viewToggle = isDirector && React.createElement(
+        "div",
+        { className: "flex gap-2 mb-4" },
+        React.createElement("button", { onClick: () => setViewMode("assistant"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "assistant" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "조교별 보기"),
+        React.createElement("button", { onClick: () => setViewMode("time"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "time" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "시간대별 보기")
     );
     // 조교(본인) 화면: 여러 조교 x 7요일을 다 펼치는 가로 표 대신, 실제 근무일만 세로로 나열
     const myDaysWithSchedule = JS_DAY_TO_KOR
@@ -2439,13 +2526,14 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
         "div",
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, isDirector ? "조교별 근무일정" : "내 근무일정"),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다." : "근무일별로 내 근무시간을 확인할 수 있습니다."),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다. '시간대별 보기'로 바꾸면 시간대별 근무 조교를 한눈에 볼 수 있어요." : "근무일별로 내 근무시간을 확인할 수 있습니다."),
         addForm,
+        viewToggle,
         loading
             ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
             : (relevantAssistants.length === 0
                 ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.")
-                : (isDirector ? grid : myScheduleList))
+                : (isDirector ? (viewMode === "assistant" ? grid : timeGrid) : myScheduleList))
     );
 }
 // ---------- 출퇴근기록 ----------
