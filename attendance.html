@@ -629,11 +629,28 @@ const TAB_DEFS = [
     { key: "assistants", label: "스태프룸", icon: "\uD83E\uDDD1\u200D\uD83C\uDFEB" },
     { key: "students", label: "학생관리", icon: "\uD83D\uDC65", directorOnly: true },
 ];
+const LAST_TAB_KEY = "attn_last_tab";
 function MainApp({ session }) {
     const role = session.user.user_metadata && session.user.user_metadata.role === "director" ? "director" : "assistant";
     const isDirector = role === "director";
     const visibleTabs = TAB_DEFS.filter((t) => !t.directorOnly || isDirector);
-    const [tab, setTab] = useState("attendance");
+    // 새로고침 시 보던 탭 유지: 같은 브라우저 탭에서 새로고침하면 sessionStorage에 저장된 탭으로 복원되고,
+    // 로그아웃 후 다시 로그인하거나 새 브라우저 탭으로 열면(sessionStorage 비어있음) 대시보드부터 시작함.
+    const [tab, setTab] = useState(() => {
+        try {
+            const saved = sessionStorage.getItem(LAST_TAB_KEY);
+            return saved && TAB_DEFS.some((t) => t.key === saved) ? saved : "dashboard";
+        } catch (e) {
+            return "dashboard";
+        }
+    });
+    useEffect(() => {
+        try { sessionStorage.setItem(LAST_TAB_KEY, tab); } catch (e) { /* noop */ }
+    }, [tab]);
+    const handleLogout = () => {
+        try { sessionStorage.removeItem(LAST_TAB_KEY); } catch (e) { /* noop */ }
+        supabaseClient.auth.signOut();
+    };
     const [students, setStudents] = useState([]);
     const [studentsLoaded, setStudentsLoaded] = useState(false);
     const [assistants, setAssistants] = useState([]);
@@ -660,7 +677,7 @@ function MainApp({ session }) {
     useEffect(() => { reloadStudents().then(() => setStudentsLoaded(true)); }, []);
     useEffect(() => { reloadAssistants(); }, []);
     useEffect(() => { if (tab === "students" && !isDirector)
-        setTab("attendance"); }, [tab, isDirector]);
+        setTab("dashboard"); }, [tab, isDirector]);
     // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
     useEffect(() => {
         const channel = supabaseClient
@@ -712,14 +729,14 @@ function MainApp({ session }) {
             React.createElement("div", { className: "flex items-center gap-1.5 mt-1", style: { color: "#22c55e", fontSize: 11 } },
                 React.createElement("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#22c55e", display: "inline-block" } }),
                 React.createElement("span", { style: { color: SUBINK } }, "\uC2E4\uC2DC\uAC04 \uB3D9\uAE30\uD654")),
-            React.createElement("button", { onClick: () => supabaseClient.auth.signOut(), className: "w-full mt-3 py-2 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "\uB85C\uADF8\uC544\uC6C3")
+            React.createElement("button", { onClick: handleLogout, className: "w-full mt-3 py-2 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "\uB85C\uADF8\uC544\uC6C3")
         )
     );
     const mobileHeader = React.createElement(
         "header",
         { className: "md:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
         React.createElement("img", { src: LOGO_HORIZONTAL, alt: "\uC62C\uACE7\uC218\uD559 \uB354\uC13C\uD140", style: { height: 24 } }),
-        React.createElement("button", { onClick: () => supabaseClient.auth.signOut(), style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "6px 10px", borderRadius: 8 } }, "\uB85C\uADF8\uC544\uC6C3")
+        React.createElement("button", { onClick: handleLogout, style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "6px 10px", borderRadius: 8 } }, "\uB85C\uADF8\uC544\uC6C3")
     );
     const mobileNav = React.createElement(
         "nav",
@@ -914,15 +931,11 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
     const [form, setForm] = useState(emptyWorkNoticeForm());
     const [showForm, setShowForm] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [month, setMonth] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState(todayStr());
-    const [subTab, setSubTab] = useState("general");
     const [expandedIds, setExpandedIds] = useState([]);
+    const [readListOpenIds, setReadListOpenIds] = useState([]);
     const [reads, setReads] = useState([]);
-    const [academicEvents, setAcademicEvents] = useState([]);
     const toggleExpand = (id) => setExpandedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-    const cells = useMemo(() => buildMonthGrid(month), [month]);
-    const today = todayStr();
+    const toggleReadList = (id) => setReadListOpenIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const load = async () => {
         setLoading(true);
         try {
@@ -934,26 +947,26 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
         }
         setLoading(false);
     };
-    const loadAcademicEvents = async () => { try {
-        setAcademicEvents(await fetchAcademicEventsForMonth(month));
-    }
-    catch (e) {
-        console.error(e);
-    } };
     useEffect(() => { load(); }, []);
-    useEffect(() => { loadAcademicEvents(); }, [month]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_work_notices_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notices" }, () => load())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notice_reads" }, () => load())
-            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events" }, () => loadAcademicEvents())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
-    }, [month]);
-    const activeAssistantCount = useMemo(() => (assistants || []).filter((a) => a.status === "재직").length, [assistants]);
+    }, []);
+    const activeAssistants = useMemo(() => (assistants || []).filter((a) => a.status === "재직"), [assistants]);
     const readCountFor = (noticeId) => new Set(reads.filter((r) => r.noticeId === noticeId).map((r) => r.assistantId)).size;
     const haveIRead = (noticeId) => !!myAssistant && reads.some((r) => r.noticeId === noticeId && r.assistantId === myAssistant.id);
+    const unreadDot = (noticeId) => !isDirector && myAssistant && !haveIRead(noticeId) && React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: RED, display: "inline-block", flexShrink: 0 } });
+    const namesForNotice = (noticeId) => {
+        const readIds = new Set(reads.filter((r) => r.noticeId === noticeId).map((r) => r.assistantId));
+        return {
+            read: activeAssistants.filter((a) => readIds.has(a.id)).map((a) => a.name),
+            unread: activeAssistants.filter((a) => !readIds.has(a.id)).map((a) => a.name),
+        };
+    };
     const markRead = async (noticeId) => {
         if (!myAssistant) return;
         try {
@@ -963,26 +976,11 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
             console.error(e);
         }
     };
-    const acadByDate = useMemo(() => {
-        const m = {};
-        academicEvents.forEach((ev) => {
-            const start = ev.date, end = ev.endDate || ev.date;
-            let cur = start, guard = 0;
-            while (cur <= end && guard < 60) { (m[cur] = m[cur] || []).push(ev); cur = addDays(cur, 1); guard++; }
-        });
-        return m;
-    }, [academicEvents]);
     const generalNotices = useMemo(() => notices.filter((n) => n.pinned), [notices]);
-    const dateNotices = useMemo(() => notices.filter((n) => !n.pinned), [notices]);
-    const byDate = useMemo(() => {
-        const m = {};
-        dateNotices.forEach((n) => { (m[n.noticeDate] = m[n.noticeDate] || []).push(n); });
-        return m;
-    }, [dateNotices]);
-    const selNotices = byDate[selectedDate] || [];
-    const openNew = () => { setForm(emptyWorkNoticeForm(selectedDate)); setShowForm(true); };
-    const openNewGeneral = () => { setForm({ ...emptyWorkNoticeForm(selectedDate), pinned: true }); setShowForm(true); };
-    const openEdit = (n) => { setForm({ id: n.id, title: n.title, content: n.content, pinned: n.pinned, noticeDate: n.noticeDate || selectedDate }); setShowForm(true); };
+    const recentNotices = useMemo(() => notices.filter((n) => !n.pinned).sort((a, b) => (b.noticeDate || "").localeCompare(a.noticeDate || "") || (b.createdAt || "").localeCompare(a.createdAt || "")), [notices]);
+    const openNew = () => { setForm(emptyWorkNoticeForm(todayStr())); setShowForm(true); };
+    const openNewGeneral = () => { setForm({ ...emptyWorkNoticeForm(todayStr()), pinned: true }); setShowForm(true); };
+    const openEdit = (n) => { setForm({ id: n.id, title: n.title, content: n.content, pinned: n.pinned, noticeDate: n.noticeDate || todayStr() }); setShowForm(true); };
     const save = async () => {
         if (!form.title.trim() || !form.content.trim()) return;
         setSaving(true);
@@ -994,7 +992,7 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
             }
             await load();
             setShowForm(false);
-            setForm(emptyWorkNoticeForm(selectedDate));
+            setForm(emptyWorkNoticeForm(todayStr()));
         } catch (e) {
             alert("저장 중 오류가 발생했습니다: " + e.message);
         }
@@ -1019,61 +1017,104 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
     const headerRow = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "\uC5C5\uBB34\uACF5\uC9C0"),
-        isDirector && !showForm && React.createElement("button", { onClick: openNew, className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL, color: "#fff" } }, "+ \uACF5\uC9C0 \uC791\uC131")
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "업무공지"),
+        isDirector && !showForm && React.createElement("button", { onClick: openNew, className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL, color: "#fff" } }, "+ 공지 작성")
     );
-    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, "\uC870\uAD50\uC0D8\uB4E4\uC5D0\uAC8C \uC804\uB2EC\uD560 \uC5C5\uBB34\uB0B4\uC6A9\uACFC \uB9E4\uB274\uC5BC\uC744 \uB0A0\uC9DC\uBCC4\uB85C \uAE30\uB85D\uD574\uB450\uB294 \uACF5\uAC04\uC785\uB2C8\uB2E4.");
+    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, "조교샘들에게 전달할 업무내용과 매뉴얼을 기록해두는 공간입니다.");
     const noticeForm = showForm && React.createElement(
         "div",
         { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${form.pinned ? AMBER : TEAL}` } },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "\uACF5\uC9C0 \uC218\uC815" : "\uC0C8 \uACF5\uC9C0 \uC791\uC131"),
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "공지 수정" : "새 공지 작성"),
         React.createElement(
             "label",
             { className: "flex items-center gap-2 mb-3 px-3 py-2 rounded-lg text-sm", style: { background: form.pinned ? AMBER_SOFT : PAPER, color: form.pinned ? AMBER : SUBINK, fontWeight: 700 } },
             React.createElement("input", { type: "checkbox", checked: form.pinned, onChange: (e) => setForm({ ...form, pinned: e.target.checked }) }),
-            "\uD83D\uDCCC \uC804\uCCB4 \uACF5\uC9C0\uC0AC\uD56D\uC73C\uB85C \uB4F1\uB85D (\uB0A0\uC9DC\uC640 \uC0C1\uAD00\uC5C6\uC774 \uD56D\uC0C1 \uB9E8 \uC704\uC5D0 \uD45C\uC2DC)"
+            "📌 전체 공지사항으로 등록 (날짜와 상관없이 항상 맨 위에 표시)"
         ),
-        !form.pinned && React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "\uB0A0\uC9DC"),
+        !form.pinned && React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "날짜"),
         !form.pinned && React.createElement("input", { type: "date", value: form.noticeDate, onChange: (e) => setForm({ ...form, noticeDate: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1 mb-2", style: { border: `1px solid ${LINE}` } }),
-        React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: "\uC81C\uBAA9", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}` } }),
-        React.createElement("textarea", { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), placeholder: "\uB0B4\uC6A9 (\uB9E4\uB274\uC5BC, \uC9C0\uCE68 \uB4F1)", rows: 6, className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
+        React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: "제목", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}` } }),
+        React.createElement("textarea", { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), placeholder: "내용 (매뉴얼, 지침 등)", rows: 6, className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
         React.createElement(
             "div",
             { className: "flex gap-2 mt-4" },
-            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: form.pinned ? AMBER : TEAL, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
-            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkNoticeForm(selectedDate)); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "\uCDE8\uC18C")
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: form.pinned ? AMBER : TEAL, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkNoticeForm(todayStr())); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
         )
     );
-    const renderGeneralNoticeItem = (n) => {
+    // 원장: '읽음 N/M' 배지를 누르면 확인함/미확인 조교 이름이 펼쳐짐
+    const readBadge = (n) => {
+        const { read, unread } = namesForNotice(n.id);
+        const isOpen = readListOpenIds.includes(n.id);
+        return React.createElement(
+            "div",
+            { onClick: (e) => e.stopPropagation() },
+            React.createElement(
+                "button",
+                { onClick: () => toggleReadList(n.id), className: "text-[10.5px] font-bold rounded-lg", style: { padding: "2px 7px", background: TEAL_SOFT, color: TEAL } },
+                "읽음 " + readCountFor(n.id) + "/" + activeAssistants.length + (isOpen ? " ▴" : " ▾")
+            ),
+            isOpen && React.createElement(
+                "div",
+                { className: "mt-2 flex flex-col gap-1 text-right", style: { fontSize: 11 } },
+                React.createElement("div", null, React.createElement("span", { style: { color: TEAL, fontWeight: 700 } }, "✅ 확인함 "), read.length ? read.join(", ") : "-"),
+                React.createElement("div", null, React.createElement("span", { style: { color: AMBER, fontWeight: 700 } }, "⏳ 미확인 "), unread.length ? unread.join(", ") : "-")
+            )
+        );
+    };
+    // 조교 본인: 동그란 체크박스로 확인 표시
+    const confirmCheckbox = (n) => myAssistant && React.createElement(
+        "div",
+        { className: "flex items-center gap-2", onClick: (e) => e.stopPropagation() },
+        React.createElement(
+            "button",
+            {
+                onClick: () => markRead(n.id),
+                disabled: haveIRead(n.id),
+                style: { width: 22, height: 22, borderRadius: 999, border: haveIRead(n.id) ? "none" : `2px solid ${LINE}`, background: haveIRead(n.id) ? TEAL : "#fff", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }
+            },
+            haveIRead(n.id) ? "✓" : ""
+        ),
+        React.createElement("span", { style: { fontSize: 11, fontWeight: haveIRead(n.id) ? 700 : 500, color: haveIRead(n.id) ? TEAL : SUBINK } }, haveIRead(n.id) ? "확인함" : "확인 전")
+    );
+    // 공지 한 건: 제목 행(더보기/접기 알약 버튼) + 펼치면 내용/확인상태
+    const renderNoticeItem = (n) => {
         const isOpen = expandedIds.includes(n.id);
         return React.createElement(
             "div",
             { key: n.id, className: "rounded-xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
             React.createElement(
-                "button",
-                { onClick: () => toggleExpand(n.id), className: "w-full flex items-center justify-between gap-3 px-3.5 py-3 text-left" },
+                "div",
+                { className: "flex items-center justify-between gap-3 px-3.5 py-3 cursor-pointer", onClick: () => toggleExpand(n.id) },
                 React.createElement(
                     "div",
                     { className: "flex items-center gap-2 min-w-0" },
-                    React.createElement("span", { style: { fontSize: 12, color: SUBINK, flexShrink: 0 } }, isOpen ? "\u25BE" : "\u25B8"),
+                    unreadDot(n.id),
+                    !n.pinned && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px", flexShrink: 0 } }, n.noticeDate),
                     React.createElement("span", { style: { fontWeight: 800, fontSize: 14, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, n.title)
                 ),
-                isDirector && React.createElement(
+                React.createElement(
                     "div",
-                    { className: "flex items-center gap-1 flex-shrink-0", onClick: (e) => e.stopPropagation() },
-                    React.createElement("button", { onClick: () => openEdit(n), className: "p-1 rounded-lg", style: { background: AMBER_SOFT, color: AMBER } }, "\u270E"),
-                    React.createElement("button", { onClick: () => remove(n.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
+                    { className: "flex items-center gap-1.5 flex-shrink-0" },
+                    isDirector && React.createElement(
+                        "div",
+                        { className: "flex items-center gap-1", onClick: (e) => e.stopPropagation() },
+                        React.createElement("button", { onClick: () => openEdit(n), className: "p-1 rounded-lg", style: { background: AMBER_SOFT, color: AMBER } }, "✎"),
+                        React.createElement("button", { onClick: () => remove(n.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+                    ),
+                    React.createElement("span", { className: "text-[11px] font-bold", style: { padding: "5px 10px", borderRadius: 999, background: TEAL_SOFT, color: TEAL, flexShrink: 0, whiteSpace: "nowrap" } }, isOpen ? "접기" : "더보기")
                 )
             ),
             isOpen && React.createElement(
                 "div",
                 { className: "px-3.5 pb-3.5", style: { borderTop: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { fontSize: 13, color: INK, marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
-                React.createElement("div", { className: "flex items-center justify-between mt-2" },
+                React.createElement(
+                    "div",
+                    { className: "flex items-center justify-between mt-3 flex-wrap gap-2" },
                     React.createElement("div", { style: { fontSize: 10.5, color: SUBINK } }, fmtDateTime(n.createdAt)),
-                    isDirector
-                        ? React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: TEAL, background: TEAL_SOFT, borderRadius: 6, padding: "2px 7px" } }, "\uC77D\uC74C " + readCountFor(n.id) + "/" + activeAssistantCount)
-                        : myAssistant && React.createElement("button", { onClick: () => markRead(n.id), disabled: haveIRead(n.id), className: "text-[10.5px] font-bold rounded-lg", style: { padding: "3px 8px", background: haveIRead(n.id) ? TEAL_SOFT : TEAL, color: haveIRead(n.id) ? TEAL : "#fff" } }, haveIRead(n.id) ? "\uD655\uC778\uD568 \u2713" : "\uC77D\uC74C \uD655\uC778"))
+                    isDirector ? readBadge(n) : confirmCheckbox(n)
+                )
             )
         );
     };
@@ -1083,138 +1124,24 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
         React.createElement(
             "div",
             { className: "flex items-center justify-between mb-3" },
-            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: AMBER } }, "\uD83D\uDCCC \uC804\uCCB4 \uACF5\uC9C0\uC0AC\uD56D"),
-            isDirector && !showForm && React.createElement("button", { onClick: openNewGeneral, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: AMBER, color: "#fff" } }, "+ \uCD94\uAC00")
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: AMBER } }, "📌 전체 공지사항"),
+            isDirector && !showForm && React.createElement("button", { onClick: openNewGeneral, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: AMBER, color: "#fff" } }, "+ 추가")
         ),
         generalNotices.length === 0
-            ? React.createElement("div", { style: { fontSize: 12.5, color: "#a06a1f" } }, "\uB4F1\uB85D\uB41C \uC804\uCCB4 \uACF5\uC9C0\uC0AC\uD56D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
-            : React.createElement("div", { className: "flex flex-col gap-2" }, generalNotices.map((n) => renderGeneralNoticeItem(n)))
+            ? React.createElement("div", { style: { fontSize: 12.5, color: "#a06a1f" } }, "등록된 전체 공지사항이 없습니다.")
+            : React.createElement("div", { className: "flex flex-col gap-2" }, generalNotices.map((n) => renderNoticeItem(n)))
     );
-    const calendarCells = cells.map((d, i) => {
-        if (!d) return React.createElement("div", { key: i });
-        const ds = fmt(d);
-        const isToday = ds === today;
-        const isSel = ds === selectedDate;
-        const dayNotices = byDate[ds] || [];
-        const dayAcad = acadByDate[ds] || [];
-        const acadTags = dayAcad.slice(0, 1).map((e) => React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title));
-        const tags = dayNotices.slice(0, 2).map((n) => React.createElement("span", { key: n.id, style: { fontSize: 9.5, background: TEAL, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, n.title));
-        const more = (dayNotices.length + dayAcad.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } }, "+", (dayNotices.length + dayAcad.length) - 3, "\uAC1C \uB354\uBCF4\uAE30");
-        return React.createElement(
-            "button",
-            { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? TEAL_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
-            React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
-            React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" }, acadTags, tags, more)
-        );
-    });
-    const calendarCard = React.createElement(
-        "div",
-        { className: "lg:col-span-2 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        React.createElement(
-            "div",
-            { className: "flex items-center justify-between px-5 py-4", style: { borderBottom: `1px solid ${LINE}` } },
-            React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u25C0"),
-            React.createElement("div", { style: { fontWeight: 800, fontSize: 16 } }, monthLabel(month)),
-            React.createElement("button", { onClick: () => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u25B6")
-        ),
-        React.createElement(
-            "div",
-            { className: "grid grid-cols-7 px-3 pt-3", style: { gap: 4 } },
-            ["\uC77C", "\uC6D4", "\uD654", "\uC218", "\uBAA9", "\uAE08", "\uD1A0"].map((w, i) => React.createElement("div", { key: w, className: "text-center text-xs font-bold pb-2", style: { color: i === 0 ? RED : i === 6 ? NAVY : SUBINK } }, w))
-        ),
-        React.createElement("div", { className: "grid grid-cols-7 px-3 pb-4", style: { gap: 4 } }, calendarCells)
-    );
-    const selDateItems = selNotices.length === 0
-        ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "10px 0" } }, "\uC774 \uB0A0\uC9DC\uC5D0 \uB4F1\uB85D\uB41C \uC5C5\uBB34\uACF5\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")
-        : selNotices.map((n) => React.createElement(
-            "div",
-            { key: n.id, className: "rounded-lg px-3 py-2", style: { background: TEAL_SOFT } },
-            React.createElement(
-                "div",
-                { className: "flex items-center justify-between gap-2" },
-                React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: TEAL } }, n.title),
-                isDirector && React.createElement("button", { onClick: () => openEdit(n), style: { color: TEAL, fontSize: 12 } }, "\u270E")
-            )
-        ));
-    const selDateCard = React.createElement(
-        "div",
-        { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
-        React.createElement("div", { style: { fontSize: 13, color: SUBINK, fontWeight: 600 } }, "\uC120\uD0DD\uD55C \uB0A0\uC9DC"),
-        React.createElement(
-            "div",
-            { style: { fontSize: 17, fontWeight: 800, marginTop: 2 } },
-            selectedDate,
-            " ",
-            React.createElement("span", { style: { color: TEAL } }, "(", korWeekdayOf(selectedDate), ")")
-        ),
-        React.createElement("div", { className: "mt-3 flex flex-col gap-2" }, selDateItems)
-    );
-    const calendarSection = React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6" }, calendarCard, selDateCard);
-    const renderNoticeCard = (n) => React.createElement(
-        "div",
-        { key: n.id, className: "rounded-2xl p-5", style: { background: "#fff", border: n.pinned ? `1.5px solid ${TEAL}` : `1px solid ${LINE}` } },
-        React.createElement(
-            "div",
-            { className: "flex items-start justify-between gap-3" },
-            React.createElement(
-                "div",
-                { className: "flex items-center gap-2 flex-wrap" },
-                n.pinned && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: TEAL_SOFT, color: TEAL, borderRadius: 5, padding: "1.5px 6px" } }, "\uACE0\uC815"),
-                React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, n.noticeDate),
-                React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, n.title)
-            ),
-            isDirector && React.createElement(
-                "div",
-                { className: "flex items-center gap-1 flex-shrink-0" },
-                React.createElement("button", { onClick: () => openEdit(n), className: "p-1.5 rounded-lg", style: { background: TEAL_SOFT, color: TEAL } }, "\u270E"),
-                React.createElement("button", { onClick: () => remove(n.id), className: "p-1.5 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
-            )
-        ),
-        React.createElement("div", { style: { fontSize: 13.5, color: INK, marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.6 } }, n.content),
-        React.createElement(
-            "div",
-            { className: "flex items-center justify-between mt-2.5" },
-            React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, fmtDateTime(n.createdAt)),
-            isDirector
-                ? React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: TEAL, background: TEAL_SOFT, borderRadius: 6, padding: "2px 7px" } }, "\uC77D\uC74C " + readCountFor(n.id) + "/" + activeAssistantCount)
-                : myAssistant && React.createElement("button", { onClick: () => markRead(n.id), disabled: haveIRead(n.id), className: "text-[10.5px] font-bold rounded-lg", style: { padding: "3px 8px", background: haveIRead(n.id) ? TEAL_SOFT : TEAL, color: haveIRead(n.id) ? TEAL : "#fff" } }, haveIRead(n.id) ? "\uD655\uC778\uD568 \u2713" : "\uC77D\uC74C \uD655\uC778")
-        )
-    );
-    let listBody;
-    if (loading) {
-        listBody = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
-    } else if (dateNotices.length === 0) {
-        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "\uB4F1\uB85D\uB41C \uC5C5\uBB34\uACF5\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.");
-    } else {
-        listBody = React.createElement("div", { className: "flex flex-col gap-3" }, dateNotices.map((n) => renderNoticeCard(n)));
-    }
-    const fullListSection = React.createElement(
+    const recentCard = React.createElement(
         "div",
         { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "\uB0A0\uC9DC\uBCC4 \uC5C5\uBB34\uACF5\uC9C0 \uC804\uCCB4"),
-        listBody
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "최근 공지"),
+        loading
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+            : recentNotices.length === 0
+                ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "등록된 업무공지가 없습니다.")
+                : React.createElement("div", { className: "flex flex-col gap-2" }, recentNotices.map((n) => renderNoticeItem(n)))
     );
-    const subTabBtn = (key, label) => React.createElement(
-        "button",
-        {
-            onClick: () => setSubTab(key),
-            className: "px-3.5 py-1.5 rounded-lg text-xs font-bold",
-            style: subTab === key
-                ? { background: TEAL, color: "#fff" }
-                : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` }
-        },
-        label
-    );
-    const subTabBar = React.createElement(
-        "div",
-        { className: "flex gap-2 mb-4" },
-        subTabBtn("general", "\uC804\uCCB4\uACF5\uC9C0 (" + generalNotices.length + ")"),
-        subTabBtn("calendar", "\uB0A0\uC9DC\uBCC4 \uACF5\uC9C0")
-    );
-    const subTabContent = subTab === "general"
-        ? generalCard
-        : React.createElement(React.Fragment, null, calendarSection, fullListSection);
-    return React.createElement("div", null, headerRow, subText, noticeForm, subTabBar, subTabContent);
+    return React.createElement("div", null, headerRow, subText, noticeForm, generalCard, recentCard);
 }
 
 // ---------- Attendance ----------
@@ -2148,6 +2075,29 @@ function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssis
     const subtabs = isDirector ? ASSISTANT_SUBTABS_DIRECTOR : ASSISTANT_SUBTABS_STAFF;
     const [subTab, setSubTab] = useState(subtabs[0].key);
     useEffect(() => { if (!subtabs.find((t) => t.key === subTab)) setSubTab(subtabs[0].key); }, [isDirector]);
+    // 안 읽은 업무공지가 있으면 '업무공지' 서브탭 버튼에 작은 알림 점 표시 (조교 본인 기준)
+    const [hasUnreadNotices, setHasUnreadNotices] = useState(false);
+    useEffect(() => {
+        if (isDirector || !myAssistant) { setHasUnreadNotices(false); return; }
+        let cancelled = false;
+        const checkUnread = async () => {
+            try {
+                const rows = await fetchWorkNotices();
+                const noticeReads = await fetchNoticeReads(rows.map((r) => r.id));
+                const readIds = new Set(noticeReads.filter((r) => r.assistantId === myAssistant.id).map((r) => r.noticeId));
+                if (!cancelled) setHasUnreadNotices(rows.some((r) => !readIds.has(r.id)));
+            } catch (e) {
+                console.error(e);
+            }
+        };
+        checkUnread();
+        const channel = supabaseClient
+            .channel("attn_staffroom_notice_badge")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notices" }, checkUnread)
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_notice_reads" }, checkUnread)
+            .subscribe();
+        return () => { cancelled = true; supabaseClient.removeChannel(channel); };
+    }, [isDirector, myAssistant]);
     const subTabBar = React.createElement(
         "div",
         { className: "flex gap-2 mb-5 flex-wrap" },
@@ -2156,10 +2106,11 @@ function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssis
             {
                 key: t.key,
                 onClick: () => setSubTab(t.key),
-                className: "px-4 py-2 rounded-xl text-sm font-bold",
+                className: "px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1.5",
                 style: subTab === t.key ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` },
             },
-            t.label
+            t.label,
+            t.key === "notices" && hasUnreadNotices && React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: RED, display: "inline-block", flexShrink: 0 } })
         ))
     );
     return React.createElement(
