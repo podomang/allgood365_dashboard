@@ -187,6 +187,21 @@ function applyHistoryAsOf(s, historyList, dateStr) {
         return s;
     return { ...s, school: h.school, grade: h.grade, class: h.class, regularTime: h.regularTime, clinic: h.clinic, clinicTime: h.clinicTime, clinicDays: h.clinicDays, days: h.days };
 }
+// 근무일정 이력(여러 구간)을 (조교, 요일) 슬롯별로 묶어서, 주어진 날짜에 유효했던 구간만 골라낸다.
+// 슬롯마다 resolveHistoryAsOf를 재사용해서 "그 날짜에 어떤 시간이 적용 중이었는지"를 정확히 계산한다.
+function resolveScheduleAsOf(scheduleSegments, dateStr) {
+    const bySlot = {};
+    scheduleSegments.forEach((s) => {
+        const key = s.assistantId + "|" + s.day;
+        (bySlot[key] = bySlot[key] || []).push(s);
+    });
+    const result = [];
+    Object.keys(bySlot).forEach((key) => {
+        const active = resolveHistoryAsOf(bySlot[key], dateStr);
+        if (active) result.push(active);
+    });
+    return result;
+}
 function korWeekdayOf(dateStr) {
     return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
@@ -451,17 +466,75 @@ async function deleteAssistantRow(id) {
     if (error) throw error;
 }
 // ---------- 근무일정 ----------
+// attn_work_schedules: (조교, 요일) 슬롯별로 effective_from~effective_to 구간을 이력으로 쌓아둔다.
+// 학생관리의 attn_student_history와 같은 방식 — 시간이 바뀌면 새 구간을 추가하고 이전 구간은 그대로 보존한다.
+function mapWorkSchedule(r) {
+    return { id: r.id, assistantId: r.assistant_id, day: r.day_of_week, start: (r.start_time || "").slice(0, 5), end: (r.end_time || "").slice(0, 5), note: r.note || "", effectiveFrom: r.effective_from, effectiveTo: r.effective_to };
+}
 async function fetchWorkSchedules() {
-    const { data, error } = await supabaseClient.from("attn_work_schedules").select("*");
+    const { data, error } = await supabaseClient.from("attn_work_schedules").select("*").order("effective_from");
     if (error) throw error;
-    return data.map((r) => ({ id: r.id, assistantId: r.assistant_id, day: r.day_of_week, start: (r.start_time || "").slice(0, 5), end: (r.end_time || "").slice(0, 5), note: r.note || "" }));
+    return data.map(mapWorkSchedule);
 }
+async function fetchWorkScheduleHistory(assistantId, day) {
+    const { data, error } = await supabaseClient.from("attn_work_schedules").select("*").eq("assistant_id", assistantId).eq("day_of_week", day).order("effective_from");
+    if (error) throw error;
+    return data.map(mapWorkSchedule);
+}
+// 새 근무일정 등록(신규 슬롯). 오늘부터 바로 적용된다 — 이력 재계산이 필요 없는 첫 구간이라 단순 insert.
 async function addWorkScheduleRow(assistantId, day, start, end, note) {
-    const { error } = await supabaseClient.from("attn_work_schedules").insert({ assistant_id: assistantId, day_of_week: day, start_time: start, end_time: end, note: note || "" });
+    const { error } = await supabaseClient.from("attn_work_schedules").insert({ assistant_id: assistantId, day_of_week: day, start_time: start, end_time: end, note: note || "", effective_from: todayStr() });
     if (error) throw error;
 }
-async function deleteWorkScheduleRow(id) {
-    const { error } = await supabaseClient.from("attn_work_schedules").delete().eq("id", id);
+// 기존 슬롯의 시간을 "적용일" 기준으로 변경. 그 슬롯의 전체 이력을 다시 불러와서 적용일 순서로
+// 재정렬한 뒤, 각 구간의 effective_to를 다음 구간 시작일 전날로 맞춰 저장한다(saveHistorySnapshot과 동일한 방식).
+async function saveWorkScheduleSnapshot(assistantId, day, effectiveFrom, snapshot) {
+    const existing = await fetchWorkScheduleHistory(assistantId, day);
+    const withoutSameDate = existing.filter((r) => r.effectiveFrom !== effectiveFrom);
+    const newRow = { effectiveFrom, effectiveTo: null, ...snapshot, isNew: true };
+    const merged = [...withoutSameDate.map((r) => ({ ...r, isNew: false })), newRow]
+        .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
+    for (let i = 0; i < merged.length; i++) {
+        merged[i].effectiveTo = i === merged.length - 1 ? null : addDays(merged[i + 1].effectiveFrom, -1);
+    }
+    for (const row of merged) {
+        const payload = { effective_to: row.effectiveTo, start_time: row.start, end_time: row.end, note: row.note };
+        if (row.isNew) {
+            const { error } = await supabaseClient.from("attn_work_schedules").insert({ assistant_id: assistantId, day_of_week: day, effective_from: row.effectiveFrom, ...payload });
+            if (error) throw error;
+        } else {
+            const { error } = await supabaseClient.from("attn_work_schedules").update(payload).eq("id", row.id);
+            if (error) throw error;
+        }
+    }
+}
+// 슬롯 전체 삭제(과거 이력 포함) — 확인 후 즉시 삭제, 별도 "종료 이력"은 남기지 않는다(원장님 확인).
+async function deleteWorkScheduleSlot(assistantId, day) {
+    const { error } = await supabaseClient.from("attn_work_schedules").delete().eq("assistant_id", assistantId).eq("day_of_week", day);
+    if (error) throw error;
+}
+// ---------- 근무일정 변동사항(캘린더: 학원휴무 자동취소/개인결근/추가근무) ----------
+function mapScheduleException(r) {
+    return { id: r.id, date: r.exception_date, assistantId: r.assistant_id, kind: r.kind, start: (r.start_time || "").slice(0, 5), end: (r.end_time || "").slice(0, 5), note: r.note || "" };
+}
+async function fetchScheduleExceptionsForMonth(monthDate) {
+    const year = monthDate.getFullYear(), month = monthDate.getMonth();
+    const start = fmt(new Date(year, month, 1));
+    const end = fmt(new Date(year, month + 1, 0));
+    const { data, error } = await supabaseClient.from("attn_schedule_exceptions").select("*").gte("exception_date", start).lte("exception_date", end);
+    if (error) throw error;
+    return data.map(mapScheduleException);
+}
+async function addScheduleCancel(date, assistantId, note) {
+    const { error } = await supabaseClient.from("attn_schedule_exceptions").insert({ exception_date: date, assistant_id: assistantId, kind: "cancel", note: note || "" });
+    if (error) throw error;
+}
+async function addScheduleExtra(date, assistantId, start, end, note) {
+    const { error } = await supabaseClient.from("attn_schedule_exceptions").insert({ exception_date: date, assistant_id: assistantId, kind: "extra", start_time: start || null, end_time: end || null, note: note || "" });
+    if (error) throw error;
+}
+async function deleteScheduleException(id) {
+    const { error } = await supabaseClient.from("attn_schedule_exceptions").delete().eq("id", id);
     if (error) throw error;
 }
 // ---------- 출퇴근기록 ----------
@@ -483,6 +556,10 @@ async function checkOutToday(rowId) {
 }
 async function correctAttendanceRow(id, checkIn, checkOut) {
     const { error } = await supabaseClient.from("attn_assistant_attendance").update({ check_in: checkIn, check_out: checkOut }).eq("id", id);
+    if (error) throw error;
+}
+async function deleteAttendanceRow(id) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").delete().eq("id", id);
     if (error) throw error;
 }
 async function fetchAttendanceForDate(date) {
@@ -2082,6 +2159,12 @@ function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssis
     const subtabs = isDirector ? ASSISTANT_SUBTABS_DIRECTOR : ASSISTANT_SUBTABS_STAFF;
     const [subTab, setSubTab] = useState(subtabs[0].key);
     useEffect(() => { if (!subtabs.find((t) => t.key === subTab)) setSubTab(subtabs[0].key); }, [isDirector]);
+    // 근무일정에서 조교를 선택하면 출퇴근기록 탭으로 넘어가면서 해당 조교로 필터링
+    const [attendanceFocus, setAttendanceFocus] = useState({ assistantId: null, token: 0 });
+    const goToAssistantAttendance = (assistantId) => {
+        setAttendanceFocus((prev) => ({ assistantId, token: prev.token + 1 }));
+        setSubTab("attendance");
+    };
     // 안 읽은 업무공지가 있으면 '업무공지' 서브탭 버튼에 작은 알림 점 표시 (조교 본인 기준)
     const [hasUnreadNotices, setHasUnreadNotices] = useState(false);
     useEffect(() => {
@@ -2133,8 +2216,8 @@ function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssis
         ),
         subTab === "notices" && React.createElement(WorkNotices, { isDirector: isDirector, authorEmail: myEmail, assistants: assistants, myAssistant: myAssistant }),
         subTab === "roster" && isDirector && React.createElement(AssistantRoster, { assistants: assistants, reloadAssistants: reloadAssistants }),
-        subTab === "schedule" && React.createElement(WorkScheduleManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant }),
-        subTab === "attendance" && React.createElement(AssistantAttendanceManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant })
+        subTab === "schedule" && React.createElement(WorkScheduleManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant, goToAssistant: isDirector ? goToAssistantAttendance : null }),
+        subTab === "attendance" && React.createElement(AssistantAttendanceManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant, focusAssistantId: attendanceFocus.assistantId, focusToken: attendanceFocus.token })
     );
 }
 // ---------- 조교명단 ----------
@@ -2252,12 +2335,28 @@ function timeToMinutes(t) {
     const parts = t.split(":");
     return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
 }
-function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
+function WorkScheduleManager({ isDirector, assistants, myAssistant, goToAssistant }) {
     const [schedules, setSchedules] = useState([]);
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState(emptyScheduleForm());
     const [saving, setSaving] = useState(false);
-    const [viewMode, setViewMode] = useState("assistant"); // "assistant" | "time" (원장 전용 보기 전환)
+    const [viewMode, setViewMode] = useState(isDirector ? "assistant" : "list"); // "assistant" | "time" | "list" | "calendar"
+    // 근무 변동사항(캘린더): 학원휴무 자동취소 / 개인 결근(취소선) / 추가근무
+    const [calMonth, setCalMonth] = useState(new Date());
+    const [exceptions, setExceptions] = useState([]);
+    const [academicEvents, setAcademicEvents] = useState([]);
+    const [selectedCalDate, setSelectedCalDate] = useState(todayStr());
+    const [extraForm, setExtraForm] = useState({ assistantId: "", start: "", end: "", note: "" });
+    const [savingExtra, setSavingExtra] = useState(false);
+    const [cancelNoteDraft, setCancelNoteDraft] = useState({});
+    // 근무일정 상세 목록(적용일 기준 수정 + 변경 이력)
+    const [showDetailList, setShowDetailList] = useState(false);
+    const [editSlot, setEditSlot] = useState(null); // "assistantId|day" 키
+    const [editForm, setEditForm] = useState({ effectiveFrom: todayStr(), start: "", end: "", note: "" });
+    const [savingEdit, setSavingEdit] = useState(false);
+    const [historySlot, setHistorySlot] = useState(null);
+    const [historyRows, setHistoryRows] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const load = async () => {
         setLoading(true);
         try {
@@ -2267,7 +2366,14 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
         }
         setLoading(false);
     };
+    const loadExceptions = async () => {
+        try { setExceptions(await fetchScheduleExceptionsForMonth(calMonth)); } catch (e) { console.error(e); }
+    };
+    const loadCalAcademicEvents = async () => {
+        try { setAcademicEvents(await fetchAcademicEventsForMonth(calMonth)); } catch (e) { console.error(e); }
+    };
     useEffect(() => { load(); }, []);
+    useEffect(() => { loadExceptions(); loadCalAcademicEvents(); }, [calMonth]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_work_schedules_changes")
@@ -2275,8 +2381,75 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_schedule_exceptions_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_schedule_exceptions" }, () => loadExceptions())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events" }, () => loadCalAcademicEvents())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, [calMonth]);
+    // schedules에는 (조교, 요일) 슬롯별 전체 이력(과거·현재·미래 구간)이 들어있다.
+    // 컴팩트한 표(조교별/시간대별 보기)와 조교 본인 리스트는 "오늘 기준으로 유효한" 구간만 보여줘야 하므로
+    // resolveScheduleAsOf로 슬롯마다 오늘 날짜에 해당하는 구간을 골라낸다.
     const visibleSchedules = isDirector ? schedules : schedules.filter((s) => myAssistant && s.assistantId === myAssistant.id);
+    const currentSchedules = useMemo(() => resolveScheduleAsOf(visibleSchedules, todayStr()), [visibleSchedules]);
+    const visibleExceptions = isDirector ? exceptions : exceptions.filter((e) => myAssistant && e.assistantId === myAssistant.id);
     const relevantAssistants = isDirector ? assistants : (myAssistant ? [myAssistant] : []);
+    const nameOfAssistant = (id) => (assistants.find((a) => a.id === id) || {}).name || "?";
+    const closedByDate = useMemo(() => {
+        const m = {};
+        academicEvents.forEach((ev) => {
+            if (ev.type !== "학원휴무") return;
+            const start = ev.date, end = ev.endDate || ev.date;
+            let cur = start, guard = 0;
+            while (cur <= end && guard < 60) { (m[cur] = m[cur] || []).push(ev); cur = addDays(cur, 1); guard++; }
+        });
+        return m;
+    }, [academicEvents]);
+    // 캘린더 보기는 날짜마다 그날 실제로 적용 중이던(또는 적용될) 근무시간을 정확히 보여줘야 하므로
+    // 요일이 같은 구간들 중에서 그 특정 날짜(dateStr) 기준으로 유효했던 구간만 골라낸다.
+    const regularEntriesFor = (dateStr) => resolveScheduleAsOf(visibleSchedules.filter((s) => s.day === korWeekdayOf(dateStr)), dateStr);
+    const cancelExceptionFor = (dateStr, assistantId) => visibleExceptions.find((e) => e.kind === "cancel" && e.date === dateStr && e.assistantId === assistantId);
+    const extraExceptionsFor = (dateStr) => visibleExceptions.filter((e) => e.kind === "extra" && e.date === dateStr);
+    const cancelEntry = async (dateStr, assistantId) => {
+        try {
+            await addScheduleCancel(dateStr, assistantId, cancelNoteDraft[assistantId] || "");
+            setCancelNoteDraft((prev) => ({ ...prev, [assistantId]: "" }));
+            await loadExceptions();
+        } catch (e) {
+            alert("결근 처리 중 오류: " + e.message);
+        }
+    };
+    const restoreEntry = async (excId) => {
+        try {
+            await deleteScheduleException(excId);
+            await loadExceptions();
+        } catch (e) {
+            alert("복구 중 오류: " + e.message);
+        }
+    };
+    const addExtra = async () => {
+        if (!extraForm.assistantId) { alert("조교를 선택해주세요."); return; }
+        setSavingExtra(true);
+        try {
+            await addScheduleExtra(selectedCalDate, extraForm.assistantId, extraForm.start, extraForm.end, extraForm.note);
+            setExtraForm({ assistantId: "", start: "", end: "", note: "" });
+            await loadExceptions();
+        } catch (e) {
+            alert("추가근무 등록 중 오류: " + e.message);
+        }
+        setSavingExtra(false);
+    };
+    const removeExtra = async (id) => {
+        if (!confirm("이 추가근무 기록을 삭제할까요?")) return;
+        try {
+            await deleteScheduleException(id);
+            await loadExceptions();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
     const add = async () => {
         if (!form.assistantId) { alert("조교를 선택해주세요."); return; }
         setSaving(true);
@@ -2289,13 +2462,46 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
         }
         setSaving(false);
     };
-    const remove = async (id) => {
+    const remove = async (entry) => {
+        if (!confirm("이 근무일정을 삭제할까요? 과거 이력을 포함해 완전히 삭제됩니다.")) return;
         try {
-            await deleteWorkScheduleRow(id);
+            await deleteWorkScheduleSlot(entry.assistantId, entry.day);
             await load();
         } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
+    };
+    const openEditSlot = (entry) => {
+        setEditSlot(entry.assistantId + "|" + entry.day);
+        setEditForm({ effectiveFrom: todayStr(), start: entry.start, end: entry.end, note: entry.note || "" });
+        setHistorySlot(null);
+    };
+    const closeEditSlot = () => setEditSlot(null);
+    const saveEditSlot = async (entry) => {
+        if (!editForm.effectiveFrom) { alert("적용일을 입력해주세요."); return; }
+        if (!editForm.start || !editForm.end) { alert("시작/종료 시간을 입력해주세요."); return; }
+        setSavingEdit(true);
+        try {
+            await saveWorkScheduleSnapshot(entry.assistantId, entry.day, editForm.effectiveFrom, { start: editForm.start, end: editForm.end, note: editForm.note });
+            setEditSlot(null);
+            await load();
+        } catch (e) {
+            alert("수정 중 오류: " + e.message);
+        }
+        setSavingEdit(false);
+    };
+    const toggleHistorySlot = async (entry) => {
+        const key = entry.assistantId + "|" + entry.day;
+        if (historySlot === key) { setHistorySlot(null); return; }
+        setHistorySlot(key);
+        setHistoryLoading(true);
+        try {
+            setHistoryRows(await fetchWorkScheduleHistory(entry.assistantId, entry.day));
+        } catch (e) {
+            console.error(e);
+            setHistoryRows([]);
+        }
+        setHistoryLoading(false);
     };
     const addForm = isDirector && React.createElement(
         "div",
@@ -2347,9 +2553,15 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                     relevantAssistants.map((a) => React.createElement(
                         "tr",
                         { key: a.id },
-                        React.createElement("td", { className: "px-2.5 py-2 align-top", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 700, fontSize: 12.5 } }, a.name),
+                        React.createElement(
+                            "td",
+                            { className: "px-2.5 py-2 align-top", style: { borderBottom: `1px solid ${LINE}` } },
+                            goToAssistant
+                                ? React.createElement("button", { onClick: () => goToAssistant(a.id), title: "출퇴근기록 보기", style: { fontWeight: 700, fontSize: 12.5, color: PURPLE, textDecoration: "underline", textAlign: "left" } }, a.name)
+                                : React.createElement("span", { style: { fontWeight: 700, fontSize: 12.5 } }, a.name)
+                        ),
                         JS_DAY_TO_KOR.map((d) => {
-                            const entries = visibleSchedules.filter((s) => s.assistantId === a.id && s.day === d);
+                            const entries = currentSchedules.filter((s) => s.assistantId === a.id && s.day === d);
                             return React.createElement(
                                 "td",
                                 { key: d, className: "px-1 py-1.5 align-top", style: { borderBottom: `1px solid ${LINE}` } },
@@ -2362,7 +2574,7 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                                         { key: s.id, className: "flex flex-col items-center gap-0.5 rounded-md px-1 py-0.5", style: { background: PURPLE_SOFT, fontSize: 9.5, lineHeight: 1.25 } },
                                         React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.start),
                                         React.createElement("span", { style: { fontWeight: 700, color: PURPLE } }, s.end),
-                                        isDirector && React.createElement("button", { onClick: () => remove(s.id), style: { color: SUBINK, fontSize: 9 } }, "✕")
+                                        isDirector && React.createElement("button", { onClick: () => remove(s), style: { color: SUBINK, fontSize: 9 } }, "✕")
                                     ))
                                 )
                             );
@@ -2374,9 +2586,9 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     );
     // 시간대별 보기: 왼쪽 열에 시간대, 칸 안에는 그 시간에 근무하는 조교 이름
     const timeRange = (() => {
-        if (visibleSchedules.length === 0) return { startHour: 14, endHour: 22 };
+        if (currentSchedules.length === 0) return { startHour: 14, endHour: 22 };
         let minM = Infinity, maxM = -Infinity;
-        visibleSchedules.forEach((s) => {
+        currentSchedules.forEach((s) => {
             const sm = timeToMinutes(s.start), em = timeToMinutes(s.end);
             if (sm < minM) minM = sm;
             if (em > maxM) maxM = em;
@@ -2390,7 +2602,7 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     const namesInSlot = (day, slot) => {
         const seen = new Set();
         const names = [];
-        visibleSchedules
+        currentSchedules
             .filter((s) => s.day === day && timeToMinutes(s.start) < slot.endMin && timeToMinutes(s.end) > slot.startMin)
             .forEach((s) => {
                 const nm = (assistants.find((a) => a.id === s.assistantId) || {}).name;
@@ -2445,15 +2657,17 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                 )
             )
     );
-    const viewToggle = isDirector && React.createElement(
+    const viewToggle = React.createElement(
         "div",
-        { className: "flex gap-2 mb-4" },
-        React.createElement("button", { onClick: () => setViewMode("assistant"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "assistant" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "조교별 보기"),
-        React.createElement("button", { onClick: () => setViewMode("time"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "time" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "시간대별 보기")
+        { className: "flex gap-2 mb-4 flex-wrap" },
+        isDirector && React.createElement("button", { onClick: () => setViewMode("assistant"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "assistant" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "조교별 보기"),
+        isDirector && React.createElement("button", { onClick: () => setViewMode("time"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "time" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "시간대별 보기"),
+        !isDirector && React.createElement("button", { onClick: () => setViewMode("list"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "list" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "내 근무일정"),
+        React.createElement("button", { onClick: () => setViewMode("calendar"), className: "px-3.5 py-1.5 rounded-lg text-xs font-bold", style: viewMode === "calendar" ? { background: PURPLE, color: "#fff" } : { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "캘린더 보기")
     );
     // 조교(본인) 화면: 여러 조교 x 7요일을 다 펼치는 가로 표 대신, 실제 근무일만 세로로 나열
     const myDaysWithSchedule = JS_DAY_TO_KOR
-        .map((d) => ({ day: d, entries: visibleSchedules.filter((s) => s.day === d) }))
+        .map((d) => ({ day: d, entries: currentSchedules.filter((s) => s.day === d) }))
         .filter((x) => x.entries.length > 0);
     const myScheduleList = React.createElement(
         "div",
@@ -2480,22 +2694,272 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                 )
             ))
     );
+    // 캘린더 보기: 학원휴무(자동 취소) + 개인 결근(수동 취소선) + 추가근무를 월별 달력으로 확인
+    const calCells = useMemo(() => buildMonthGrid(calMonth), [calMonth]);
+    const calToday = todayStr();
+    const calendarGrid = React.createElement(
+        "div",
+        { className: "lg:col-span-2 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between px-5 py-4", style: { borderBottom: `1px solid ${LINE}` } },
+            React.createElement("button", { onClick: () => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "◀"),
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 16 } }, monthLabel(calMonth)),
+            React.createElement("button", { onClick: () => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1)), className: "p-1.5 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "▶")
+        ),
+        React.createElement("div", { className: "grid grid-cols-7 px-3 pt-3", style: { gap: 4 } }, ["일", "월", "화", "수", "목", "금", "토"].map((w, i) => React.createElement("div", { key: w, className: "text-center text-xs font-bold pb-2", style: { color: i === 0 ? RED : i === 6 ? NAVY : SUBINK } }, w))),
+        React.createElement("div", { className: "grid grid-cols-7 px-3 pb-4", style: { gap: 4 } }, calCells.map((d, i) => {
+            if (!d) return React.createElement("div", { key: i });
+            const ds = fmt(d);
+            const isToday = ds === calToday, isSel = ds === selectedCalDate;
+            const isClosed = !!(closedByDate[ds] && closedByDate[ds].length);
+            const dayRegular = regularEntriesFor(ds);
+            const dayExtra = extraExceptionsFor(ds);
+            return React.createElement(
+                "button",
+                { key: i, onClick: () => setSelectedCalDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 68, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
+                React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
+                isClosed && React.createElement("span", { style: { fontSize: 8.5, color: SKY, fontWeight: 700, marginTop: 1 } }, "학원휴무"),
+                React.createElement(
+                    "div",
+                    { className: "flex flex-col gap-0.5 mt-1" },
+                    dayRegular.slice(0, 2).map((s) => {
+                        const canceled = isClosed || !!cancelExceptionFor(ds, s.assistantId);
+                        return React.createElement("span", { key: "r" + s.id, style: { fontSize: 9, color: canceled ? "#b8bcc4" : INK, textDecoration: canceled ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, nameOfAssistant(s.assistantId) + " " + s.start);
+                    }),
+                    dayExtra.slice(0, 2).map((e) => React.createElement("span", { key: "e" + e.id, style: { fontSize: 9, color: TEAL, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, "+" + nameOfAssistant(e.assistantId) + (e.start ? " " + e.start : ""))),
+                    (dayRegular.length + dayExtra.length) > 4 && React.createElement("span", { style: { fontSize: 8.5, color: SUBINK, fontWeight: 600 } }, "+" + ((dayRegular.length + dayExtra.length) - 4) + "개 더보기")
+                )
+            );
+        }))
+    );
+    const selRegularEntries = regularEntriesFor(selectedCalDate);
+    const selExtraEntries = extraExceptionsFor(selectedCalDate);
+    const selClosed = !!(closedByDate[selectedCalDate] && closedByDate[selectedCalDate].length);
+    const sidePanel = React.createElement(
+        "div",
+        { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}`, height: "fit-content" } },
+        React.createElement("div", { style: { fontSize: 13, color: SUBINK, fontWeight: 600 } }, "선택한 날짜"),
+        React.createElement(
+            "div",
+            { style: { fontSize: 17, fontWeight: 800, marginTop: 2 } },
+            selectedCalDate + " ",
+            React.createElement("span", { style: { color: RED } }, "(" + korWeekdayOf(selectedCalDate) + ")")
+        ),
+        selClosed && React.createElement("div", { className: "mt-2 px-3 py-2 rounded-lg", style: { background: SKY_SOFT, color: SKY, fontSize: 12, fontWeight: 700 } }, "학원 휴무일이라 이 날의 정규근무는 전부 자동으로 취소돼요."),
+        React.createElement("div", { style: { marginTop: 14, fontSize: 12.5, fontWeight: 700, color: SUBINK } }, "정규근무"),
+        React.createElement(
+            "div",
+            { className: "flex flex-col gap-2 mt-2" },
+            selRegularEntries.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "6px 0" } }, "이 날은 정규근무 조교가 없습니다."),
+            selRegularEntries.map((s) => {
+                const exc = cancelExceptionFor(selectedCalDate, s.assistantId);
+                const canceled = selClosed || !!exc;
+                return React.createElement(
+                    "div",
+                    { key: s.id, className: "rounded-lg px-3 py-2", style: { background: PAPER } },
+                    React.createElement(
+                        "div",
+                        { className: "flex items-center justify-between gap-2" },
+                        React.createElement("span", { style: { fontSize: 13, fontWeight: 700, textDecoration: canceled ? "line-through" : "none", color: canceled ? SUBINK : INK } }, nameOfAssistant(s.assistantId) + " " + s.start + "-" + s.end),
+                        isDirector && !selClosed && (exc
+                            ? React.createElement("button", { onClick: () => restoreEntry(exc.id), className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: TEAL_SOFT, color: TEAL } }, "복구")
+                            : React.createElement("button", { onClick: () => cancelEntry(selectedCalDate, s.assistantId), className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: RED_SOFT, color: RED } }, "결근 처리"))
+                    ),
+                    exc && exc.note && React.createElement("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 2 } }, "메모: " + exc.note),
+                    isDirector && !selClosed && !exc && React.createElement("input", {
+                        value: cancelNoteDraft[s.assistantId] || "",
+                        onChange: (e) => setCancelNoteDraft((prev) => ({ ...prev, [s.assistantId]: e.target.value })),
+                        placeholder: "결근 사유 메모(선택)",
+                        className: "w-full px-2 py-1 rounded-md text-xs outline-none mt-1.5",
+                        style: { border: `1px solid ${LINE}` },
+                    })
+                );
+            })
+        ),
+        React.createElement("div", { style: { marginTop: 16, fontSize: 12.5, fontWeight: 700, color: SUBINK } }, "추가근무"),
+        React.createElement(
+            "div",
+            { className: "flex flex-col gap-2 mt-2" },
+            selExtraEntries.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, padding: "6px 0" } }, "등록된 추가근무가 없습니다."),
+            selExtraEntries.map((e) => React.createElement(
+                "div",
+                { key: e.id, className: "flex items-center justify-between gap-2 px-3 py-2 rounded-lg", style: { background: TEAL_SOFT } },
+                React.createElement(
+                    "div",
+                    null,
+                    React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: TEAL } }, nameOfAssistant(e.assistantId) + (e.start ? " " + e.start + (e.end ? "-" + e.end : "") : "")),
+                    e.note && React.createElement("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 1 } }, e.note)
+                ),
+                isDirector && React.createElement("button", { onClick: () => removeExtra(e.id), style: { color: SUBINK } }, "✕")
+            ))
+        ),
+        isDirector && React.createElement(
+            "div",
+            { className: "mt-3 rounded-lg p-3", style: { background: PAPER } },
+            React.createElement(
+                "div",
+                { className: "grid grid-cols-2 gap-2" },
+                React.createElement(
+                    "select",
+                    { value: extraForm.assistantId, onChange: (e) => setExtraForm({ ...extraForm, assistantId: e.target.value }), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none col-span-2", style: { border: `1px solid ${LINE}` } },
+                    React.createElement("option", { value: "" }, "조교 선택"),
+                    assistants.map((a) => React.createElement("option", { key: a.id, value: a.id }, a.name))
+                ),
+                React.createElement("input", { type: "time", value: extraForm.start, onChange: (e) => setExtraForm({ ...extraForm, start: e.target.value }), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("input", { type: "time", value: extraForm.end, onChange: (e) => setExtraForm({ ...extraForm, end: e.target.value }), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } })
+            ),
+            React.createElement("input", { value: extraForm.note, onChange: (e) => setExtraForm({ ...extraForm, note: e.target.value }), placeholder: "메모(선택, 예: 특강 보강)", className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-2", style: { border: `1px solid ${LINE}` } }),
+            React.createElement("button", { onClick: addExtra, disabled: savingExtra, className: "w-full mt-2 py-2 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingExtra ? 0.6 : 1 } }, savingExtra ? "등록 중..." : "+ 추가근무 등록")
+        )
+    );
+    const calendarView = React.createElement(
+        "div",
+        { className: "grid grid-cols-1 lg:grid-cols-3 gap-5" },
+        calendarGrid,
+        sidePanel
+    );
+    const emptyMsg = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.");
+    const nonCalendarView = isDirector ? (viewMode === "assistant" ? grid : timeGrid) : myScheduleList;
+    // 근무일정 상세 목록: 컴팩트한 표는 한눈에 보기용으로 그대로 두고, 수정(적용일 포함)·이력보기·삭제는
+    // 여기 별도 목록에서 여유 있게 처리한다(학생관리의 이력보기 패턴과 동일).
+    const dayOrderIndex = (d) => JS_DAY_TO_KOR.indexOf(d);
+    const detailEntries = currentSchedules.slice().sort((a, b) => {
+        const an = nameOfAssistant(a.assistantId), bn = nameOfAssistant(b.assistantId);
+        if (an !== bn) return an.localeCompare(bn, "ko");
+        return dayOrderIndex(a.day) - dayOrderIndex(b.day);
+    });
+    const detailList = isDirector && React.createElement(
+        "div",
+        { className: "mt-6 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between flex-wrap gap-2 px-5 py-4", style: { borderBottom: showDetailList ? `1px solid ${LINE}` : "none" } },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "근무일정 상세 목록"),
+                React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginTop: 1 } }, "시간을 수정하면 적용일을 입력받아, 이전 시간은 이력(🔍)으로 남습니다.")
+            ),
+            React.createElement("button", { onClick: () => setShowDetailList((v) => !v), className: "px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0", style: { background: showDetailList ? PAPER : NAVY, color: showDetailList ? SUBINK : "#fff" } }, showDetailList ? "접기" : "펼치기")
+        ),
+        showDetailList && (detailEntries.length === 0
+            ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "24px 0" } }, "등록된 근무일정이 없습니다.")
+            : React.createElement(
+                "div",
+                null,
+                detailEntries.map((entry) => {
+                    const key = entry.assistantId + "|" + entry.day;
+                    const isEditing = editSlot === key;
+                    const isHistoryOpen = historySlot === key;
+                    return React.createElement(
+                        React.Fragment,
+                        { key },
+                        React.createElement(
+                            "div",
+                            { className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+                            React.createElement(
+                                "div",
+                                { className: "flex items-center gap-3 min-w-0 flex-wrap" },
+                                React.createElement("span", { style: { fontWeight: 700, fontSize: 13, minWidth: 56 } }, nameOfAssistant(entry.assistantId)),
+                                React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: entry.day === "일" ? RED : entry.day === "토" ? NAVY : SUBINK, minWidth: 20 } }, entry.day),
+                                React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: PURPLE } }, entry.start + " - " + entry.end),
+                                entry.note && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, entry.note)
+                            ),
+                            React.createElement(
+                                "div",
+                                { className: "flex items-center gap-1 flex-shrink-0" },
+                                React.createElement("button", { onClick: () => toggleHistorySlot(entry), className: "p-2 rounded-lg", style: { background: isHistoryOpen ? SKY_SOFT : PAPER, color: SKY }, title: "변경 이력 보기" }, "🔍"),
+                                React.createElement("button", { onClick: () => (isEditing ? closeEditSlot() : openEditSlot(entry)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY }, title: "수정" }, "✎"),
+                                React.createElement("button", { onClick: () => remove(entry), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED }, title: "삭제" }, "🗑")
+                            )
+                        ),
+                        isHistoryOpen && React.createElement(
+                            "div",
+                            { className: "px-5 py-3", style: { background: SKY_SOFT, borderBottom: `1px solid ${LINE}` } },
+                            historyLoading
+                                ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "불러오는 중...")
+                                : React.createElement(
+                                    "div",
+                                    { className: "flex flex-col gap-1.5" },
+                                    historyRows.slice().reverse().map((h) => React.createElement(
+                                        "div",
+                                        { key: h.id, className: "flex items-center gap-2 flex-wrap" },
+                                        React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: SKY, minWidth: 150 } }, h.effectiveFrom + " ~ " + (h.effectiveTo || "현재")),
+                                        React.createElement("span", { style: { fontSize: 12, color: INK } }, h.start + " - " + h.end + (h.note ? " · " + h.note : ""))
+                                    ))
+                                )
+                        ),
+                        isEditing && React.createElement(
+                            "div",
+                            { className: "px-5 py-4", style: { background: PAPER, borderBottom: `1px solid ${LINE}` } },
+                            React.createElement(
+                                "div",
+                                { className: "grid grid-cols-2 sm:grid-cols-4 gap-2" },
+                                React.createElement(
+                                    "div",
+                                    null,
+                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "적용일"),
+                                    React.createElement("input", { type: "date", value: editForm.effectiveFrom, onChange: (e) => setEditForm({ ...editForm, effectiveFrom: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                ),
+                                React.createElement(
+                                    "div",
+                                    null,
+                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "시작"),
+                                    React.createElement("input", { type: "time", value: editForm.start, onChange: (e) => setEditForm({ ...editForm, start: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                ),
+                                React.createElement(
+                                    "div",
+                                    null,
+                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "종료"),
+                                    React.createElement("input", { type: "time", value: editForm.end, onChange: (e) => setEditForm({ ...editForm, end: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                ),
+                                React.createElement(
+                                    "div",
+                                    null,
+                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "메모"),
+                                    React.createElement("input", { value: editForm.note, onChange: (e) => setEditForm({ ...editForm, note: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                )
+                            ),
+                            React.createElement(
+                                "div",
+                                { className: "flex gap-2 mt-3" },
+                                React.createElement("button", { onClick: () => saveEditSlot(entry), disabled: savingEdit, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingEdit ? 0.6 : 1 } }, savingEdit ? "저장 중..." : "저장"),
+                                React.createElement("button", { onClick: closeEditSlot, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+                            )
+                        )
+                    );
+                })
+            ))
+    );
     return React.createElement(
         "div",
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, isDirector ? "조교별 근무일정" : "내 근무일정"),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다. '시간대별 보기'로 바꾸면 시간대별 근무 조교를 한눈에 볼 수 있어요." : "근무일별로 내 근무시간을 확인할 수 있습니다."),
-        React.createElement(
-            "div",
-            { style: { width: "fit-content", maxWidth: "100%" } },
-            addForm,
-            viewToggle,
-            loading
-                ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
-                : (relevantAssistants.length === 0
-                    ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.")
-                    : (isDirector ? (viewMode === "assistant" ? grid : timeGrid) : myScheduleList))
-        )
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다. '캘린더 보기'에서는 학원휴무 자동취소·개인 결근·추가근무를 날짜별로 확인·기록할 수 있어요." : "근무일별로 내 근무시간을 확인하고, '캘린더 보기'에서 결근·추가근무 변동사항을 볼 수 있습니다."),
+        viewMode === "calendar"
+            ? React.createElement(
+                "div",
+                null,
+                viewToggle,
+                loading
+                    ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+                    : (relevantAssistants.length === 0 ? emptyMsg : calendarView)
+            )
+            : React.createElement(
+                "div",
+                null,
+                React.createElement(
+                    "div",
+                    { style: { width: "fit-content", maxWidth: "100%" } },
+                    addForm,
+                    viewToggle,
+                    loading
+                        ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+                        : (relevantAssistants.length === 0 ? emptyMsg : nonCalendarView)
+                ),
+                !loading && relevantAssistants.length > 0 && detailList
+            )
     );
 }
 // ---------- 출퇴근기록 ----------
@@ -2514,30 +2978,43 @@ function workedHours(checkIn, checkOut) {
     const h = Math.floor(ms / 3600000), m = Math.round((ms % 3600000) / 60000);
     return h + "시간 " + m + "분";
 }
-function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
+function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
+function monthKeyLabel(key) {
+    const parts = key.split("-");
+    return parts[0] + "년 " + parseInt(parts[1], 10) + "월";
+}
+function monthKeysOf(list) {
+    const seen = {};
+    list.forEach((r) => { seen[monthKeyOf(r.date)] = true; });
+    return Object.keys(seen).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+}
+function AssistantAttendanceManager({ isDirector, assistants, myAssistant, focusAssistantId, focusToken }) {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState(null);
     const [editIn, setEditIn] = useState("");
     const [editOut, setEditOut] = useState("");
+    const [rangeMonths, setRangeMonths] = useState(1); // 1~3개월 선택 조회 (원장 전용)
+    const [assistantFilter, setAssistantFilter] = useState(focusAssistantId || "");
+    useEffect(() => { if (focusAssistantId) setAssistantFilter(focusAssistantId); }, [focusToken]);
     const load = async () => {
         setLoading(true);
         try {
-            const start = isDirector ? addDays(todayStr(), -30) : null;
+            const start = isDirector ? addDays(todayStr(), -30 * rangeMonths) : null;
             setRows(await fetchAssistantAttendance(start, null));
         } catch (e) {
             console.error(e);
         }
         setLoading(false);
     };
-    useEffect(() => { load(); }, [isDirector]);
+    useEffect(() => { load(); }, [isDirector, rangeMonths]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_assistant_attendance_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistant_attendance" }, () => load())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
-    }, [isDirector]);
+    }, [isDirector, rangeMonths]);
     const nameOf = (id) => (assistants.find((a) => a.id === id) || {}).name || "?";
     const myToday = myAssistant ? rows.find((r) => r.assistantId === myAssistant.id && r.date === todayStr()) : null;
     const doCheckIn = async () => {
@@ -2564,6 +3041,15 @@ function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
             await load();
         } catch (e) {
             alert("정정 중 오류: " + e.message);
+        }
+    };
+    const doDelete = async (id) => {
+        if (!confirm("이 출퇴근 기록을 삭제할까요?")) return;
+        try {
+            await deleteAttendanceRow(id);
+            await load();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
         }
     };
     const selfPanel = !isDirector && myAssistant && React.createElement(
@@ -2595,11 +3081,70 @@ function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
             myToday && myToday.checkOut && React.createElement("div", { className: "flex-1 py-3 rounded-xl text-sm font-bold text-center", style: { background: TEAL_SOFT, color: TEAL } }, "오늘 근무 완료")
         )
     );
-    const visibleRows = isDirector ? rows : rows.filter((r) => myAssistant && r.assistantId === myAssistant.id);
+    const visibleRows = isDirector
+        ? rows.filter((r) => !assistantFilter || r.assistantId === assistantFilter)
+        : rows.filter((r) => myAssistant && r.assistantId === myAssistant.id);
+    const renderRow = (r) => React.createElement(
+        "div",
+        { key: r.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+        React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, minWidth: 108 } }, r.date + " (" + korWeekdayOf(r.date) + ")"),
+        editingId === r.id
+            ? React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("input", { type: "datetime-local", value: editIn, onChange: (e) => setEditIn(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("input", { type: "datetime-local", value: editOut, onChange: (e) => setEditOut(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("button", { onClick: () => saveEdit(r.id), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff" } }, "저장"),
+                React.createElement("button", { onClick: () => setEditingId(null), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+            )
+            : React.createElement(
+                "div",
+                { className: "flex items-center gap-3" },
+                React.createElement("span", { style: { fontSize: 12.5 } }, "출근 " + fmtTime(r.checkIn)),
+                React.createElement("span", { style: { fontSize: 12.5 } }, "퇴근 " + fmtTime(r.checkOut)),
+                React.createElement("span", { style: { fontSize: 12.5, color: TEAL, fontWeight: 700 } }, workedHours(r.checkIn, r.checkOut)),
+                isDirector && React.createElement("button", { onClick: () => startEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎"),
+                isDirector && React.createElement("button", { onClick: () => doDelete(r.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+            )
+    );
+    // 원장 화면: 조교별 -> 월별로 그룹핑. 조교 본인 화면: 월별로만 그룹핑.
+    const groupedByAssistant = {};
+    if (isDirector) {
+        visibleRows.forEach((r) => {
+            const aid = r.assistantId;
+            if (!groupedByAssistant[aid]) groupedByAssistant[aid] = { name: nameOf(aid), months: {} };
+            const mk = monthKeyOf(r.date);
+            if (!groupedByAssistant[aid].months[mk]) groupedByAssistant[aid].months[mk] = [];
+            groupedByAssistant[aid].months[mk].push(r);
+        });
+    }
+    const assistantGroups = Object.keys(groupedByAssistant)
+        .map((aid) => groupedByAssistant[aid])
+        .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const myMonthKeys = monthKeysOf(visibleRows);
     const listCard = React.createElement(
         "div",
         { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        React.createElement("div", { className: "px-5 py-4", style: { borderBottom: `1px solid ${LINE}`, fontWeight: 800, fontSize: 15 } }, isDirector ? "전체 출퇴근기록 (최근 30일)" : "내 출퇴근기록"),
+        React.createElement(
+            "div",
+            { className: "px-5 py-4 flex items-center justify-between gap-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+            React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, isDirector ? "전체 출퇴근기록" : "내 출퇴근기록"),
+            isDirector && React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement(
+                    "select",
+                    { value: assistantFilter, onChange: (e) => setAssistantFilter(e.target.value), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
+                    React.createElement("option", { value: "" }, "전체 조교"),
+                    assistants.map((a) => React.createElement("option", { key: a.id, value: a.id }, a.name))
+                ),
+                React.createElement(
+                    "select",
+                    { value: rangeMonths, onChange: (e) => setRangeMonths(Number(e.target.value)), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
+                    [1, 2, 3].map((n) => React.createElement("option", { key: n, value: n }, "최근 " + n + "개월"))
+                )
+            )
+        ),
         loading
             ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
             : visibleRows.length === 0
@@ -2607,40 +3152,31 @@ function AssistantAttendanceManager({ isDirector, assistants, myAssistant }) {
                 : React.createElement(
                     "div",
                     null,
-                    visibleRows.map((r) => React.createElement(
-                        "div",
-                        { key: r.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
-                        React.createElement(
+                    isDirector
+                        ? assistantGroups.map((g) => React.createElement(
                             "div",
-                            { className: "flex items-center gap-3 min-w-0" },
-                            isDirector && React.createElement("span", { style: { fontWeight: 700, fontSize: 13, minWidth: 56 } }, nameOf(r.assistantId)),
-                            React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, minWidth: 88 } }, r.date)
-                        ),
-                        editingId === r.id
-                            ? React.createElement(
+                            { key: g.name },
+                            React.createElement("div", { className: "px-5 py-2", style: { background: PAPER, fontWeight: 800, fontSize: 13 } }, g.name),
+                            Object.keys(g.months).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map((mk) => React.createElement(
                                 "div",
-                                { className: "flex items-center gap-2 flex-wrap" },
-                                React.createElement("input", { type: "datetime-local", value: editIn, onChange: (e) => setEditIn(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
-                                React.createElement("input", { type: "datetime-local", value: editOut, onChange: (e) => setEditOut(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
-                                React.createElement("button", { onClick: () => saveEdit(r.id), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff" } }, "저장"),
-                                React.createElement("button", { onClick: () => setEditingId(null), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
-                            )
-                            : React.createElement(
-                                "div",
-                                { className: "flex items-center gap-3" },
-                                React.createElement("span", { style: { fontSize: 12.5 } }, "출근 " + fmtTime(r.checkIn)),
-                                React.createElement("span", { style: { fontSize: 12.5 } }, "퇴근 " + fmtTime(r.checkOut)),
-                                React.createElement("span", { style: { fontSize: 12.5, color: TEAL, fontWeight: 700 } }, workedHours(r.checkIn, r.checkOut)),
-                                isDirector && React.createElement("button", { onClick: () => startEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎")
-                            )
-                    ))
+                                { key: mk },
+                                React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                                g.months[mk].map((r) => renderRow(r))
+                            ))
+                        ))
+                        : myMonthKeys.map((mk) => React.createElement(
+                            "div",
+                            { key: mk },
+                            React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                            visibleRows.filter((r) => monthKeyOf(r.date) === mk).map((r) => renderRow(r))
+                        ))
                 )
     );
     return React.createElement(
         "div",
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, "출퇴근기록"),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교 출퇴근기록을 조회하고, 필요 시 정정할 수 있습니다." : "출근/퇴근 버튼으로 오늘 기록을 남기세요."),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교별·월별로 정리된 출퇴근기록을 조회하고, 필요 시 정정·삭제할 수 있습니다." : "출근/퇴근 버튼으로 오늘 기록을 남기세요."),
         selfPanel,
         !isDirector && !myAssistant && React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "이 계정이 조교명단에 아직 연결되지 않았습니다."),
         (isDirector || myAssistant) && listCard
