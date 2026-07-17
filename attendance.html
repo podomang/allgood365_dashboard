@@ -869,11 +869,11 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
 }
 // ---------- 보강(extra) 명단 ----------
 async function fetchExtraRoster(date) {
-    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at").eq("attn_date", date);
     if (error)
         throw error;
     const map = {};
-    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "" }; });
+    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "" }; });
     return map;
 }
 async function addExtraRosterRow(date, studentId, addedBy, scheduledTime) {
@@ -889,24 +889,44 @@ async function setExtraScheduledTime(date, studentId, scheduledTime) {
     if (error)
         throw error;
 }
+// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시를 항상 초기화한다.
 async function setExtraPlanNote(date, studentId, note) {
-    const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_note: note || null }).eq("attn_date", date).eq("student_id", studentId);
+    const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null }).eq("attn_date", date).eq("student_id", studentId);
+    if (error)
+        throw error;
+}
+async function setExtraPlanDone(date, studentId, done, byName) {
+    const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_done: done, plan_done_by: done ? byName : null, plan_done_at: done ? new Date().toISOString() : null }).eq("attn_date", date).eq("student_id", studentId);
     if (error)
         throw error;
 }
 // 정규/클리닉 세션의 당일 수업계획 메모 (attn_session_notes). 출석 체크 여부와 무관하게 독립적으로 저장됨.
+function emptyNoteMeta() { return { note: "", done: false, doneBy: "", doneAt: "" }; }
 async function fetchSessionNotesForDate(date) {
-    const { data, error } = await supabaseClient.from("attn_session_notes").select("session, student_id, plan_note").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_session_notes").select("session, student_id, plan_note, plan_done, plan_done_by, plan_done_at").eq("attn_date", date);
     if (error)
         throw error;
     const result = { regular: {}, clinic: {}, extra: {} };
-    data.forEach((r) => { result[r.session] = result[r.session] || {}; result[r.session][r.student_id] = r.plan_note || ""; });
+    data.forEach((r) => {
+        result[r.session] = result[r.session] || {};
+        result[r.session][r.student_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "" };
+    });
     return result;
 }
+// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시를 항상 초기화한다.
 async function upsertSessionNote(date, session, studentId, note) {
-    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, plan_note: note || null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
     if (error)
         throw error;
+}
+async function setSessionNoteDone(date, session, studentId, done, byName) {
+    const { error } = await supabaseClient.from("attn_session_notes").update({ plan_done: done, plan_done_by: done ? byName : null, plan_done_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString() }).eq("attn_date", date).eq("session", session).eq("student_id", studentId);
+    if (error)
+        throw error;
+}
+function fmtDateTimeShort(iso) {
+    try { return new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+    catch (e) { return ""; }
 }
 async function removeExtraRosterRow(date, studentId) {
     const { error } = await supabaseClient.from("attn_extra_roster").delete().eq("attn_date", date).eq("student_id", studentId);
@@ -1024,6 +1044,12 @@ async function fetchCourseAttendanceForDate(date) {
     const result = {};
     data.forEach((r) => { result[r.course_id] = { status: r.status, reason: r.reason || "" }; });
     return result;
+}
+// 근무일지 "출석한 학생" 좌석표에 특강만 듣는 학생도 포함시키기 위한 헬퍼(attn_course_attendance는 student_id를 직접 갖고 있음).
+async function fetchPresentCourseStudentIds(date) {
+    const { data, error } = await supabaseClient.from("attn_course_attendance").select("student_id, status").eq("attn_date", date).in("status", ["출석", "지각"]);
+    if (error) throw error;
+    return data.map((r) => r.student_id);
 }
 async function setCourseAttendanceReason(date, courseId, reason) {
     const { error } = await supabaseClient.from("attn_course_attendance").update({ reason, updated_at: new Date().toISOString() }).eq("attn_date", date).eq("course_id", courseId);
@@ -1179,6 +1205,9 @@ function MainApp({ session }) {
     // 출석체크(보강 탭)에서 채워지고, 학생관리 탭으로 넘어가면 그 값으로 새 학생 폼이 미리 채워진다.
     const [studentPrefill, setStudentPrefill] = useState(null);
     const goRegisterStudentFromDiagnostic = (prefillData) => { setStudentPrefill(prefillData); setTab("students"); };
+    // 출석체크에서 출석/지각으로 체크된 학생 이름을 누르면 스태프룸 > 근무일지 작성 화면으로 바로 이동시키는 다리 역할 상태.
+    const [workLogFocus, setWorkLogFocus] = useState(null); // { studentId, date, token } | null
+    const goToWorkLog = (studentId, date) => { setWorkLogFocus({ studentId, date, token: Date.now() }); setTab("assistants"); };
     const reloadStudents = async () => {
         try {
             setStudents(await fetchStudentsRoster());
@@ -1293,9 +1322,9 @@ function MainApp({ session }) {
         : React.createElement(
             React.Fragment,
             null,
-            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses }),
+            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog, myAssistant: myAssistant }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector, students: students }),
-            tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students }),
+            tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students, focusWorkLog: workLogFocus, onFocusWorkLogConsumed: () => setWorkLogFocus(null) }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses })
         );
     return React.createElement(
@@ -1716,7 +1745,9 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
 function emptyDiagForm() {
     return { name: "", phone: "", school: "", grade: "", time: "", note: "", sourceNote: "" };
 }
-function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses }) {
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses, goToWorkLog, myAssistant }) {
+    // 수업계획/보강계획을 "완료"로 표시할 때 기록할 이름(원장 전용 상세 표시에 쓰임).
+    const noteAuthorName = isDirector ? "원장" : (myAssistant ? myAssistant.name : "");
     const session = attSession;
     const setSession = setAttSession;
     const groupMode = attGroupMode;
@@ -1955,7 +1986,8 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         }
     };
     const saveExtraNote = async (studentId, note) => {
-        setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), note } }));
+        // 새 지시이므로 완료 표시는 항상 초기화
+        setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), note, done: false, doneBy: "", doneAt: "" } }));
         try {
             await setExtraPlanNote(selectedDate, studentId, note);
         } catch (e) {
@@ -2025,7 +2057,8 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     };
     // 정규/클리닉 세션의 당일 수업계획 메모 저장 (attn_session_notes)
     const saveSessionNote = async (studentId, note) => {
-        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: note } }));
+        // 새 지시이므로 완료 표시는 항상 초기화
+        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: { note, done: false, doneBy: "", doneAt: "" } } }));
         try {
             await upsertSessionNote(selectedDate, session, studentId, note);
         } catch (e) {
@@ -2034,8 +2067,28 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         }
     };
     // 보강은 attn_extra_roster.plan_note, 정규/클리닉은 attn_session_notes 로 저장 위치가 다름 - 화면에서는 하나로 통일해서 사용
-    const noteForStudent = (id) => session === "extra" ? ((extraMeta[id] && extraMeta[id].note) || "") : ((sessionNotes[session] && sessionNotes[session][id]) || "");
+    const noteMetaForStudent = (id) => session === "extra" ? (extraMeta[id] || emptyNoteMeta()) : ((sessionNotes[session] && sessionNotes[session][id]) || emptyNoteMeta());
     const saveNoteForStudent = (id, note) => session === "extra" ? saveExtraNote(id, note) : saveSessionNote(id, note);
+    // 수업계획/보강계획 완료 체크 토글 - 조교/원장 누구나 누를 수 있고, 완료 시점의 이름·시각을 함께 저장.
+    const toggleNoteDone = async (studentId, nextDone) => {
+        if (session === "extra") {
+            setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || emptyNoteMeta()), done: nextDone, doneBy: nextDone ? noteAuthorName : "", doneAt: nextDone ? new Date().toISOString() : "" } }));
+            try {
+                await setExtraPlanDone(selectedDate, studentId, nextDone, noteAuthorName);
+            } catch (e) {
+                console.error(e);
+                load();
+            }
+        } else {
+            setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: { ...(((prev[session] || {})[studentId]) || emptyNoteMeta()), done: nextDone, doneBy: nextDone ? noteAuthorName : "", doneAt: nextDone ? new Date().toISOString() : "" } } }));
+            try {
+                await setSessionNoteDone(selectedDate, session, studentId, nextDone, noteAuthorName);
+            } catch (e) {
+                console.error(e);
+                load();
+            }
+        }
+    };
     const counts = STATUS_ORDER.reduce((acc, st) => { acc[st] = roster.filter((s) => current[s.id]?.status === st).length; return acc; }, {});
     const uncheckedCount = roster.filter((s) => !current[s.id]?.status).length;
     // 토요일 정규수업은 등원요일에 토요일을 선택한 학생의 "토요일 출석시간"이 따로 저장돼 있으면
@@ -2268,7 +2321,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, planNote: noteForStudent(s.id), saveNote: saveNoteForStudent, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
         );
     } else {
         listBody = React.createElement(
@@ -2290,7 +2343,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, planNote: noteForStudent(s.id), saveNote: saveNoteForStudent, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
                 );
             })
         );
@@ -2320,7 +2373,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, setStatus: setCourseStatus, saveReason: saveCourseReason }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, setStatus: setCourseStatus, saveReason: saveCourseReason, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
                     );
                 })
             );
@@ -2463,17 +2516,22 @@ function ExtraTimeControl({ initialValue, onSave }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, planNote, saveNote, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
     const targetTime = current[s.id]?.targetTime || "";
     const scheduledTime = (extraMeta[s.id] && extraMeta[s.id].time) || "";
     const [noteEditing, setNoteEditing] = useState(false);
+    // 수업계획/보강계획은 업무전달 성격이라 원장 전용 입력 - 조교는 값이 있으면 읽기전용으로만 본다(편집 아이콘 자체가 안 보임).
     const notesEnabled = session === "extra" || session === "clinic";
+    const notesEditable = notesEnabled && isDirector;
     const noteLabel = session === "extra" ? "보강계획" : "수업계획";
+    const planNote = noteMeta.note;
     const showNoteLine = notesEnabled && (planNote || noteEditing);
-    const showNoteInlinePencil = notesEnabled && !planNote && !noteEditing;
+    const showNoteInlinePencil = notesEditable && !planNote && !noteEditing;
+    // 출석/지각으로 체크된 학생만 이름을 눌러서 근무일지 작성으로 바로 이동할 수 있음(결석/미체크는 지도한 게 없으므로 제외).
+    const clickableName = !!(goToWorkLog && (st === "출석" || st === "지각"));
     return React.createElement(
         "div",
         { className: "px-4 sm:px-5 py-3", style: { borderBottom: isLast ? "none" : `1px solid ${LINE}` } },
@@ -2484,7 +2542,9 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, planNote, saveN
             React.createElement(
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
-                React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
+                clickableName
+                    ? React.createElement("button", { onClick: () => goToWorkLog(s.id), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: NAVY }, title: "근무일지 작성으로 이동" }, s.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                    : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (s.school || s.grade) ? `${s.school || ""}${s.school && s.grade ? " · " : ""}${s.grade ? s.grade + "학년" : ""}` : "학교/학년 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`)
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
@@ -2503,17 +2563,39 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, planNote, saveN
             })
             : React.createElement(
                 "div",
-                { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
-                React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "2px 7px" } }, planNote),
-                React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: `${noteLabel} 수정` }, "📝")
+                { className: "mt-2 flex flex-col gap-1" },
+                React.createElement(
+                    "div",
+                    { className: "flex items-center gap-2 flex-wrap" },
+                    // 업무공지 확인 체크와 같은 스타일 - 동그란 버튼 + "확인 전"/"완료" 라벨. 조교/원장 누구나 눌러서 완료 처리할 수 있음.
+                    React.createElement(
+                        "div",
+                        { className: "flex items-center gap-1.5 flex-shrink-0" },
+                        React.createElement("button", {
+                            onClick: () => toggleNoteDone(s.id, !noteMeta.done),
+                            style: { width: 20, height: 20, borderRadius: 999, border: noteMeta.done ? "none" : `2px solid ${LINE}`, background: noteMeta.done ? TEAL : "#fff", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+                            title: noteMeta.done ? "완료 취소" : "완료로 표시"
+                        }, noteMeta.done ? "✓" : ""),
+                        React.createElement("span", { style: { fontSize: 10.5, fontWeight: noteMeta.done ? 700 : 500, color: noteMeta.done ? TEAL : SUBINK } }, noteMeta.done ? "완료" : "확인 전")
+                    ),
+                    React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: noteMeta.done ? "#f0f0ee" : PURPLE_SOFT, color: noteMeta.done ? SUBINK : PURPLE, borderRadius: 5, padding: "2px 7px", textDecoration: noteMeta.done ? "line-through" : "none" } }, planNote),
+                    notesEditable && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: `${noteLabel} 수정` }, "📝")
+                ),
+                // 완료 처리한 사람/시각은 원장님만 볼 수 있음.
+                isDirector && noteMeta.done && React.createElement(
+                    "div",
+                    { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
+                    "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
+                )
             ))
     );
 }
 // 특강(추가강좌) 출석체크 행 - 정규수업 AttendanceRow와 비슷하지만 훨씬 단순함(수업계획/일정변경/보강예정시간 없음).
 // 출석/지각/결석 3가지만 체크하고, 지각·결석이면 사유를 남길 수 있음(ReasonBlock 재사용).
-function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason }) {
+function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, goToWorkLog }) {
     const st = current[c.courseId]?.status;
     const reason = current[c.courseId]?.reason || "";
+    const clickableName = !!(goToWorkLog && (st === "출석" || st === "지각"));
     return React.createElement(
         "div",
         { className: "px-4 sm:px-5 py-3", style: { borderBottom: isLast ? "none" : `1px solid ${LINE}` } },
@@ -2524,7 +2606,9 @@ function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason }) {
             React.createElement(
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
-                React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
+                clickableName
+                    ? React.createElement("button", { onClick: () => goToWorkLog(c.studentId), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: TEAL }, title: "근무일지 작성으로 이동" }, c.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                    : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (c.school || c.grade) ? `${c.school || ""}${c.school && c.grade ? " · " : ""}${c.grade ? c.grade + "학년" : ""}` : "학교/학년 미지정", c.className ? ` · ${c.className}` : "", c.courseTime ? ` · ${c.courseTime}` : "")
             ),
             React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, COURSE_STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(c.courseId, c.studentId, stt) })))
@@ -3181,10 +3265,12 @@ const ASSISTANT_SUBTABS_STAFF = [
     { key: "attendance", label: "출퇴근" },
     { key: "worklog", label: "근무일지" },
 ];
-function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssistant, myEmail, students }) {
+function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssistant, myEmail, students, focusWorkLog, onFocusWorkLogConsumed }) {
     const subtabs = isDirector ? ASSISTANT_SUBTABS_DIRECTOR : ASSISTANT_SUBTABS_STAFF;
     const [subTab, setSubTab] = useState(subtabs[0].key);
     useEffect(() => { if (!subtabs.find((t) => t.key === subTab)) setSubTab(subtabs[0].key); }, [isDirector]);
+    // 출석체크에서 학생 이름을 눌러서 넘어온 경우, 근무일지 탭으로 자동 전환.
+    useEffect(() => { if (focusWorkLog) setSubTab("worklog"); }, [focusWorkLog && focusWorkLog.token]);
     // 근무일정에서 조교를 선택하면 출퇴근기록 탭으로 넘어가면서 해당 조교로 필터링
     const [attendanceFocus, setAttendanceFocus] = useState({ assistantId: null, token: 0 });
     const goToAssistantAttendance = (assistantId) => {
@@ -3244,7 +3330,7 @@ function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssis
         subTab === "roster" && isDirector && React.createElement(AssistantRoster, { assistants: assistants, reloadAssistants: reloadAssistants }),
         subTab === "schedule" && React.createElement(WorkScheduleManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant, goToAssistant: isDirector ? goToAssistantAttendance : null }),
         subTab === "attendance" && React.createElement(AssistantAttendanceManager, { isDirector: isDirector, assistants: assistants, myAssistant: myAssistant, focusAssistantId: attendanceFocus.assistantId, focusToken: attendanceFocus.token }),
-        subTab === "worklog" && React.createElement(WorkLogManager, { isDirector: isDirector, myAssistant: myAssistant, myEmail: myEmail, students: students })
+        subTab === "worklog" && React.createElement(WorkLogManager, { isDirector: isDirector, myAssistant: myAssistant, myEmail: myEmail, students: students, focusWorkLog: focusWorkLog, onFocusWorkLogConsumed: onFocusWorkLogConsumed })
     );
 }
 // ---------- 조교명단 ----------
@@ -4221,14 +4307,16 @@ function presentStudentIdsForDate(att) {
     });
     return ids;
 }
-function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
+function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkLog, onFocusWorkLogConsumed }) {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [rangeMonths, setRangeMonths] = useState(1);
     const [authorFilter, setAuthorFilter] = useState("");
     // "작성" 영역: 교실 좌석표처럼 그날 출석한 학생을 버튼으로 전부 늘어놓고, 누르면 그 학생 전용
     // 입력창(지도내용/전달사항)이 그 자리에서 펼쳐진다. expandedKey로 지금 펼쳐진 항목 하나만 추적.
-    const [writeDate, setWriteDate] = useState(todayStr());
+    // 출석체크 화면에서 학생 이름을 눌러 넘어온 경우(focusWorkLog), 이 컴포넌트는 그때 새로 마운트되므로
+    // 초기값을 그 날짜/학생으로 바로 세팅해서 별도 화면 이동 없이 입력창이 펼쳐진 채로 시작하게 한다.
+    const [writeDate, setWriteDate] = useState(() => (focusWorkLog && focusWorkLog.date) || todayStr());
     const [presentIds, setPresentIds] = useState(new Set());
     const [loadingPresent, setLoadingPresent] = useState(false);
     const [todayEntries, setTodayEntries] = useState([]); // 이 날짜에 "내"가 이미 작성한 일지들
@@ -4236,6 +4324,8 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
     const [draft, setDraft] = useState({ content: "", noteToDirector: "" });
     const [extraLabel, setExtraLabel] = useState("");
     const [savingInline, setSavingInline] = useState(false);
+    const [pendingFocusStudentId, setPendingFocusStudentId] = useState(() => (focusWorkLog && focusWorkLog.studentId) || null);
+    useEffect(() => { if (focusWorkLog && onFocusWorkLogConsumed) onFocusWorkLogConsumed(); }, []);
     const load = async () => {
         setLoading(true);
         try {
@@ -4248,10 +4338,13 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
     };
     const loadTodayEntries = async (dateStr) => {
         try {
-            setTodayEntries(await fetchWorkLogsForDateAuthor(dateStr, myEmail));
+            const entries = await fetchWorkLogsForDateAuthor(dateStr, myEmail);
+            setTodayEntries(entries);
+            return entries;
         } catch (e) {
             console.error(e);
             setTodayEntries([]);
+            return [];
         }
     };
     useEffect(() => { load(); }, [isDirector, rangeMonths]);
@@ -4266,14 +4359,36 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         setLoadingPresent(true);
         try {
             const att = await fetchAttendanceForDate(dateStr);
-            setPresentIds(presentStudentIdsForDate(att));
+            const ids = presentStudentIdsForDate(att);
+            const courseIds = await fetchPresentCourseStudentIds(dateStr);
+            courseIds.forEach((id) => ids.add(id));
+            setPresentIds(ids);
         } catch (e) {
             console.error(e);
             setPresentIds(new Set());
         }
         setLoadingPresent(false);
     };
-    useEffect(() => { loadPresent(writeDate); loadTodayEntries(writeDate); setExpandedKey(null); }, [writeDate]);
+    // 날짜가 바뀔 때마다 그날 출석자/내 작성글을 새로 불러온다. 출석체크에서 넘어와 펼쳐야 할 학생이 있으면
+    // (pendingFocusStudentId) 그 학생 입력창을 자동으로 펼치고, 없으면 기존처럼 펼침 상태를 초기화한다.
+    useEffect(() => {
+        let cancelled = false;
+        loadPresent(writeDate);
+        (async () => {
+            const entries = await loadTodayEntries(writeDate);
+            if (cancelled) return;
+            if (pendingFocusStudentId) {
+                const sid = pendingFocusStudentId;
+                setPendingFocusStudentId(null);
+                const existing = entries.find((r) => r.studentIds.includes(sid));
+                setDraft({ content: existing ? existing.content : "", noteToDirector: existing ? existing.noteToDirector : "" });
+                setExpandedKey("student:" + sid);
+            } else {
+                setExpandedKey(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [writeDate]);
     const nameOf = (id) => (students.find((s) => s.id === id) || {}).name || "?";
     const entryForStudent = (id) => todayEntries.find((r) => r.studentIds.includes(id));
     const extraEntries = todayEntries.filter((r) => r.studentIds.length === 0);
@@ -4374,7 +4489,18 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         rows.forEach((r) => { seen[r.authorEmail] = r.authorName || r.authorEmail; });
         return Object.keys(seen).map((email) => ({ email, name: seen[email] })).sort((a, b) => a.name.localeCompare(b.name, "ko"));
     }, [rows]);
-    const presentStudents = students.filter((s) => presentIds.has(s.id));
+    // presentIds에 아직 없어도(로딩 타이밍 등) 지금 펼쳐진 학생은 좌석표에서 누락되지 않도록 방어적으로 포함시킨다.
+    const presentStudents = useMemo(() => {
+        const list = students.filter((s) => presentIds.has(s.id));
+        if (expandedKey && expandedKey.startsWith("student:")) {
+            const sid = expandedKey.slice("student:".length);
+            if (!presentIds.has(sid)) {
+                const extra = students.find((s) => s.id === sid);
+                if (extra) list.push(extra);
+            }
+        }
+        return list;
+    }, [students, presentIds, expandedKey]);
     // 학생 버튼/기타 항목이 펼쳐졌을 때 공통으로 쓰는 지도내용+전달사항 인라인 입력창
     const inlineEditor = (extraLabelEditable) => React.createElement(
         "div",
