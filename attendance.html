@@ -2562,6 +2562,8 @@ function DiagnosticRow({ t, isLast, isDirector, saveField, setStatus, remove, re
     const [scoreDraft, setScoreDraft] = useState(t.score);
     // "평가범위"(구 메모)는 원장 전용 - 조교 화면에서는 값이 있으면 읽기전용으로만 보여준다.
     const [noteDraft, setNoteDraft] = useState(t.note);
+    // 평소엔 라벨이 붙은 읽기전용 텍스트로 컴팩트하게 보여주고, ✎ 버튼을 눌러야 입력칸으로 전환(다른 화면 편집 토글 방식과 통일).
+    const [editing, setEditing] = useState(false);
     useEffect(() => { setLevelDraft(t.recommendedLevel); }, [t.recommendedLevel]);
     useEffect(() => { setScoreDraft(t.score); }, [t.score]);
     useEffect(() => { setNoteDraft(t.note); }, [t.note]);
@@ -2589,17 +2591,33 @@ function DiagnosticRow({ t, isLast, isDirector, saveField, setStatus, remove, re
                 stt
             ))),
             isDirector && React.createElement("button", { onClick: () => register(t), className: "px-2.5 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: NAVY, color: "#fff" }, title: "학생으로 등록" }, "학생등록"),
+            React.createElement("button", { onClick: () => setEditing((v) => !v), className: "p-1.5 rounded-lg flex-shrink-0", style: { background: editing ? NAVY_SOFT : PAPER, color: NAVY }, title: "평가범위/점수/코멘트 편집" }, "✎"),
             React.createElement("button", { onClick: () => remove(t), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "삭제" }, "✕")
         ),
-        // 줄 순서: 평가범위(윗줄, 전체 너비) → 점수/결과 + 코멘트(아랫줄, 코멘트를 길게)
-        isDirector
-            ? React.createElement("input", { value: noteDraft || "", onChange: (e) => setNoteDraft(e.target.value), onBlur: () => { if (noteDraft !== t.note) saveField(t, "note", noteDraft); }, placeholder: "평가범위 (예: 중2-2 이차방정식, 25문항 내외)", className: "mt-2 w-full px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } })
-            : t.note && React.createElement("div", { className: "mt-2", style: { fontSize: 11.5, color: SUBINK } }, "평가범위 · ", t.note),
-        (t.status === "응시완료" || t.recommendedLevel || t.score) && React.createElement(
-            "div",
-            { className: "mt-2 flex gap-2 items-center" },
-            React.createElement("input", { value: scoreDraft, onChange: (e) => setScoreDraft(e.target.value), onBlur: () => { if (scoreDraft !== t.score) saveField(t, "score", scoreDraft); }, placeholder: "점수/결과", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${LINE}`, width: 110 } }),
-            React.createElement("input", { value: levelDraft, onChange: (e) => setLevelDraft(e.target.value), onBlur: () => { if (levelDraft !== t.recommendedLevel) saveField(t, "recommendedLevel", levelDraft); }, placeholder: "코멘트", className: "flex-1 min-w-0 px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } })
+        // 평소엔 라벨이 붙은 읽기전용 텍스트로 컴팩트하게, ✎ 눌렀을 때만 라벨 붙은 입력칸으로 전환.
+        // 줄 순서(편집 모드): 평가범위(윗줄, 전체 너비) → 점수/결과 + 코멘트(아랫줄, 코멘트를 길게)
+        !editing && t.note && React.createElement(
+            "div", { className: "mt-2", style: { fontSize: 11.5, color: SUBINK } },
+            React.createElement("span", { style: { fontWeight: 800, color: INK } }, "평가범위"), " · ", t.note
+        ),
+        !editing && (t.score || t.recommendedLevel) && React.createElement(
+            "div", { className: "mt-1.5 flex gap-4 flex-wrap", style: { fontSize: 11.5, color: SUBINK } },
+            t.score && React.createElement("span", null, React.createElement("span", { style: { fontWeight: 800, color: INK } }, "점수"), " · ", t.score),
+            t.recommendedLevel && React.createElement("span", { className: "min-w-0" }, React.createElement("span", { style: { fontWeight: 800, color: INK } }, "코멘트"), " · ", t.recommendedLevel)
+        ),
+        editing && (isDirector
+            ? React.createElement(
+                "div", { className: "mt-2 flex items-center gap-2" },
+                React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, color: SUBINK, width: 52, flexShrink: 0 } }, "평가범위"),
+                React.createElement("input", { value: noteDraft || "", onChange: (e) => setNoteDraft(e.target.value), onBlur: () => { if (noteDraft !== t.note) saveField(t, "note", noteDraft); }, placeholder: "예: 중2-2 이차방정식, 25문항 내외", className: "flex-1 min-w-0 px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } })
+              )
+            : t.note && React.createElement("div", { className: "mt-2", style: { fontSize: 11.5, color: SUBINK } }, React.createElement("span", { style: { fontWeight: 800, color: INK } }, "평가범위"), " · ", t.note)),
+        editing && React.createElement(
+            "div", { className: "mt-2 flex items-center gap-2 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, color: SUBINK, flexShrink: 0 } }, "점수"),
+            React.createElement("input", { value: scoreDraft, onChange: (e) => setScoreDraft(e.target.value), onBlur: () => { if (scoreDraft !== t.score) saveField(t, "score", scoreDraft); }, placeholder: "예: -5개", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${LINE}`, width: 100 } }),
+            React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, color: SUBINK, flexShrink: 0 } }, "코멘트"),
+            React.createElement("input", { value: levelDraft, onChange: (e) => setLevelDraft(e.target.value), onBlur: () => { if (levelDraft !== t.recommendedLevel) saveField(t, "recommendedLevel", levelDraft); }, placeholder: "코멘트 입력", className: "flex-1 min-w-0 px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } })
         ),
         t.status === "불참" && !isRescheduling && React.createElement("button", { onClick: () => startReschedule(t), className: "mt-2 px-2.5 py-1.5 rounded-lg text-xs font-bold", style: { background: SKY_SOFT, color: SKY } }, "날짜 재조정"),
         isRescheduling && React.createElement(
