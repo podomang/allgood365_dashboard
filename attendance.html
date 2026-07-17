@@ -185,7 +185,12 @@ function applyHistoryAsOf(s, historyList, dateStr) {
     const h = resolveHistoryAsOf(historyList, dateStr);
     if (!h)
         return s;
-    return { ...s, school: h.school, grade: h.grade, class: h.class, regularTime: h.regularTime, clinic: h.clinic, clinicTime: h.clinicTime, clinicDays: h.clinicDays, days: h.days };
+    return { ...s, school: h.school, grade: h.grade, class: h.class, regularTime: h.regularTime, saturdayTime: h.saturdayTime, clinic: h.clinic, clinicTime: h.clinicTime, clinicDays: h.clinicDays, days: h.days };
+}
+// 토요일 정규수업은 평일과 시작시간이 달라서, 학생이 등원요일에 토요일을 선택했고 토요일 출석시간이
+// 별도로 저장돼 있으면 그 날짜가 토요일일 때는 그 시간을, 아니면 평소 출석시간을 사용한다.
+function effectiveRegularTimeFor(s, weekday) {
+    return weekday === "토" && s.saturdayTime ? s.saturdayTime : s.regularTime;
 }
 // 근무일정 이력(여러 구간)을 (조교, 요일) 슬롯별로 묶어서, 주어진 날짜에 유효했던 구간만 골라낸다.
 // 슬롯마다 resolveHistoryAsOf를 재사용해서 "그 날짜에 어떤 시간이 적용 중이었는지"를 정확히 계산한다.
@@ -234,7 +239,7 @@ function mapStudent(row) {
         id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
         days: row.days || [], phone: row.phone || "", memo: row.memo || "",
         clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
-        regularTime: row.regular_time || "",
+        regularTime: row.regular_time || "", saturdayTime: row.saturday_time || "",
         enrollDate: row.enroll_date || "",
     };
 }
@@ -243,7 +248,7 @@ function mapStudentRoster(row) {
         id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
         days: row.days || [],
         clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
-        regularTime: row.regular_time || "",
+        regularTime: row.regular_time || "", saturdayTime: row.saturday_time || "",
         enrollDate: row.enroll_date || "",
     };
 }
@@ -264,7 +269,9 @@ async function upsertStudent(form) {
     const payload = {
         name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
         phone: form.phone, memo: form.memo, clinic: form.clinic, clinic_days: form.clinicDays,
-        clinic_time: form.clinicTime, regular_time: form.regularTime || null, enroll_date: form.enrollDate || null,
+        clinic_time: form.clinicTime, regular_time: form.regularTime || null,
+        saturday_time: form.days.includes("토") ? (form.saturdayTime || null) : null,
+        enroll_date: form.enrollDate || null,
     };
     if (form.id) {
         const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", form.id);
@@ -292,7 +299,7 @@ function mapStudentHistory(row) {
     return {
         id: row.id, studentId: row.student_id, effectiveFrom: row.effective_from, effectiveTo: row.effective_to,
         school: row.school || "", grade: row.grade || "", class: row.class || "",
-        regularTime: row.regular_time || "", clinic: row.clinic !== false,
+        regularTime: row.regular_time || "", saturdayTime: row.saturday_time || "", clinic: row.clinic !== false,
         clinicTime: row.clinic_time || "", clinicDays: row.clinic_days || [], days: row.days || [],
     };
 }
@@ -325,7 +332,7 @@ async function saveHistorySnapshot(studentId, effectiveFrom, snapshot) {
     for (const row of merged) {
         const payload = {
             effective_to: row.effectiveTo, school: row.school, grade: row.grade, class: row.class,
-            regular_time: row.regularTime, clinic: row.clinic, clinic_time: row.clinicTime,
+            regular_time: row.regularTime, saturday_time: row.saturdayTime || null, clinic: row.clinic, clinic_time: row.clinicTime,
             clinic_days: row.clinicDays, days: row.days,
         };
         if (row.isNew) {
@@ -578,6 +585,11 @@ async function fetchWorkLogs(startDate) {
     let q = supabaseClient.from("attn_work_logs").select("*").order("log_date", { ascending: false }).order("created_at", { ascending: false });
     if (startDate) q = q.gte("log_date", startDate);
     const { data, error } = await q;
+    if (error) throw error;
+    return data.map(mapWorkLog);
+}
+async function fetchWorkLogsForDateAuthor(date, authorEmail) {
+    const { data, error } = await supabaseClient.from("attn_work_logs").select("*").eq("log_date", date).eq("author_email", authorEmail);
     if (error) throw error;
     return data.map(mapWorkLog);
 }
@@ -1626,13 +1638,18 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const saveNoteForStudent = (id, note) => session === "extra" ? saveExtraNote(id, note) : saveSessionNote(id, note);
     const counts = STATUS_ORDER.reduce((acc, st) => { acc[st] = roster.filter((s) => current[s.id]?.status === st).length; return acc; }, {});
     const uncheckedCount = roster.filter((s) => !current[s.id]?.status).length;
+    // 토요일 정규수업은 등원요일에 토요일을 선택한 학생의 "토요일 출석시간"이 따로 저장돼 있으면
+    // 그 시간을 우선 사용한다 - 그룹핑/카드 표시 모두 이 보정된 시간을 기준으로 하도록 roster를 살짝 바꿔준다.
+    const rosterForDisplay = session === "regular"
+        ? roster.map((s) => ({ ...s, regularTime: effectiveRegularTimeFor(s, weekday) }))
+        : roster;
     const groups = groupMode === "grade"
-        ? groupByGrade(roster)
+        ? groupByGrade(rosterForDisplay)
         : groupMode === "school"
-            ? groupBySchool(roster)
+            ? groupBySchool(rosterForDisplay)
             : groupMode === "class"
-                ? groupByClass(roster)
-                : groupByTime(roster, session === "clinic" ? "clinicTime" : "regularTime");
+                ? groupByClass(rosterForDisplay)
+                : groupByTime(rosterForDisplay, session === "clinic" ? "clinicTime" : "regularTime");
     const header = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
@@ -2136,19 +2153,21 @@ function DiagnosticRow({ t, isLast, isDirector, saveField, setStatus, remove, re
 }
 // ---------- Student manager ----------
 function emptyForm() {
-    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr(), effectiveDate: todayStr() };
+    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", saturdayTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr(), effectiveDate: todayStr() };
 }
 // 이력 비교에 쓰이는 항목(학교/학년/반/시간/클리닉 관련)만 뽑아낸다. 연락처·메모는 이력 대상이 아니다.
 function historyRelevantFields(f) {
     return {
         school: f.school || "", grade: f.grade || "",
         class: [f.courseLevel, (f.courseName || "").trim()].filter(Boolean).join(" "),
-        regularTime: f.regularTime || "", clinic: f.clinic !== false,
+        regularTime: f.regularTime || "", saturdayTime: (f.days || []).includes("토") ? (f.saturdayTime || "") : "",
+        clinic: f.clinic !== false,
         clinicTime: f.clinicTime || "", clinicDays: (f.clinicDays || []).slice().sort(), days: (f.days || []).slice().sort(),
     };
 }
 function historyFieldsEqual(a, b) {
     return a.school === b.school && a.grade === b.grade && a.class === b.class && a.regularTime === b.regularTime
+        && a.saturdayTime === b.saturdayTime
         && a.clinic === b.clinic && a.clinicTime === b.clinicTime
         && JSON.stringify(a.clinicDays) === JSON.stringify(b.clinicDays) && JSON.stringify(a.days) === JSON.stringify(b.days);
 }
@@ -2200,10 +2219,11 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
     }, []);
     const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
     const openEdit = (s) => {
-        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", effectiveDate: todayStr() });
+        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr() });
         setBaseline({
             school: s.school || "", grade: s.grade || "", class: s.class || "",
-            regularTime: s.regularTime || "", clinic: s.clinic !== false, clinicTime: s.clinicTime || "",
+            regularTime: s.regularTime || "", saturdayTime: (s.days || []).includes("토") ? (s.saturdayTime || "") : "",
+            clinic: s.clinic !== false, clinicTime: s.clinicTime || "",
             clinicDays: (s.clinicDays || []).slice().sort(), days: (s.days || []).slice().sort(),
         });
         setEditTarget(s.id);
@@ -2328,9 +2348,21 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
             React.createElement("div", { className: "flex gap-2 mt-1.5 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", { key: d, onClick: () => toggleDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` } }, d))),
             React.createElement(
                 "div",
-                { className: "mt-2", style: { maxWidth: 220 } },
-                React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "\uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
-                React.createElement("input", { type: "text", value: form.regularTime, onChange: (e) => setForm({ ...form, regularTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC608: 16:00~18:00" })
+                { className: "mt-2 flex gap-3 flex-wrap" },
+                React.createElement(
+                    "div",
+                    { style: { maxWidth: 220 } },
+                    React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "\uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
+                    React.createElement("input", { type: "text", value: form.regularTime, onChange: (e) => setForm({ ...form, regularTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC608: 16:00~18:00" })
+                ),
+                // \uD1A0\uC694\uC77C \uC815\uADDC\uC218\uC5C5\uC740 \uD3C9\uC77C\uACFC \uC2DC\uC791\uC2DC\uAC04\uC774 \uB2EC\uB77C\uC11C, \uB4F1\uC6D0\uC694\uC77C\uC5D0 \uD1A0\uC694\uC77C\uC744 \uC120\uD0DD\uD55C \uD559\uC0DD\uB9CC \uBCC4\uB3C4 \uC2DC\uAC04 \uC785\uB825\uCE78\uC744 \uBCF4\uC5EC\uC900\uB2E4.
+                form.days.includes("\uD1A0") && React.createElement(
+                    "div",
+                    { style: { maxWidth: 220 } },
+                    React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: AMBER } }, "\uD1A0\uC694\uC77C \uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
+                    React.createElement("input", { type: "text", value: form.saturdayTime, onChange: (e) => setForm({ ...form, saturdayTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT }, placeholder: "\uC608: 10:00~12:00" }),
+                    React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uBE44\uC6CC\uB450\uBA74 \uD3C9\uC77C \uCD9C\uC11D \uC2DC\uAC04\uC774 \uD1A0\uC694\uC77C\uC5D0\uB3C4 \uADF8\uB300\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4.")
+                )
             )
         ),
         React.createElement(
@@ -2389,7 +2421,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
                     { className: "flex gap-1" },
                     WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => React.createElement("span", { key: d, style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, d)),
                     s.days.length === 0 && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "\uC694\uC77C \uBBF8\uC9C0\uC815"),
-                    s.regularTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, s.regularTime)
+                    s.regularTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, s.regularTime),
+                    s.days.includes("토") && s.saturdayTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: AMBER_SOFT, color: AMBER, borderRadius: 5, padding: "1.5px 6px" } }, "토 ", s.saturdayTime)
                 ),
                 !s.clinic && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 \uC81C\uC678"),
                 s.clinic && s.clinicDays.length > 0 && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" } }, "\uD074\uB9AC\uB2C9 ", s.clinicDays.join("\u00B7"), s.clinicTime ? ` ${s.clinicTime}` : ""),
@@ -2420,7 +2453,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
                         "div",
                         { key: h.id, className: "rounded-lg px-3 py-2", style: { background: SKY_SOFT } },
                         React.createElement("div", { style: { fontSize: 11.5, fontWeight: 800, color: SKY } }, h.effectiveFrom, " ~ ", h.effectiveTo || "\uD604\uC7AC"),
-                        React.createElement("div", { style: { fontSize: 12, color: INK, marginTop: 2 } }, [h.school, h.grade ? `${h.grade}\uD559\uB144` : "", h.class, h.regularTime, h.clinic ? (h.clinicDays.length ? `\uD074\uB9AC\uB2C9 ${h.clinicDays.join("\u00B7")}${h.clinicTime ? " " + h.clinicTime : ""}` : "\uD074\uB9AC\uB2C9") : "\uD074\uB9AC\uB2C9 \uC81C\uC678"].filter(Boolean).join(" \u00B7 "))
+                        React.createElement("div", { style: { fontSize: 12, color: INK, marginTop: 2 } }, [h.school, h.grade ? `${h.grade}\uD559\uB144` : "", h.class, h.regularTime, h.days.includes("\uD1A0") && h.saturdayTime ? `\uD1A0 ${h.saturdayTime}` : "", h.clinic ? (h.clinicDays.length ? `\uD074\uB9AC\uB2C9 ${h.clinicDays.join("\u00B7")}${h.clinicTime ? " " + h.clinicTime : ""}` : "\uD074\uB9AC\uB2C9") : "\uD074\uB9AC\uB2C9 \uC81C\uC678"].filter(Boolean).join(" \u00B7 "))
                     ))
                 )
     );
@@ -3574,9 +3607,6 @@ function AssistantAttendanceManager({ isDirector, assistants, myAssistant, focus
     );
 }
 // ---------- 근무일지 ----------
-function emptyWorkLogForm(dateStr) {
-    return { id: null, date: dateStr || todayStr(), studentIds: [], studentNote: "", content: "", noteToDirector: "" };
-}
 // 그 날짜에 실제로 출석(출석/지각/조퇴)한 학생 id 집합 - 근무일지 학생 선택 후보를 여기서 우선 보여준다.
 function presentStudentIdsForDate(att) {
     const ids = new Set();
@@ -3593,12 +3623,16 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
     const [loading, setLoading] = useState(true);
     const [rangeMonths, setRangeMonths] = useState(1);
     const [authorFilter, setAuthorFilter] = useState("");
-    const [showForm, setShowForm] = useState(false);
-    const [form, setForm] = useState(emptyWorkLogForm());
-    const [saving, setSaving] = useState(false);
-    const [studentQuery, setStudentQuery] = useState("");
+    // "작성" 영역: 교실 좌석표처럼 그날 출석한 학생을 버튼으로 전부 늘어놓고, 누르면 그 학생 전용
+    // 입력창(지도내용/전달사항)이 그 자리에서 펼쳐진다. expandedKey로 지금 펼쳐진 항목 하나만 추적.
+    const [writeDate, setWriteDate] = useState(todayStr());
     const [presentIds, setPresentIds] = useState(new Set());
     const [loadingPresent, setLoadingPresent] = useState(false);
+    const [todayEntries, setTodayEntries] = useState([]); // 이 날짜에 "내"가 이미 작성한 일지들
+    const [expandedKey, setExpandedKey] = useState(null); // "student:<id>" | "extraNew" | "extraEdit:<logId>" | null
+    const [draft, setDraft] = useState({ content: "", noteToDirector: "" });
+    const [extraLabel, setExtraLabel] = useState("");
+    const [savingInline, setSavingInline] = useState(false);
     const load = async () => {
         setLoading(true);
         try {
@@ -3609,14 +3643,22 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         }
         setLoading(false);
     };
+    const loadTodayEntries = async (dateStr) => {
+        try {
+            setTodayEntries(await fetchWorkLogsForDateAuthor(dateStr, myEmail));
+        } catch (e) {
+            console.error(e);
+            setTodayEntries([]);
+        }
+    };
     useEffect(() => { load(); }, [isDirector, rangeMonths]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_work_logs_changes")
-            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_logs" }, () => load())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_logs" }, () => { load(); loadTodayEntries(writeDate); })
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
-    }, [isDirector, rangeMonths]);
+    }, [isDirector, rangeMonths, writeDate]);
     const loadPresent = async (dateStr) => {
         setLoadingPresent(true);
         try {
@@ -3628,40 +3670,73 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         }
         setLoadingPresent(false);
     };
-    useEffect(() => { if (showForm) loadPresent(form.date); }, [showForm, form.date]);
+    useEffect(() => { loadPresent(writeDate); loadTodayEntries(writeDate); setExpandedKey(null); }, [writeDate]);
     const nameOf = (id) => (students.find((s) => s.id === id) || {}).name || "?";
-    const openNew = () => { setForm(emptyWorkLogForm()); setStudentQuery(""); setShowForm(true); };
-    const openEdit = (r) => {
-        setForm({ id: r.id, date: r.date, studentIds: r.studentIds.slice(), studentNote: r.studentNote, content: r.content, noteToDirector: r.noteToDirector });
-        setStudentQuery("");
-        setShowForm(true);
+    const entryForStudent = (id) => todayEntries.find((r) => r.studentIds.includes(id));
+    const extraEntries = todayEntries.filter((r) => r.studentIds.length === 0);
+    const openStudent = (s) => {
+        const key = "student:" + s.id;
+        if (expandedKey === key) { setExpandedKey(null); return; }
+        const existing = entryForStudent(s.id);
+        setDraft({ content: existing ? existing.content : "", noteToDirector: existing ? existing.noteToDirector : "" });
+        setExpandedKey(key);
     };
-    const toggleStudent = (id) => {
-        setForm((prev) => ({ ...prev, studentIds: prev.studentIds.includes(id) ? prev.studentIds.filter((x) => x !== id) : [...prev.studentIds, id] }));
+    const openExtraNew = () => {
+        if (expandedKey === "extraNew") { setExpandedKey(null); return; }
+        setExtraLabel("");
+        setDraft({ content: "", noteToDirector: "" });
+        setExpandedKey("extraNew");
     };
-    const save = async () => {
-        if (!form.content.trim()) { alert("수업·지도내용을 입력해주세요."); return; }
-        setSaving(true);
+    const openExtraEdit = (r) => {
+        const key = "extraEdit:" + r.id;
+        if (expandedKey === key) { setExpandedKey(null); return; }
+        setExtraLabel(r.studentNote);
+        setDraft({ content: r.content, noteToDirector: r.noteToDirector });
+        setExpandedKey(key);
+    };
+    const saveInline = async () => {
+        if (!expandedKey) return;
+        if (!draft.content.trim()) { alert("수업·지도내용을 입력해주세요."); return; }
+        setSavingInline(true);
         try {
-            if (form.id) {
-                await updateWorkLogRow(form.id, form);
-            } else {
-                const authorName = isDirector ? "원장" : (myAssistant ? myAssistant.name : "");
-                await addWorkLogRow({ ...form, authorEmail: myEmail, authorName });
+            const authorName = isDirector ? "원장" : (myAssistant ? myAssistant.name : "");
+            if (expandedKey.startsWith("student:")) {
+                const sid = expandedKey.slice("student:".length);
+                const existing = entryForStudent(sid);
+                const payload = { date: writeDate, studentIds: [sid], studentNote: "", content: draft.content, noteToDirector: draft.noteToDirector };
+                if (existing) await updateWorkLogRow(existing.id, payload);
+                else await addWorkLogRow({ ...payload, authorEmail: myEmail, authorName });
+            } else if (expandedKey === "extraNew") {
+                await addWorkLogRow({ date: writeDate, studentIds: [], studentNote: extraLabel, content: draft.content, noteToDirector: draft.noteToDirector, authorEmail: myEmail, authorName });
+            } else if (expandedKey.startsWith("extraEdit:")) {
+                const id = expandedKey.slice("extraEdit:".length);
+                await updateWorkLogRow(id, { date: writeDate, studentIds: [], studentNote: extraLabel, content: draft.content, noteToDirector: draft.noteToDirector });
             }
-            setShowForm(false);
-            setForm(emptyWorkLogForm());
+            setExpandedKey(null);
             await load();
+            await loadTodayEntries(writeDate);
         } catch (e) {
             alert("저장 중 오류: " + e.message);
         }
-        setSaving(false);
+        setSavingInline(false);
+    };
+    const deleteExtraEntry = async (r) => {
+        if (!confirm("이 기록을 삭제할까요?")) return;
+        try {
+            await deleteWorkLogRow(r.id);
+            if (expandedKey === "extraEdit:" + r.id) setExpandedKey(null);
+            await load();
+            await loadTodayEntries(writeDate);
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
     };
     const remove = async (id) => {
         if (!confirm("이 근무일지를 삭제할까요?")) return;
         try {
             await deleteWorkLogRow(id);
             await load();
+            await loadTodayEntries(writeDate);
         } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
@@ -3675,64 +3750,105 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         }
     };
     const canEdit = (r) => isDirector || r.authorEmail === myEmail;
+    // 아래쪽 "전체/내 근무일지" 조회 목록에서 인라인으로 바로 수정할 때 쓰는 상태(작성 영역의 expandedKey와는 별개)
+    const [editingRowId, setEditingRowId] = useState(null);
+    const [rowDraft, setRowDraft] = useState({ content: "", noteToDirector: "" });
+    const openRowEdit = (r) => { setEditingRowId(r.id); setRowDraft({ content: r.content, noteToDirector: r.noteToDirector }); };
+    const saveRowEdit = async (r) => {
+        if (!rowDraft.content.trim()) { alert("수업·지도내용을 입력해주세요."); return; }
+        try {
+            await updateWorkLogRow(r.id, { date: r.date, studentIds: r.studentIds, studentNote: r.studentNote, content: rowDraft.content, noteToDirector: rowDraft.noteToDirector });
+            setEditingRowId(null);
+            await load();
+            if (r.date === writeDate) await loadTodayEntries(writeDate);
+        } catch (e) {
+            alert("수정 중 오류: " + e.message);
+        }
+    };
     const visibleRows = isDirector ? rows.filter((r) => !authorFilter || r.authorEmail === authorFilter) : rows;
     const authorOptions = useMemo(() => {
         const seen = {};
         rows.forEach((r) => { seen[r.authorEmail] = r.authorName || r.authorEmail; });
         return Object.keys(seen).map((email) => ({ email, name: seen[email] })).sort((a, b) => a.name.localeCompare(b.name, "ko"));
     }, [rows]);
-    const q = studentQuery.trim();
-    const candidateIds = Array.from(presentIds);
-    const candidates = students.filter((s) => candidateIds.includes(s.id) && (!q || s.name.includes(q)) && !form.studentIds.includes(s.id)).slice(0, 8);
-    const formCard = showForm && React.createElement(
+    const presentStudents = students.filter((s) => presentIds.has(s.id));
+    // 학생 버튼/기타 항목이 펼쳐졌을 때 공통으로 쓰는 지도내용+전달사항 인라인 입력창
+    const inlineEditor = (extraLabelEditable) => React.createElement(
         "div",
-        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, form.id ? "근무일지 수정" : "근무일지 작성"),
+        { className: "p-3", style: { background: PAPER, borderTop: `1px solid ${LINE}` } },
+        extraLabelEditable && React.createElement("input", { value: extraLabel, onChange: (e) => setExtraLabel(e.target.value), placeholder: "대상 설명 (예: 반 전체, 명단에 없는 학생 등)", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}`, background: "#fff" } }),
+        React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "수업·지도내용 *"),
+        React.createElement("textarea", { autoFocus: true, value: draft.content, onChange: (e) => setDraft({ ...draft, content: e.target.value }), rows: 3, placeholder: "오늘 지도한 내용, 특이사항 등을 기록하세요.", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1 mb-2", style: { border: `1px solid ${LINE}`, background: "#fff", resize: "vertical" } }),
+        React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: AMBER } }, "원장님께 전달사항 (선택)"),
+        React.createElement("textarea", { value: draft.noteToDirector, onChange: (e) => setDraft({ ...draft, noteToDirector: e.target.value }), rows: 2, placeholder: "원장님이 꼭 확인해야 할 내용이 있으면 적어주세요.", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT } }),
         React.createElement(
             "div",
-            null,
-            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "날짜"),
-            React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1 mb-3", style: { border: `1px solid ${LINE}` } })
-        ),
-        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "대상 학생 (그날 출석한 학생 중 선택)"),
-        React.createElement(
-            "div",
-            { className: "mt-1 mb-2" },
-            form.studentIds.length > 0 && React.createElement(
-                "div",
-                { className: "flex flex-wrap gap-1.5 mb-2" },
-                form.studentIds.map((id) => React.createElement(
-                    "span",
-                    { key: id, className: "px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1", style: { background: PURPLE_SOFT, color: PURPLE } },
-                    nameOf(id),
-                    React.createElement("button", { onClick: () => toggleStudent(id), style: { color: PURPLE } }, "✕")
-                ))
-            ),
-            React.createElement("input", { value: studentQuery, onChange: (e) => setStudentQuery(e.target.value), placeholder: loadingPresent ? "출석 정보 불러오는 중..." : "학생 이름 검색", className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
-            q !== "" && candidates.length === 0 && React.createElement("div", { style: { fontSize: 12, color: SUBINK, padding: "6px 2px" } }, "일치하는 학생이 없습니다."),
-            !loadingPresent && presentIds.size === 0 && React.createElement("div", { style: { fontSize: 12, color: SUBINK, padding: "6px 2px" } }, "이 날짜에 기록된 출석 정보가 없습니다. 아래 메모에 자유롭게 적어주세요."),
-            candidates.length > 0 && React.createElement(
-                "div",
-                { className: "flex flex-col gap-1 mt-1" },
-                candidates.map((s) => React.createElement(
-                    "button",
-                    { key: s.id, onClick: () => { toggleStudent(s.id); setStudentQuery(""); }, className: "text-left px-3 py-2 rounded-lg text-sm", style: { background: PAPER, color: INK } },
-                    React.createElement("span", { style: { fontWeight: 700 } }, s.name),
-                    React.createElement("span", { style: { color: SUBINK, fontSize: 12 } }, " · ", s.school || "학교 미지정", " · ", s.grade ? s.grade + "학년" : "학년 미지정")
-                ))
-            )
-        ),
-        React.createElement("input", { value: form.studentNote, onChange: (e) => setForm({ ...form, studentNote: e.target.value }), placeholder: "대상 보완 메모 (선택, 예: 반 전체, 명단에 없는 학생 등)", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-3", style: { border: `1px solid ${LINE}` } }),
-        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "수업·지도내용 *"),
-        React.createElement("textarea", { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), rows: 3, placeholder: "오늘 지도한 내용, 특이사항 등을 기록하세요.", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1 mb-3", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
-        React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: AMBER } }, "원장님께 전달사항 (선택)"),
-        React.createElement("textarea", { value: form.noteToDirector, onChange: (e) => setForm({ ...form, noteToDirector: e.target.value }), rows: 2, placeholder: "원장님이 꼭 확인해야 할 내용이 있으면 적어주세요.", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT } }),
-        React.createElement(
-            "div",
-            { className: "flex gap-2 mt-4" },
-            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
-            React.createElement("button", { onClick: () => { setShowForm(false); setForm(emptyWorkLogForm()); }, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+            { className: "flex gap-2 mt-3" },
+            React.createElement("button", { onClick: saveInline, disabled: savingInline, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: savingInline ? 0.6 : 1 } }, savingInline ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: () => setExpandedKey(null), className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
         )
+    );
+    // 학생 버튼들 - 교실 좌석표처럼 그리드로 배치. 이미 오늘 기록을 남긴 학생은 색(TEAL)으로 구분.
+    const studentButtons = presentStudents.map((s) => {
+        const key = "student:" + s.id;
+        const isOpen = expandedKey === key;
+        const existing = entryForStudent(s.id);
+        return React.createElement(
+            "div",
+            { key: s.id, style: isOpen ? { gridColumn: "1 / -1" } : {} },
+            React.createElement(
+                "button",
+                {
+                    onClick: () => openStudent(s),
+                    className: "w-full px-2 py-2.5 rounded-xl text-sm font-bold text-center transition-colors",
+                    style: isOpen
+                        ? { background: PURPLE, color: "#fff", borderRadius: existing || true ? "12px 12px 0 0" : 12 }
+                        : existing
+                            ? { background: TEAL_SOFT, color: TEAL, border: `1px solid ${TEAL}` }
+                            : { background: "#fff", color: INK, border: `1px solid ${LINE}` },
+                },
+                s.name
+            ),
+            isOpen && React.createElement("div", { style: { border: `1.5px solid ${PURPLE}`, borderTop: "none", borderRadius: "0 0 12px 12px" } }, inlineEditor(false))
+        );
+    });
+    const extraSection = React.createElement(
+        "div",
+        { className: "mt-3" },
+        extraEntries.map((r) => {
+            const key = "extraEdit:" + r.id;
+            const isOpen = expandedKey === key;
+            return React.createElement(
+                "div",
+                { key: r.id, className: "rounded-xl overflow-hidden mb-2", style: { border: `1px solid ${isOpen ? PURPLE : TEAL}` } },
+                React.createElement(
+                    "div",
+                    { className: "flex items-center justify-between px-3 py-2", style: { background: isOpen ? PURPLE_SOFT : TEAL_SOFT } },
+                    React.createElement("button", { onClick: () => openExtraEdit(r), className: "text-left flex-1", style: { fontSize: 13, fontWeight: 700, color: isOpen ? PURPLE : TEAL } }, "📌 " + (r.studentNote || "기타")),
+                    React.createElement("button", { onClick: () => deleteExtraEntry(r), className: "p-1 rounded-md", style: { color: RED } }, "🗑")
+                ),
+                isOpen && inlineEditor(true)
+            );
+        }),
+        React.createElement(
+            "div",
+            { className: "rounded-xl overflow-hidden", style: { border: `1px solid ${expandedKey === "extraNew" ? PURPLE : LINE}` } },
+            React.createElement("button", { onClick: openExtraNew, className: "w-full px-3 py-2.5 text-sm font-bold text-left", style: { background: expandedKey === "extraNew" ? PURPLE_SOFT : "#fff", color: expandedKey === "extraNew" ? PURPLE : SUBINK } }, "+ 기타 메모 추가 (반 전체, 명단에 없는 학생 등)"),
+            expandedKey === "extraNew" && inlineEditor(true)
+        )
+    );
+    const writeSection = React.createElement(
+        "div",
+        { className: "rounded-2xl p-4 mb-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 2 } }, "근무일지 작성"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12, marginBottom: 10 } }, "출석한 학생을 누르면 지도내용·전달사항을 남길 수 있어요. 이미 기록한 학생은 색이 다르게 표시됩니다."),
+        React.createElement("input", { type: "date", value: writeDate, onChange: (e) => setWriteDate(e.target.value), className: "px-3 py-2 rounded-lg text-sm outline-none mb-3", style: { border: `1px solid ${LINE}` } }),
+        loadingPresent
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "출석 정보 불러오는 중...")
+            : presentStudents.length === 0
+                ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "이 날짜에 기록된 출석 정보가 없습니다. 아래 \"기타 메모\"로 남겨주세요.")
+                : React.createElement("div", { className: "grid gap-2 mb-2", style: { gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" } }, studentButtons),
+        extraSection
     );
     const renderRow = (r) => React.createElement(
         "div",
@@ -3749,7 +3865,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
             React.createElement(
                 "div",
                 { className: "flex items-center gap-1" },
-                canEdit(r) && React.createElement("button", { onClick: () => openEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎"),
+                canEdit(r) && editingRowId !== r.id && React.createElement("button", { onClick: () => openRowEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎"),
                 canEdit(r) && React.createElement("button", { onClick: () => remove(r.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
             )
         ),
@@ -3760,20 +3876,37 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
             r.studentIds.length > 0 && r.studentNote ? " · " : "",
             r.studentNote
         ),
-        React.createElement("div", { style: { fontSize: 13, color: INK, whiteSpace: "pre-wrap", marginBottom: r.noteToDirector ? 8 : 0 } }, r.content),
-        r.noteToDirector && React.createElement(
-            "div",
-            { className: "rounded-lg p-2.5 flex items-start justify-between gap-2 flex-wrap", style: { background: AMBER_SOFT, border: `1px solid ${AMBER}` } },
-            React.createElement(
+        editingRowId === r.id
+            ? React.createElement(
                 "div",
+                { className: "mt-1" },
+                React.createElement("textarea", { autoFocus: true, value: rowDraft.content, onChange: (e) => setRowDraft({ ...rowDraft, content: e.target.value }), rows: 3, className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}`, resize: "vertical" } }),
+                React.createElement("textarea", { value: rowDraft.noteToDirector, onChange: (e) => setRowDraft({ ...rowDraft, noteToDirector: e.target.value }), rows: 2, placeholder: "원장님께 전달사항", className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT } }),
+                React.createElement(
+                    "div",
+                    { className: "flex gap-2" },
+                    React.createElement("button", { onClick: () => saveRowEdit(r), className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff" } }, "저장"),
+                    React.createElement("button", { onClick: () => setEditingRowId(null), className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+                )
+            )
+            : React.createElement(
+                React.Fragment,
                 null,
-                React.createElement("div", { style: { fontSize: 11, fontWeight: 800, color: AMBER, marginBottom: 2 } }, "📌 원장님께 전달"),
-                React.createElement("div", { style: { fontSize: 12.5, color: INK, whiteSpace: "pre-wrap" } }, r.noteToDirector)
-            ),
-            isDirector
-                ? React.createElement("button", { onClick: () => toggleConfirmed(r), className: "px-2.5 py-1 rounded-lg text-xs font-bold flex-shrink-0", style: r.directorConfirmed ? { background: TEAL, color: "#fff" } : { background: "#fff", color: AMBER, border: `1px solid ${AMBER}` } }, r.directorConfirmed ? "확인함" : "미확인")
-                : React.createElement("span", { className: "px-2.5 py-1 rounded-lg text-xs font-bold flex-shrink-0", style: r.directorConfirmed ? { background: TEAL_SOFT, color: TEAL } : { background: "#fff", color: AMBER, border: `1px solid ${AMBER}` } }, r.directorConfirmed ? "원장님 확인함" : "확인 대기중")
-        )
+                React.createElement("div", { style: { fontSize: 13, color: INK, whiteSpace: "pre-wrap", marginBottom: r.noteToDirector ? 8 : 0 } }, r.content),
+                r.noteToDirector && React.createElement(
+                    "div",
+                    { className: "rounded-lg p-2.5 flex items-start justify-between gap-2 flex-wrap", style: { background: AMBER_SOFT, border: `1px solid ${AMBER}` } },
+                    React.createElement(
+                        "div",
+                        null,
+                        React.createElement("div", { style: { fontSize: 11, fontWeight: 800, color: AMBER, marginBottom: 2 } }, "📌 원장님께 전달"),
+                        React.createElement("div", { style: { fontSize: 12.5, color: INK, whiteSpace: "pre-wrap" } }, r.noteToDirector)
+                    ),
+                    isDirector
+                        ? React.createElement("button", { onClick: () => toggleConfirmed(r), className: "px-2.5 py-1 rounded-lg text-xs font-bold flex-shrink-0", style: r.directorConfirmed ? { background: TEAL, color: "#fff" } : { background: "#fff", color: AMBER, border: `1px solid ${AMBER}` } }, r.directorConfirmed ? "확인함" : "미확인")
+                        : React.createElement("span", { className: "px-2.5 py-1 rounded-lg text-xs font-bold flex-shrink-0", style: r.directorConfirmed ? { background: TEAL_SOFT, color: TEAL } : { background: "#fff", color: AMBER, border: `1px solid ${AMBER}` } }, r.directorConfirmed ? "원장님 확인함" : "확인 대기중")
+                )
+            )
     );
     const groupedByAuthor = {};
     if (isDirector) {
@@ -3840,10 +3973,9 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students }) {
         "div",
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, "근무일지"),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교별·월별로 정리된 근무일지를 조회하고, 전달사항을 확인 처리할 수 있습니다." : "근무한 날 지도한 학생과 내용을 남기고, 원장님께 전달할 사항을 기록하세요."),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교별·월별로 정리된 근무일지를 조회하고, 전달사항을 확인 처리할 수 있습니다." : "출석한 학생을 눌러 지도내용을 남기고, 원장님께 전달할 사항을 기록하세요."),
         !isDirector && !myAssistant && React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "이 계정이 조교명단에 아직 연결되지 않았습니다."),
-        (isDirector || myAssistant) && !showForm && React.createElement("button", { onClick: openNew, className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold mb-4", style: { background: PURPLE, color: "#fff" } }, "+ 근무일지 작성"),
-        formCard,
+        (isDirector || myAssistant) && writeSection,
         (isDirector || myAssistant) && listCard
     );
 }
