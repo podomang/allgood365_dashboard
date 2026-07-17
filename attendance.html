@@ -2299,7 +2299,7 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     };
     const addForm = isDirector && React.createElement(
         "div",
-        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}`, width: "100%" } },
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "근무일정 추가"),
         React.createElement(
             "div",
@@ -2324,21 +2324,21 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     // 조교별 보기: 좁고 촘촘하게(한눈에 들어오도록) 조정
     const grid = React.createElement(
         "div",
-        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, width: "fit-content", maxWidth: "100%" } },
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, width: "100%" } },
         React.createElement(
             "div",
             { className: "overflow-x-auto" },
             React.createElement(
                 "table",
-                { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed" } },
+                { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed", width: "100%" } },
                 React.createElement(
                     "thead",
                     null,
                     React.createElement(
                         "tr",
                         null,
-                        React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: 64 } }, "조교"),
-                        JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: 62 } }, d))
+                        React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: "14%" } }, "조교"),
+                        JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: "12.3%" } }, d))
                     )
                 ),
                 React.createElement(
@@ -2400,7 +2400,7 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
     };
     const timeGrid = React.createElement(
         "div",
-        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, ...(timeSlots.length === 0 ? {} : { width: "fit-content", maxWidth: "100%" }) } },
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, width: "100%" } },
         timeSlots.length === 0
             ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 20px" } }, "등록된 근무일정이 없습니다.")
             : React.createElement(
@@ -2408,15 +2408,15 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
                 { className: "overflow-x-auto" },
                 React.createElement(
                     "table",
-                    { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed" } },
+                    { className: "text-sm", style: { borderCollapse: "collapse", tableLayout: "fixed", width: "100%" } },
                     React.createElement(
                         "thead",
                         null,
                         React.createElement(
                             "tr",
                             null,
-                            React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: 64 } }, "시간대"),
-                            JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: 62 } }, d))
+                            React.createElement("th", { className: "text-left px-2.5 py-2", style: { borderBottom: `1px solid ${LINE}`, color: SUBINK, fontSize: 11, width: "14%" } }, "시간대"),
+                            JS_DAY_TO_KOR.map((d) => React.createElement("th", { key: d, className: "text-center px-1 py-2", style: { borderBottom: `1px solid ${LINE}`, color: d === "일" ? RED : d === "토" ? NAVY : SUBINK, fontSize: 11, width: "12.3%" } }, d))
                         )
                     ),
                     React.createElement(
@@ -2485,13 +2485,17 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant }) {
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, isDirector ? "조교별 근무일정" : "내 근무일정"),
         React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "요일별로 조교 근무시간을 배정합니다. '시간대별 보기'로 바꾸면 시간대별 근무 조교를 한눈에 볼 수 있어요." : "근무일별로 내 근무시간을 확인할 수 있습니다."),
-        addForm,
-        viewToggle,
-        loading
-            ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
-            : (relevantAssistants.length === 0
-                ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.")
-                : (isDirector ? (viewMode === "assistant" ? grid : timeGrid) : myScheduleList))
+        React.createElement(
+            "div",
+            { style: { width: "fit-content", maxWidth: "100%" } },
+            addForm,
+            viewToggle,
+            loading
+                ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+                : (relevantAssistants.length === 0
+                    ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, isDirector ? "등록된 조교가 없습니다." : "이 계정이 조교명단에 아직 연결되지 않았습니다.")
+                    : (isDirector ? (viewMode === "assistant" ? grid : timeGrid) : myScheduleList))
+        )
     );
 }
 // ---------- 출퇴근기록 ----------
