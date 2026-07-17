@@ -637,6 +637,61 @@ async function removeExtraRosterRow(date, studentId) {
     // 같이 남아있던 그날의 출석 기록도 정리
     await supabaseClient.from("attn_attendance").delete().eq("attn_date", date).eq("session", "extra").eq("student_id", studentId);
 }
+// ---------- 진단평가 (신규등록 전 응시자, 아직 학생명단에 없는 사람) ----------
+function mapDiagnosticTest(r) {
+    return {
+        id: r.id, date: r.test_date, time: r.test_time || "", name: r.name, phone: r.phone || "",
+        school: r.school || "", grade: r.grade || "", note: r.note || "",
+        recommendedLevel: r.recommended_level || "", score: r.score || "", sourceNote: r.source_note || "",
+        status: r.status, linkedStudentId: r.linked_student_id,
+    };
+}
+async function fetchDiagnosticTestsForDate(date) {
+    const { data, error } = await supabaseClient.from("attn_diagnostic_tests").select("*").eq("test_date", date).order("test_time");
+    if (error) throw error;
+    return data.map(mapDiagnosticTest);
+}
+// 아직 학생으로 등록되지 않은(linked_student_id가 비어있는) 전체 진단평가 응시자 — 날짜 상관없이 전부 불러온 뒤
+// 화면에서 "다가오는"/"지난" 두 그룹으로 나눠서 보여준다(자동 정리 대신 시각적으로만 접어둠).
+async function fetchUnlinkedDiagnosticTests() {
+    const { data, error } = await supabaseClient.from("attn_diagnostic_tests").select("*").is("linked_student_id", null).order("test_date").order("test_time");
+    if (error) throw error;
+    return data.map(mapDiagnosticTest);
+}
+async function addDiagnosticTest(payload) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").insert({
+        test_date: payload.date, test_time: payload.time || null, name: payload.name, phone: payload.phone || null,
+        school: payload.school || null, grade: payload.grade || null, note: payload.note || "", source_note: payload.sourceNote || null,
+    });
+    if (error) throw error;
+}
+async function updateDiagnosticTest(id, payload) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").update({
+        test_date: payload.date, test_time: payload.time || null, name: payload.name, phone: payload.phone || null,
+        school: payload.school || null, grade: payload.grade || null, note: payload.note || "",
+        recommended_level: payload.recommendedLevel || null, score: payload.score || null, source_note: payload.sourceNote || null,
+    }).eq("id", id);
+    if (error) throw error;
+}
+async function setDiagnosticTestStatus(id, status) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").update({ status }).eq("id", id);
+    if (error) throw error;
+}
+// 불참 응시자를 다른 날짜로 재조정 — 날짜를 바꾸고 상태를 다시 "예정"으로 되돌린다.
+async function rescheduleDiagnosticTest(id, newDate) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").update({ test_date: newDate, status: "예정" }).eq("id", id);
+    if (error) throw error;
+}
+async function deleteDiagnosticTest(id) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").delete().eq("id", id);
+    if (error) throw error;
+}
+// "학생으로 등록" 버튼으로 새 학생이 만들어지면, 그 학생 id를 진단평가 기록에 연결해서
+// 다가오는/지난 목록에서 자동으로 빠지게 한다(이미 등록됐다는 뜻이므로).
+async function linkDiagnosticTestToStudent(id, studentId) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").update({ linked_student_id: studentId, status: "응시완료" }).eq("id", id);
+    if (error) throw error;
+}
 // 일정변경: 원래 출석부에 목적지(날짜/시간)를 기록하고, 그 날짜의 보강 명단에 자동 등록
 async function setScheduleChange(date, session, studentId, targetDate, targetTime, note, addedBy, prevTargetDate) {
     const { error } = await supabaseClient.from("attn_attendance").update({
@@ -672,9 +727,28 @@ function StampButton({ status, active, onClick }) {
 // ============================================================
 // Login screen
 // ============================================================
+// 비밀번호 표시/숨김 토글 아이콘 - 실사형 눈 이모지 대신 옅은 선 그림으로, 부담스럽지 않게
+function EyeIcon({ off }) {
+    const common = { width: 19, height: 19, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
+    return off
+        ? React.createElement(
+            "svg",
+            common,
+            React.createElement("path", { d: "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" }),
+            React.createElement("path", { d: "M14.12 14.12a3 3 0 1 1-4.24-4.24" }),
+            React.createElement("line", { x1: "1", y1: "1", x2: "23", y2: "23" })
+        )
+        : React.createElement(
+            "svg",
+            common,
+            React.createElement("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }),
+            React.createElement("circle", { cx: "12", cy: "12", r: "3" })
+        );
+}
 function LoginScreen() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const submit = async (e) => {
@@ -692,7 +766,12 @@ function LoginScreen() {
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, textAlign: "center", marginBottom: 18, color: INK } }, "\uB0B4\uBD80 \uAD00\uB9AC \uC2DC\uC2A4\uD15C \uB85C\uADF8\uC778"),
             React.createElement("form", { onSubmit: submit, className: "flex flex-col gap-3" },
                 React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), placeholder: "\uC774\uBA54\uC77C", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
-                React.createElement("input", { type: "password", required: true, value: password, onChange: (e) => setPassword(e.target.value), placeholder: "\uBE44\uBC00\uBC88\uD638", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement(
+                    "div",
+                    { style: { position: "relative" } },
+                    React.createElement("input", { type: showPassword ? "text" : "password", required: true, value: password, onChange: (e) => setPassword(e.target.value), placeholder: "\uBE44\uBC00\uBC88\uD638", className: "w-full px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, paddingRight: 42 } }),
+                    React.createElement("button", { type: "button", onClick: () => setShowPassword((v) => !v), "aria-label": showPassword ? "\uBE44\uBC00\uBC88\uD638 \uC228\uAE30\uAE30" : "\uBE44\uBC00\uBC88\uD638 \uBCF4\uC774\uAE30", style: { position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, background: "transparent" } }, React.createElement(EyeIcon, { off: showPassword }))
+                ),
                 error && React.createElement("div", { style: { color: RED, fontSize: 12.5, fontWeight: 600 } }, error),
                 React.createElement("button", { type: "submit", disabled: loading, className: "py-3 rounded-lg text-sm font-bold mt-1", style: { background: NAVY, color: "#fff", opacity: loading ? 0.6 : 1 } }, loading ? "로그인 중..." : "로그인")),
             React.createElement("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 14, textAlign: "center" } }, "\uACC4\uC815\uC774 \uC5C6\uB2E4\uBA74 \uC6D0\uC7A5\uB2D8\uAED8 \uBB38\uC758\uD558\uC138\uC694."))));
@@ -735,6 +814,10 @@ function MainApp({ session }) {
     const [month, setMonth] = useState(new Date());
     const [attSession, setAttSession] = useState("regular");
     const [attGroupMode, setAttGroupMode] = useState("time");
+    // 진단평가 응시자를 "학생으로 등록" 버튼으로 넘길 때 쓰는 다리 역할 상태.
+    // 출석체크(보강 탭)에서 채워지고, 학생관리 탭으로 넘어가면 그 값으로 새 학생 폼이 미리 채워진다.
+    const [studentPrefill, setStudentPrefill] = useState(null);
+    const goRegisterStudentFromDiagnostic = (prefillData) => { setStudentPrefill(prefillData); setTab("students"); };
     const reloadStudents = async () => {
         try {
             setStudents(await fetchStudentsRoster());
@@ -830,10 +913,10 @@ function MainApp({ session }) {
         : React.createElement(
             React.Fragment,
             null,
-            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode }),
+            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector }),
             tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email }),
-            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents })
+            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null) })
         );
     return React.createElement(
         "div",
@@ -1229,7 +1312,10 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
 }
 
 // ---------- Attendance ----------
-function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode }) {
+function emptyDiagForm() {
+    return { name: "", phone: "", school: "", grade: "", time: "", note: "", sourceNote: "" };
+}
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic }) {
     const session = attSession;
     const setSession = setAttSession;
     const groupMode = attGroupMode;
@@ -1244,20 +1330,48 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [showAddPicker, setShowAddPicker] = useState(false);
     const [history, setHistory] = useState([]);
     const [collapsedGroups, setCollapsedGroups] = useState({});
+    // 진단평가(신규등록 전 배치테스트) - 선택된 날짜 목록 + 접수 폼
+    const [diagTests, setDiagTests] = useState([]);
+    const [showDiagAdd, setShowDiagAdd] = useState(false);
+    const [diagForm, setDiagForm] = useState(emptyDiagForm());
+    const [savingDiag, setSavingDiag] = useState(false);
+    const [reschedulingId, setReschedulingId] = useState(null);
+    const [rescheduleDate, setRescheduleDate] = useState("");
+    // 다가오는/지난 진단평가(아직 학생 미등록) 위젯 - 날짜와 무관하게 전체를 따로 불러옴
+    const [showUpcomingDiag, setShowUpcomingDiag] = useState(false);
+    const [upcomingDiag, setUpcomingDiag] = useState([]);
+    const [showPastDiag, setShowPastDiag] = useState(false);
     const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
     const weekday = korWeekdayOf(selectedDate);
     const load = async () => {
         setLoading(true);
         try {
-            const [att, extra, notes] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate)]);
+            const [att, extra, notes, diag] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
             setSessionNotes(notes);
+            setDiagTests(diag);
         } catch (e) {
             console.error(e);
         }
         setLoading(false);
     };
+    // 다가오는/지난 진단평가 위젯 데이터 로드 (날짜 무관, 아직 학생 미등록인 것만)
+    const loadUpcomingDiag = async () => {
+        try {
+            setUpcomingDiag(await fetchUnlinkedDiagnosticTests());
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { loadUpcomingDiag(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_diagnostic_tests_all_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_diagnostic_tests" }, () => loadUpcomingDiag())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
     // 학생 정보 변경 이력: 반이동/시간변경 등이 있어도 과거 날짜를 조회하면 그 당시 정보가 정확히
     // 보이도록, 전체 이력을 한 번 불러와두고 선택된 날짜에 맞는 값으로 매 번 다시 계산한다.
     const loadHistory = async () => {
@@ -1285,23 +1399,25 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const resolvedStudents = useMemo(() => students.map((s) => applyHistoryAsOf(s, historyByStudent[s.id], selectedDate)), [students, historyByStudent, selectedDate]);
     const loadQuiet = async () => {
         try {
-            const [att, extra, notes] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate)]);
+            const [att, extra, notes, diag] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
             setSessionNotes(notes);
+            setDiagTests(diag);
         } catch (e) {
             console.error(e);
         }
     };
-    useEffect(() => { load(); setShowAddPicker(false); setAddQuery(""); setEditingScheduleId(null); }, [selectedDate]);
+    useEffect(() => { load(); setShowAddPicker(false); setAddQuery(""); setEditingScheduleId(null); setShowDiagAdd(false); setDiagForm(emptyDiagForm()); setReschedulingId(null); }, [selectedDate]);
     useEffect(() => { setEditingScheduleId(null); }, [session]);
-    // realtime: 다른 사람이 같은 날짜에 체크한 출석/보강명단/수업계획이 바로 반영됨
+    // realtime: 다른 사람이 같은 날짜에 체크한 출석/보강명단/수업계획/진단평가가 바로 반영됨
     useEffect(() => {
         const channel = supabaseClient
             .channel(`attn_attendance_${selectedDate}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_extra_roster", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_session_notes", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_diagnostic_tests" }, () => loadQuiet())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
@@ -1393,6 +1509,65 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             console.error(e);
             load();
         }
+    };
+    // ---------- 진단평가(신규등록 전 배치테스트) ----------
+    const saveDiagAdd = async () => {
+        if (!diagForm.name.trim()) { alert("이름을 입력해주세요."); return; }
+        setSavingDiag(true);
+        try {
+            await addDiagnosticTest({ date: selectedDate, ...diagForm, name: diagForm.name.trim() });
+            setDiagForm(emptyDiagForm());
+            setShowDiagAdd(false);
+            await load();
+        } catch (e) {
+            console.error(e);
+            alert("저장에 실패했습니다.");
+        }
+        setSavingDiag(false);
+    };
+    const saveDiagField = async (t, field, value) => {
+        setDiagTests((prev) => prev.map((d) => d.id === t.id ? { ...d, [field]: value } : d));
+        try {
+            await updateDiagnosticTest(t.id, { date: t.date, time: t.time, name: t.name, phone: t.phone, school: t.school, grade: t.grade, note: t.note, recommendedLevel: field === "recommendedLevel" ? value : t.recommendedLevel, score: field === "score" ? value : t.score, sourceNote: t.sourceNote });
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const setDiagStatus = async (t, status) => {
+        setDiagTests((prev) => prev.map((d) => d.id === t.id ? { ...d, status } : d));
+        try {
+            await setDiagnosticTestStatus(t.id, status);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const removeDiag = async (t) => {
+        if (!confirm(`${t.name} 진단평가 기록을 삭제할까요?`)) return;
+        setDiagTests((prev) => prev.filter((d) => d.id !== t.id));
+        try {
+            await deleteDiagnosticTest(t.id);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    const startReschedule = (t) => { setReschedulingId(t.id); setRescheduleDate(t.date); };
+    const confirmReschedule = async (t) => {
+        if (!rescheduleDate) return;
+        try {
+            await rescheduleDiagnosticTest(t.id, rescheduleDate);
+            setReschedulingId(null);
+            await load();
+            await loadUpcomingDiag();
+        } catch (e) {
+            console.error(e);
+            alert("재조정에 실패했습니다.");
+        }
+    };
+    const registerFromDiag = (t) => {
+        goRegisterStudentFromDiagnostic({ diagnosticTestId: t.id, name: t.name, phone: t.phone, school: t.school, grade: t.grade });
     };
     // 정규/클리닉 세션의 당일 수업계획 메모 저장 (attn_session_notes)
     const saveSessionNote = async (studentId, note) => {
@@ -1519,6 +1694,102 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                 )
         );
     }
+    // \uC9C4\uB2E8\uD3C9\uAC00 \uC811\uC218 \uD3FC + \uC624\uB298 \uC811\uC218 \uBAA9\uB85D (\uBCF4\uAC15 \uD0ED \uC548\uC5D0\uC11C\uB9CC \uB178\uCD9C)
+    let diagSection = null;
+    if (session === "extra") {
+        const setDiagFormField = (field, value) => setDiagForm((prev) => ({ ...prev, [field]: value }));
+        const diagAddForm = React.createElement(
+            "div",
+            { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${AMBER}` } },
+            !showDiagAdd
+                ? React.createElement("button", { onClick: () => setShowDiagAdd(true), className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "+ \uC9C4\uB2E8\uD3C9\uAC00 \uC811\uC218")
+                : React.createElement(
+                    "div",
+                    { className: "flex flex-col gap-2" },
+                    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: AMBER } }, "\uC9C4\uB2E8\uD3C9\uAC00 \uC811\uC218 (", selectedDate, ")"),
+                    React.createElement("input", { autoFocus: true, value: diagForm.name, onChange: (e) => setDiagFormField("name", e.target.value), placeholder: "\uC774\uB984 *", className: "w-full px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                        React.createElement("input", { value: diagForm.phone, onChange: (e) => setDiagFormField("phone", e.target.value), placeholder: "\uC5F0\uB77D\uCC98", className: "px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                        React.createElement("input", { value: diagForm.time, onChange: (e) => setDiagFormField("time", e.target.value), placeholder: "\uC608\uC815\uC2DC\uAC04 (\uC608: 16:00)", className: "px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } })
+                    ),
+                    React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                        React.createElement("input", { value: diagForm.school, onChange: (e) => setDiagFormField("school", e.target.value), placeholder: "\uD559\uAD50", className: "px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                        React.createElement("input", { value: diagForm.grade, onChange: (e) => setDiagFormField("grade", e.target.value), placeholder: "\uD559\uB144", className: "px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } })
+                    ),
+                    React.createElement("input", { value: diagForm.sourceNote, onChange: (e) => setDiagFormField("sourceNote", e.target.value), placeholder: "\uC720\uC785\uACBD\uB85C (\uC608: \uC9C0\uC778\uC18C\uAC1C, \uC804\uB2E8\uC9C0)", className: "w-full px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement("input", { value: diagForm.note, onChange: (e) => setDiagFormField("note", e.target.value), placeholder: "\uBA54\uBAA8 (\uC120\uD0DD)", className: "w-full px-3 py-2.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement(
+                        "div",
+                        { className: "flex gap-2 mt-1" },
+                        React.createElement("button", { onClick: saveDiagAdd, disabled: savingDiag, className: "flex-1 px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff", opacity: savingDiag ? 0.6 : 1 } }, savingDiag ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
+                        React.createElement("button", { onClick: () => { setShowDiagAdd(false); setDiagForm(emptyDiagForm()); }, className: "px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
+                    )
+                )
+        );
+        const diagList = diagTests.length === 0
+            ? null
+            : React.createElement(
+                "div",
+                { className: "rounded-2xl overflow-hidden mb-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "px-4 sm:px-5 py-2.5", style: { background: AMBER_SOFT, borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: AMBER } }, "\uC9C4\uB2E8\uD3C9\uAC00 (", diagTests.length, "\uBA85)")
+                ),
+                diagTests.map((t, idx) => React.createElement(DiagnosticRow, {
+                    key: t.id, t: t, isLast: idx === diagTests.length - 1, isDirector: isDirector,
+                    saveField: saveDiagField, setStatus: setDiagStatus, remove: removeDiag, register: registerFromDiag,
+                    isRescheduling: reschedulingId === t.id, rescheduleDate: rescheduleDate, setRescheduleDate: setRescheduleDate,
+                    startReschedule: startReschedule, confirmReschedule: confirmReschedule, cancelReschedule: () => setReschedulingId(null),
+                }))
+            );
+        diagSection = React.createElement(React.Fragment, null, diagAddForm, diagList);
+    }
+    // "\uB2E4\uAC00\uC624\uB294 \uC9C4\uB2E8\uD3C9\uAC00" - \uC544\uC9C1 \uD559\uC0DD\uC73C\uB85C \uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uC804\uCCB4 \uC751\uC2DC\uC790\uB97C \uB0A0\uC9DC\uC640 \uBB34\uAD00\uD558\uAC8C \uD55C \uBC88\uC5D0 \uBCF4\uC5EC\uC8FC\uB294 \uC704\uC82F.
+    // Dashboard\uB294 \uCD94\uD6C4 \uD559\uC0DD \uACF5\uAC1C \uC608\uC815\uC774\uB77C \uBBF8\uB4F1\uB85D\uC790 \uAC1C\uC778\uC815\uBCF4\uB97C \uB2F4\uC744 \uC218 \uC5C6\uC5B4, \uC5EC\uAE30 \uCD9C\uC11D\uCCB4\uD06C(\uAD50\uC9C1\uC6D0 \uC804\uC6A9) \uD654\uBA74\uC5D0\uB9CC \uB454\uB2E4.
+    let upcomingDiagWidget = null;
+    if (session === "extra") {
+        const td = todayStr();
+        const upcomingList = upcomingDiag.filter((d) => d.date >= td);
+        const pastList = upcomingDiag.filter((d) => d.date < td);
+        upcomingDiagWidget = React.createElement(
+            "div",
+            { className: "rounded-2xl overflow-hidden mb-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement(
+                "button",
+                { onClick: () => setShowUpcomingDiag((v) => !v), className: "w-full flex items-center justify-between px-4 py-3", style: { background: AMBER_SOFT } },
+                React.createElement("span", { style: { fontSize: 13, fontWeight: 800, color: AMBER } }, "\uB2E4\uAC00\uC624\uB294 \uC9C4\uB2E8\uD3C9\uAC00 (\uBBF8\uB4F1\uB85D, ", upcomingList.length, "\uBA85)"),
+                React.createElement("span", { style: { fontSize: 12, color: AMBER, fontWeight: 700 } }, showUpcomingDiag ? "\u25B2 \uC811\uAE30" : "\u25BC \uD3BC\uCE58\uAE30")
+            ),
+            showUpcomingDiag && React.createElement(
+                "div",
+                { className: "flex flex-col" },
+                upcomingList.length === 0
+                    ? React.createElement("div", { className: "px-4 py-4", style: { fontSize: 12.5, color: SUBINK } }, "\uB2E4\uAC00\uC624\uB294 \uC9C4\uB2E8\uD3C9\uAC00\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")
+                    : upcomingList.map((t) => React.createElement(
+                        "div",
+                        { key: t.id, className: "flex items-center justify-between gap-2 px-4 py-2.5 flex-wrap", style: { borderTop: `1px solid ${LINE}` } },
+                        React.createElement("span", { style: { fontSize: 13, fontWeight: 700 } }, t.name),
+                        React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, t.date, "(", korWeekdayOf(t.date), ")", t.time ? ` ${t.time}` : ""),
+                        React.createElement("button", { onClick: () => setSelectedDate(t.date), className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: AMBER_SOFT, color: AMBER } }, "\uD574\uB2F9 \uB0A0\uC9DC\uB85C")
+                    )),
+                React.createElement(
+                    "div",
+                    { style: { borderTop: `1px solid ${LINE}` } },
+                    React.createElement(
+                        "button",
+                        { onClick: () => setShowPastDiag((v) => !v), className: "w-full text-left px-4 py-2.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } },
+                        "\uC9C0\uB09C \uC9C4\uB2E8\uD3C9\uAC00 (\uBBF8\uB4F1\uB85D, ", pastList.length, "\uBA85) ", showPastDiag ? "\u25B2" : "\u25BC"
+                    ),
+                    showPastDiag && pastList.map((t) => React.createElement(
+                        "div",
+                        { key: t.id, className: "flex items-center justify-between gap-2 px-4 py-2.5 flex-wrap", style: { borderTop: `1px solid ${LINE}` } },
+                        React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: SUBINK } }, t.name),
+                        React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, t.date, "(", korWeekdayOf(t.date), ")", t.time ? ` ${t.time}` : "", " \u00B7 ", t.status),
+                        React.createElement("button", { onClick: () => setSelectedDate(t.date), className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "\uD574\uB2F9 \uB0A0\uC9DC\uB85C")
+                    ))
+                )
+            )
+        );
+    }
     let listBody;
     if (loading) {
         listBody = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
@@ -1558,7 +1829,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             })
         );
     }
-    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody);
+    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, diagSection, listBody, upcomingDiagWidget);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 // 결석/지각/조퇴 사유: 값이 있으면 평소엔 배지로 접혀있고, 연필을 눌러야 편집창이 열림
@@ -1762,6 +2033,57 @@ function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
         onCancel && React.createElement("button", { onClick: onCancel, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
     );
 }
+const DIAG_STATUS_COLOR = { "예정": AMBER, "응시완료": TEAL, "불참": RED };
+const DIAG_STATUS_SOFT = { "예정": AMBER_SOFT, "응시완료": TEAL_SOFT, "불참": RED_SOFT };
+// 진단평가(신규등록 전 배치테스트) 응시자 한 명의 카드 - 보강 명단과 구분되도록 앰버 톤으로 표시
+function DiagnosticRow({ t, isLast, isDirector, saveField, setStatus, remove, register, isRescheduling, rescheduleDate, setRescheduleDate, startReschedule, confirmReschedule, cancelReschedule }) {
+    const [levelDraft, setLevelDraft] = useState(t.recommendedLevel);
+    const [scoreDraft, setScoreDraft] = useState(t.score);
+    useEffect(() => { setLevelDraft(t.recommendedLevel); }, [t.recommendedLevel]);
+    useEffect(() => { setScoreDraft(t.score); }, [t.score]);
+    const color = DIAG_STATUS_COLOR[t.status] || AMBER;
+    const soft = DIAG_STATUS_SOFT[t.status] || AMBER_SOFT;
+    return React.createElement(
+        "div",
+        { className: "px-4 sm:px-5 py-3", style: { borderBottom: isLast ? "none" : `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-3 flex-wrap" },
+            React.createElement("div", { style: { width: 32, height: 32, borderRadius: 9, background: soft, color: color, fontWeight: 800, fontSize: 12.5 }, className: "flex items-center justify-center flex-shrink-0" }, t.name.slice(0, 1)),
+            React.createElement(
+                "div",
+                { className: "min-w-0", style: { flex: "1 1 140px" } },
+                React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                    React.createElement("span", { style: { fontWeight: 700, fontSize: 14 } }, t.name),
+                    t.time && React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, t.time)
+                ),
+                React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (t.school || t.grade) ? `${t.school || ""}${t.school && t.grade ? " · " : ""}${t.grade ? t.grade + "학년" : ""}` : "학교/학년 미입력", t.phone ? ` · ${t.phone}` : "", t.sourceNote ? ` · ${t.sourceNote}` : "")
+            ),
+            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, ["예정", "응시완료", "불참"].map((stt) => React.createElement(
+                "button",
+                { key: stt, onClick: () => setStatus(t, stt), className: "px-2.5 py-1.5 rounded-lg text-xs font-bold", style: { background: t.status === stt ? DIAG_STATUS_COLOR[stt] : "#fff", color: t.status === stt ? "#fff" : SUBINK, border: `1px solid ${t.status === stt ? DIAG_STATUS_COLOR[stt] : LINE}` } },
+                stt
+            ))),
+            isDirector && React.createElement("button", { onClick: () => register(t), className: "px-2.5 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: NAVY, color: "#fff" }, title: "학생으로 등록" }, "학생등록"),
+            React.createElement("button", { onClick: () => remove(t), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "삭제" }, "✕")
+        ),
+        (t.status === "응시완료" || t.recommendedLevel || t.score) && React.createElement(
+            "div",
+            { className: "mt-2 flex gap-2 flex-wrap items-center" },
+            React.createElement("input", { value: levelDraft, onChange: (e) => setLevelDraft(e.target.value), onBlur: () => { if (levelDraft !== t.recommendedLevel) saveField(t, "recommendedLevel", levelDraft); }, placeholder: "추천레벨", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, width: 110 } }),
+            React.createElement("input", { value: scoreDraft, onChange: (e) => setScoreDraft(e.target.value), onBlur: () => { if (scoreDraft !== t.score) saveField(t, "score", scoreDraft); }, placeholder: "점수/결과", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, width: 110 } })
+        ),
+        t.note && React.createElement("div", { className: "mt-2", style: { fontSize: 11.5, color: SUBINK } }, "메모 · ", t.note),
+        t.status === "불참" && !isRescheduling && React.createElement("button", { onClick: () => startReschedule(t), className: "mt-2 px-2.5 py-1.5 rounded-lg text-xs font-bold", style: { background: SKY_SOFT, color: SKY } }, "날짜 재조정"),
+        isRescheduling && React.createElement(
+            "div",
+            { className: "mt-2 flex gap-2 flex-wrap items-center p-2.5 rounded-lg", style: { background: SKY_SOFT } },
+            React.createElement("input", { type: "date", value: rescheduleDate, onChange: (e) => setRescheduleDate(e.target.value), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${SKY}` } }),
+            React.createElement("button", { onClick: () => confirmReschedule(t), className: "px-2.5 py-1.5 rounded-lg text-xs font-bold", style: { background: SKY, color: "#fff" } }, "확정"),
+            React.createElement("button", { onClick: cancelReschedule, className: "px-2.5 py-1.5 rounded-lg text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+        )
+    );
+}
 // ---------- Student manager ----------
 function emptyForm() {
     return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", phone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr(), effectiveDate: todayStr() };
@@ -1786,13 +2108,23 @@ function parseClassString(classStr) {
     if (str.startsWith("고등과정")) return { courseLevel: "고등과정", courseName: str.slice(4).trim() };
     return { courseLevel: "", courseName: str };
 }
-function StudentManager({ onChanged }) {
+function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
     const [students, setStudents] = useState([]);
     const [loaded, setLoaded] = useState(false);
     const [form, setForm] = useState(emptyForm());
     const [baseline, setBaseline] = useState(null); // 편집 시작 시점의 이력 비교용 원본 값(school/grade/class/시간 등)
     const [editTarget, setEditTarget] = useState(null); // null | "new" | studentId
     const [saving, setSaving] = useState(false);
+    // 진단평가 "학생으로 등록" 버튼으로 넘어온 경우, 저장 성공 시 그 진단평가 기록에 새 학생 id를 연결해준다.
+    const [prefillSourceId, setPrefillSourceId] = useState(null);
+    useEffect(() => {
+        if (!prefill) return;
+        setForm({ ...emptyForm(), name: prefill.name || "", phone: prefill.phone || "", school: prefill.school || "", grade: prefill.grade || "" });
+        setBaseline(null);
+        setEditTarget("new");
+        setPrefillSourceId(prefill.diagnosticTestId || null);
+        if (onPrefillConsumed) onPrefillConsumed();
+    }, [prefill]);
     const [historyTarget, setHistoryTarget] = useState(null); // 🔍 눌러서 이력을 보고 있는 학생 id
     const [historyRows, setHistoryRows] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
@@ -1816,7 +2148,7 @@ function StudentManager({ onChanged }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); };
+    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
     const openEdit = (s) => {
         setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", effectiveDate: todayStr() });
         setBaseline({
@@ -1825,8 +2157,9 @@ function StudentManager({ onChanged }) {
             clinicDays: (s.clinicDays || []).slice().sort(), days: (s.days || []).slice().sort(),
         });
         setEditTarget(s.id);
+        setPrefillSourceId(null);
     };
-    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); };
+    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); setPrefillSourceId(null); };
     const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
     const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
     const save = async () => {
@@ -1843,6 +2176,11 @@ function StudentManager({ onChanged }) {
             } else if (baseline && !historyFieldsEqual(baseline, newFields)) {
                 // 반/학교/학년/시간/클리닉 관련 정보가 실제로 바뀐 경우에만 이력을 새로 남긴다.
                 await saveHistorySnapshot(studentId, form.effectiveDate || todayStr(), newFields);
+            }
+            // 진단평가 "학생으로 등록"에서 넘어온 경우, 그 진단평가 기록에 새 학생 id를 연결해서
+            // "다가오는/지난 진단평가" 목록에서 자동으로 빠지게 한다.
+            if (isNewStudent && prefillSourceId) {
+                try { await linkDiagnosticTestToStudent(prefillSourceId, studentId); } catch (e) { console.error(e); }
             }
             await reload();
             closeForm();
@@ -3329,13 +3667,40 @@ function AcademicEventsManager() {
     );
 }
 
+// 로그인 후 12시간이 지나면 자동 로그아웃 - 학원 공용 컴퓨터에 로그인 정보가 계속 남아있는 걸 방지.
+// (기본은 로그인 정보가 브라우저에 저장되어 창을 닫아도 로그인이 풀리지 않는데, 그 대신 여기서 시간 제한을 둠)
+const LOGIN_AT_KEY = "attn_login_at";
+const AUTO_LOGOUT_MS = 12 * 60 * 60 * 1000;
 function Root() {
     const [session, setSession] = useState(null);
     const [checked, setChecked] = useState(false);
     useEffect(() => {
-        supabaseClient.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
-        const { data: sub } = supabaseClient.auth.onAuthStateChange((_e, s) => setSession(s));
-        return () => sub.subscription.unsubscribe();
+        const checkAutoLogout = () => {
+            const loginAt = Number(localStorage.getItem(LOGIN_AT_KEY) || 0);
+            if (loginAt && Date.now() - loginAt > AUTO_LOGOUT_MS) {
+                supabaseClient.auth.signOut();
+            }
+        };
+        supabaseClient.auth.getSession().then(({ data }) => {
+            // 이미 로그인되어 있는데 시작 시각 기록이 없는 경우(이 기능 배포 전부터 로그인돼있던 경우) - 지금을 기준으로 새로 시작
+            if (data.session && !localStorage.getItem(LOGIN_AT_KEY)) {
+                localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+            }
+            checkAutoLogout();
+            setSession(data.session);
+            setChecked(true);
+        });
+        const { data: sub } = supabaseClient.auth.onAuthStateChange((event, s) => {
+            if (event === "SIGNED_IN") {
+                localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+            } else if (event === "SIGNED_OUT") {
+                localStorage.removeItem(LOGIN_AT_KEY);
+            }
+            setSession(s);
+        });
+        // 탭을 오래 켜둔 채로 있는 경우를 대비해 5분마다 시간 제한 초과 여부를 다시 확인
+        const timer = setInterval(checkAutoLogout, 5 * 60 * 1000);
+        return () => { sub.subscription.unsubscribe(); clearInterval(timer); };
     }, []);
     if (!checked) {
         return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
