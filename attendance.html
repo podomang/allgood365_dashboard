@@ -79,6 +79,23 @@ function groupByClass(list) {
     });
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
+// "16:00~18:00" 형태의 문자열 ↔ {start, end} 왕복 변환. 학생관리의 출석/클리닉/토요일 시간을
+// 근무일정 등 다른 탭과 같은 "시작~종료" 시간 선택기(<input type="time"> 2개) 방식으로 통일하되,
+// DB에는 지금처럼 하나의 텍스트로 저장해서 그룹핑/이력 로직을 그대로 재사용하기 위한 헬퍼.
+function parseTimeRange(str) {
+    const s = (str || "").trim();
+    if (!s)
+        return { start: "", end: "" };
+    const parts = s.split("~");
+    return { start: (parts[0] || "").trim(), end: (parts[1] || "").trim() };
+}
+function composeTimeRange(start, end) {
+    if (start && end)
+        return `${start}~${end}`;
+    if (start)
+        return start;
+    return "";
+}
 function groupByTime(list, timeField) {
     const groups = {};
     list.forEach((s) => {
@@ -151,6 +168,17 @@ function groupBySchool(list) {
         return a.localeCompare(b, "ko");
     });
     return keys.map((k) => ({ className: k, list: groups[k] }));
+}
+// 등원요일별 그룹핑 - 학생 한 명이 여러 요일에 다닐 수 있어서(예: 월수금), 다니는 요일 전부에
+// 중복으로 나타난다("월요일에 누가 오는지" 보기에 맞춘 방식). 아무도 없는 요일은 그룹 자체를 만들지 않는다.
+function groupByDay(list) {
+    const groups = WEEKDAYS_MON_FIRST
+        .map((d) => ({ className: `${d}요일`, list: list.filter((s) => (s.days || []).includes(d)) }))
+        .filter((g) => g.list.length > 0);
+    const unassigned = list.filter((s) => !s.days || s.days.length === 0);
+    if (unassigned.length > 0)
+        groups.push({ className: "요일 미지정", list: unassigned });
+    return groups;
 }
 const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강", diagnostic: "진단평가" };
 const SESSION_ORDER = ["regular", "clinic", "extra", "diagnostic"];
@@ -305,14 +333,16 @@ function mapStudentHistory(row) {
 }
 // 출석체크 화면에서 과거/미래 날짜를 정확히 표시하기 위해 전체 학생의 이력을 한 번에 불러온다.
 async function fetchAllStudentHistory() {
-    const { data, error } = await supabaseClient.from("attn_student_history").select("*").order("effective_from");
+    // effective_from이 같은 행(정상 상태라면 없어야 하지만, 과거 저장 버그로 중복이 생겼을 수 있어
+    // 방어적으로) 사이의 순서가 뒤섞이지 않도록 created_at을 2차 정렬 기준으로 둔다.
+    const { data, error } = await supabaseClient.from("attn_student_history").select("*").order("effective_from").order("created_at");
     if (error)
         throw error;
     return data.map(mapStudentHistory);
 }
 // 학생관리의 "이력보기"에서 한 학생의 타임라인만 불러올 때 사용.
 async function fetchStudentHistoryRows(studentId) {
-    const { data, error } = await supabaseClient.from("attn_student_history").select("*").eq("student_id", studentId).order("effective_from");
+    const { data, error } = await supabaseClient.from("attn_student_history").select("*").eq("student_id", studentId).order("effective_from").order("created_at");
     if (error)
         throw error;
     return data.map(mapStudentHistory);
@@ -320,11 +350,29 @@ async function fetchStudentHistoryRows(studentId) {
 // 학생 정보를 수정할 때 호출. effectiveFrom(적용 시작일) 기준으로 이력 타임라인을 다시 계산해서 저장한다.
 // 같은 날짜에 이미 이력이 있으면 그 값을 새 값으로 덮어쓰고, 나머지 구간들의 종료일도 순서에 맞게 재정렬한다.
 // (오늘부터 적용은 물론, 미래 날짜 예약이나 과거 날짜 정정도 모두 이 로직 하나로 처리된다.)
+//
+// ⚠️ 버그 수정(2026-07-17): 예전 코드는 같은 effectiveFrom의 기존 행을 "제외"만 하고 새 행을 항상
+// INSERT해서, 같은 날짜로 여러 번 저장하면(예: 값을 몇 번 고쳐 저장) 같은 effective_from을 가진
+// 행이 계속 쌓였다(기존 행은 삭제도 갱신도 안 되고 DB에 그대로 남음). 그러면 resolveHistoryAsOf가
+// 그 중 어떤 행을 "최신"으로 볼지 DB 반환 순서에 의존하게 되어, 실제로는 최신 값을 저장했는데도
+// 화면에는 중간에 저장했던 옛날 값이 보이는 문제가 생겼다(최유성 학생 사례로 실측 확인).
+// 수정: 같은 effectiveFrom의 기존 행이 있으면 그 행을 재사용(UPDATE)하고, 혹시 이미 쌓여있던
+// 중복 행은 이번 저장에서 함께 정리(삭제)한다.
 async function saveHistorySnapshot(studentId, effectiveFrom, snapshot) {
     const existing = await fetchStudentHistoryRows(studentId);
-    const withoutSameDate = existing.filter((r) => r.effectiveFrom !== effectiveFrom);
-    const newRow = { effectiveFrom, effectiveTo: null, ...snapshot, isNew: true };
-    const merged = [...withoutSameDate.map((r) => ({ ...r, isNew: false })), newRow]
+    const sameDateRows = existing.filter((r) => r.effectiveFrom === effectiveFrom);
+    const others = existing.filter((r) => r.effectiveFrom !== effectiveFrom);
+    const reuseRow = sameDateRows[0] || null; // 가장 먼저 생성된 행을 재사용 대상으로 삼는다
+    const duplicateIds = sameDateRows.slice(1).map((r) => r.id); // 이미 쌓여있던 중복 행(있다면) 삭제 대상
+    if (duplicateIds.length > 0) {
+        const { error: dupError } = await supabaseClient.from("attn_student_history").delete().in("id", duplicateIds);
+        if (dupError)
+            throw dupError;
+    }
+    const newRow = reuseRow
+        ? { ...reuseRow, ...snapshot, effectiveFrom, effectiveTo: null, isNew: false }
+        : { effectiveFrom, effectiveTo: null, ...snapshot, isNew: true };
+    const merged = [...others.map((r) => ({ ...r, isNew: false })), newRow]
         .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
     for (let i = 0; i < merged.length; i++) {
         merged[i].effectiveTo = i === merged.length - 1 ? null : addDays(merged[i + 1].effectiveFrom, -1);
@@ -2177,6 +2225,18 @@ function parseClassString(classStr) {
     if (str.startsWith("고등과정")) return { courseLevel: "고등과정", courseName: str.slice(4).trim() };
     return { courseLevel: "", courseName: str };
 }
+// 출석/클리닉/토요일 시간 입력을 근무일정 등 다른 탭과 같은 "시작~종료" 시간 선택기로 통일한 컴포넌트.
+function TimeRangeInput({ value, onChange, borderColor, background }) {
+    const { start, end } = parseTimeRange(value);
+    const inputStyle = { border: `1px solid ${borderColor || LINE}`, background: background || "#fff" };
+    return React.createElement(
+        "div",
+        { className: "flex items-center gap-1.5 mt-1" },
+        React.createElement("input", { type: "time", value: start, onChange: (e) => onChange(composeTimeRange(e.target.value, end)), className: "px-2 py-2 rounded-lg text-sm outline-none", style: inputStyle }),
+        React.createElement("span", { style: { color: SUBINK, fontSize: 12 } }, "~"),
+        React.createElement("input", { type: "time", value: end, onChange: (e) => onChange(composeTimeRange(start, e.target.value)), className: "px-2 py-2 rounded-lg text-sm outline-none", style: inputStyle })
+    );
+}
 function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
     const [students, setStudents] = useState([]);
     const [loaded, setLoaded] = useState(false);
@@ -2197,7 +2257,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
     const [historyTarget, setHistoryTarget] = useState(null); // 🔍 눌러서 이력을 보고 있는 학생 id
     const [historyRows, setHistoryRows] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
-    const [groupMode, setGroupMode] = useState("none"); // none | grade | school | class
+    const [groupMode, setGroupMode] = useState("none"); // none | grade | school | class | day
     const [searchQuery, setSearchQuery] = useState("");
     const [collapsedGroups, setCollapsedGroups] = useState({});
     const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -2351,16 +2411,16 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
                 { className: "mt-2 flex gap-3 flex-wrap" },
                 React.createElement(
                     "div",
-                    { style: { maxWidth: 220 } },
+                    null,
                     React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "\uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
-                    React.createElement("input", { type: "text", value: form.regularTime, onChange: (e) => setForm({ ...form, regularTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "\uC608: 16:00~18:00" })
+                    React.createElement(TimeRangeInput, { value: form.regularTime, onChange: (v) => setForm({ ...form, regularTime: v }), borderColor: LINE })
                 ),
                 // \uD1A0\uC694\uC77C \uC815\uADDC\uC218\uC5C5\uC740 \uD3C9\uC77C\uACFC \uC2DC\uC791\uC2DC\uAC04\uC774 \uB2EC\uB77C\uC11C, \uB4F1\uC6D0\uC694\uC77C\uC5D0 \uD1A0\uC694\uC77C\uC744 \uC120\uD0DD\uD55C \uD559\uC0DD\uB9CC \uBCC4\uB3C4 \uC2DC\uAC04 \uC785\uB825\uCE78\uC744 \uBCF4\uC5EC\uC900\uB2E4.
                 form.days.includes("\uD1A0") && React.createElement(
                     "div",
-                    { style: { maxWidth: 220 } },
+                    null,
                     React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: AMBER } }, "\uD1A0\uC694\uC77C \uCD9C\uC11D \uC2DC\uAC04 (\uC120\uD0DD)"),
-                    React.createElement("input", { type: "text", value: form.saturdayTime, onChange: (e) => setForm({ ...form, saturdayTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT }, placeholder: "\uC608: 10:00~12:00" }),
+                    React.createElement(TimeRangeInput, { value: form.saturdayTime, onChange: (v) => setForm({ ...form, saturdayTime: v }), borderColor: AMBER, background: AMBER_SOFT }),
                     React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "\uBE44\uC6CC\uB450\uBA74 \uD3C9\uC77C \uCD9C\uC11D \uC2DC\uAC04\uC774 \uD1A0\uC694\uC77C\uC5D0\uB3C4 \uADF8\uB300\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4.")
                 )
             )
@@ -2390,7 +2450,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
                 "div",
                 { className: "mt-3" },
                 React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "\uD074\uB9AC\uB2C9 \uC2DC\uAC04 (\uC120\uD0DD)"),
-                React.createElement("input", { type: "text", value: form.clinicTime, onChange: (e) => setForm({ ...form, clinicTime: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" }, placeholder: "\uC608: 19:00~20:30" })
+                React.createElement(TimeRangeInput, { value: form.clinicTime, onChange: (v) => setForm({ ...form, clinicTime: v }), borderColor: LINE, background: "#fff" })
             )
         ),
         React.createElement(
@@ -2469,9 +2529,9 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
         historyTarget === s.id && renderHistoryPanel(),
         editTarget === s.id && studentFormEl
     );
-    const GROUP_MODE_LABELS = { none: "\uC804\uCCB4\uBCF4\uAE30", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4" };
+    const GROUP_MODE_LABELS = { none: "\uC804\uCCB4\uBCF4\uAE30", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4", day: "\uC694\uC77C\uBCC4" };
     const searchTrimmed = searchQuery.trim();
-    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(students) : groupMode === "school" ? groupBySchool(students) : groupByClass(students);
+    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(students) : groupMode === "school" ? groupBySchool(students) : groupMode === "day" ? groupByDay(students) : groupByClass(students);
     const expandAllGroups = () => setCollapsedGroups({});
     const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
     const groupToggle = React.createElement(
@@ -2492,7 +2552,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed }) {
                 "div",
                 { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
-                ["none", "grade", "school", "class"].map((m) => React.createElement(
+                ["none", "grade", "school", "class", "day"].map((m) => React.createElement(
                     "button",
                     { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
                     GROUP_MODE_LABELS[m]
