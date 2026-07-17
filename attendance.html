@@ -2423,16 +2423,18 @@ function ReasonField({ status, initialValue, onSave, onCancel }) {
 }
 // 일정변경: 목적지 날짜/시간 + 메모. 저장하면 그 날짜의 보강 명단에 자동 등록됨
 // 일정변경 배지 + 연필(수정) 버튼. 값이 이미 있으면 평소엔 접혀있고, 연필을 눌러야 편집창이 열림
-function ScheduleChangeBlock({ targetDate, targetTime, note, onSave }) {
-    const [editing, setEditing] = useState(!targetDate);
+// \uC77C\uC815\uBCC0\uACBD \uC9C0\uC815/\uC218\uC815\uC740 \uC6D0\uC7A5 \uC804\uC6A9 - \uC870\uAD50 \uD654\uBA74\uC5D0\uC11C\uB294 \uC774\uBBF8 \uC9C0\uC815\uB41C \uB0B4\uC6A9\uC744 \uC77D\uAE30\uC804\uC6A9 \uBC30\uC9C0\uB85C\uB9CC \uBCF4\uC5EC\uC90C(\u270E \uC218\uC815 \uBC84\uD2BC \uC5C6\uC74C).
+function ScheduleChangeBlock({ targetDate, targetTime, note, onSave, isDirector }) {
+    const [editing, setEditing] = useState(isDirector && !targetDate);
     if (!editing) {
         return React.createElement(
             "div",
             { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
             React.createElement("span", { style: { fontSize: 11, fontWeight: 800, background: SKY_SOFT, color: SKY, borderRadius: 5, padding: "2px 7px" } }, "\u2192 ", targetDate, "(", korWeekdayOf(targetDate), ")", targetTime ? ` ${targetTime}` : "", note ? ` \u00B7 ${note}` : ""),
-            React.createElement("button", { onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color: SKY }, title: "\uC77C\uC815\uBCC0\uACBD \uC218\uC815" }, "\u270E")
+            isDirector && React.createElement("button", { onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color: SKY }, title: "\uC77C\uC815\uBCC0\uACBD \uC218\uC815" }, "\u270E")
         );
     }
+    if (!isDirector) return null;
     return React.createElement(ScheduleChangeField, {
         initialTargetDate: targetDate, initialTargetTime: targetTime, initialNote: note,
         onSave: async (td, tt, n) => { await onSave(td, tt, n); setEditing(false); },
@@ -2549,10 +2551,10 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
             showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: `${noteLabel} 추가` }, "📝"),
-            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
+            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.filter((stt) => stt !== "일정변경" || isDirector).map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
             session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "목록에서 제거" }, "✕")
         ),
-        st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note) }),
+        st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note), isDirector: isDirector }),
         st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) }),
         showNoteLine && (noteEditing
             ? React.createElement(ExtraNoteField, {
