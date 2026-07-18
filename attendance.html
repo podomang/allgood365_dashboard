@@ -1851,10 +1851,10 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     }, [blockedByClockIn]);
     const clockInBlockedBanner = React.createElement(
         "div",
-        { className: "rounded-2xl p-8 text-center", style: { background: AMBER_SOFT, border: `1px solid ${AMBER}` } },
-        React.createElement("div", { style: { fontSize: 14.5, fontWeight: 800, color: AMBER, marginBottom: 6 } }, "\uD83D\uDD12 ", selectedDate, "\uC740 \uCD9C\uADFC \uAE30\uB85D\uC774 \uC5C6\uC5B4\uC11C \uCD9C\uC11D\uCCB4\uD06C\uB97C \uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."),
-        React.createElement("div", { style: { fontSize: 12.5, color: AMBER, marginBottom: 16 } }, "[\uCD9C\uD1F4\uADFC] \uD0ED\uC5D0\uC11C \uBA3C\uC800 \uCD9C\uADFC\uC744 \uAE30\uB85D\uD574\uC8FC\uC138\uC694."),
-        goToClockIn && React.createElement("button", { onClick: goToClockIn, className: "px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "\uCD9C\uD1F4\uADFC \uD0ED\uC73C\uB85C \uC774\uB3D9")
+        { className: "rounded-2xl p-5 mb-4", style: { background: AMBER_SOFT, border: `1px solid ${AMBER}` } },
+        React.createElement("div", { style: { fontSize: 13.5, fontWeight: 800, color: AMBER, marginBottom: 4 } }, "🔒 미리보기 모드 · ", selectedDate),
+        React.createElement("div", { style: { fontSize: 12.5, color: AMBER, marginBottom: 12 } }, "출근 기록이 없어서 출석체크는 아직 할 수 없어요. 학생 명단과 수업계획/보강계획은 볼 수 있어요. [출퇴근] 탭에서 출근을 기록하면 체크할 수 있습니다."),
+        goToClockIn && React.createElement("button", { onClick: goToClockIn, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "출퇴근 탭으로 이동")
     );
     const clockInModal = showClockInModal && React.createElement(
         "div",
@@ -1862,9 +1862,10 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         React.createElement(
             "div",
             { className: "rounded-2xl p-6 w-full", style: { background: "#fff", maxWidth: 360 } },
-            React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: AMBER, marginBottom: 8 } }, "\uD83D\uDD12 ", selectedDate, "\uC740 \uCD9C\uADFC \uAE30\uB85D\uC774 \uC5C6\uC5B4\uC11C \uCD9C\uC11D\uCCB4\uD06C\uB97C \uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."),
-            React.createElement("div", { style: { fontSize: 13, color: SUBINK, marginBottom: 18 } }, "[\uCD9C\uD1F4\uADFC] \uD0ED\uC5D0\uC11C \uBA3C\uC800 \uCD9C\uADFC\uC744 \uAE30\uB85D\uD574\uC8FC\uC138\uC694."),
-            React.createElement("button", { onClick: () => { setShowClockInModal(false); if (goToClockIn) goToClockIn(); }, className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "\uCD9C\uD1F4\uADFC \uD0ED\uC73C\uB85C \uC774\uB3D9")
+            React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: AMBER, marginBottom: 8 } }, "🔒 아직 출근 전이에요"),
+            React.createElement("div", { style: { fontSize: 13, color: SUBINK, marginBottom: 18 } }, "학생 명단과 수업계획/보강계획은 볼 수 있지만, 출석체크(스탬프)는 출근 기록 후에 가능해요."),
+            React.createElement("button", { onClick: () => { setShowClockInModal(false); if (goToClockIn) goToClockIn(); }, className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold mb-2", style: { background: AMBER, color: "#fff" } }, "출퇴근 탭으로 이동"),
+            React.createElement("button", { onClick: () => setShowClockInModal(false), className: "w-full px-4 py-2 rounded-lg text-sm font-semibold", style: { color: SUBINK } }, "닫기 (계속 둘러보기)")
         )
     );
     const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -2303,7 +2304,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         )
     );
     let addPicker = null;
-    if (session === "extra") {
+    if (session === "extra" && !blockedByClockIn) {
         const q = addQuery.trim();
         const candidates = q === "" ? [] : resolvedStudents.filter((s) => !Object.prototype.hasOwnProperty.call(extraMeta, s.id) && s.name.includes(q)).slice(0, 8);
         addPicker = React.createElement(
@@ -2436,7 +2437,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
         );
     } else {
         listBody = React.createElement(
@@ -2458,7 +2459,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -2467,9 +2468,6 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         return React.createElement("div", null, header, dateInput, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
     if (session === "course") {
-        if (blockedByClockIn) {
-            return React.createElement("div", null, header, dateInput, sessionTabs, clockInBlockedBanner, clockInModal);
-        }
         const courseListBody = courseGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 특강이 없습니다.")
             : React.createElement(
@@ -2491,21 +2489,27 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, setStatus: setCourseStatus, saveReason: saveCourseReason, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, setStatus: setCourseStatus, saveReason: saveCourseReason, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
                     );
                 })
             );
-        return React.createElement("div", null, header, dateInput, sessionTabs, courseListBody, clockInModal);
+        return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseListBody, clockInModal);
     }
-    if (blockedByClockIn) {
-        return React.createElement("div", null, header, dateInput, sessionTabs, clockInBlockedBanner, clockInModal);
-    }
-    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
+    return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 // 결석/지각/조퇴 사유: 값이 있으면 평소엔 배지로 접혀있고, 연필을 눌러야 편집창이 열림
-function ReasonBlock({ status, initialValue, onSave }) {
-    const [editing, setEditing] = useState(!initialValue);
+function ReasonBlock({ status, initialValue, onSave, locked }) {
+    const [editing, setEditing] = useState(!initialValue && !locked);
+    if (locked) {
+        return React.createElement(
+            "div",
+            { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
+            initialValue
+                ? React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: STATUS[status].soft, color: STATUS[status].color, borderRadius: 5, padding: "2px 7px" } }, initialValue)
+                : React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "사유 미입력")
+        );
+    }
     if (!editing) {
         return React.createElement(
             "div",
@@ -2614,10 +2618,19 @@ function formatAmPmTime(t) {
     return `${period} ${String(h12).padStart(2, "0")}:${mm}`;
 }
 // 보강 예정시간: 값이 있으면 작은 배지로 접혀있고, 연필을 눌러야 시간 입력창이 열림
-function ExtraTimeControl({ initialValue, onSave }) {
-    const [editing, setEditing] = useState(!initialValue);
+function ExtraTimeControl({ initialValue, onSave, locked }) {
+    const [editing, setEditing] = useState(!initialValue && !locked);
     const [value, setValue] = useState(initialValue);
     useEffect(() => { setValue(initialValue); }, [initialValue]);
+    if (locked) {
+        return React.createElement(
+            "div",
+            { className: "flex items-center gap-1 flex-shrink-0" },
+            initialValue
+                ? React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "2px 7px" } }, formatAmPmTime(initialValue))
+                : React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "예정시간 미정")
+        );
+    }
     if (!editing) {
         return React.createElement(
             "div",
@@ -2639,7 +2652,7 @@ function ExtraTimeControl({ initialValue, onSave }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
@@ -2670,18 +2683,19 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                     : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (s.school || s.grade) ? `${s.school || ""}${s.school && s.grade ? " · " : ""}${s.grade ? s.grade + "학년" : ""}` : "학교/학년 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`)
             ),
-            session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
+            session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t), locked: locked }),
             showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: `${noteLabel} 추가` }, "📝"),
             React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.filter((stt) => stt !== "일정변경" || isDirector).map((stt) => React.createElement(StampButton, {
                 key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt),
                 // 이미 일정변경된 학생은 원장만 상태를 바꿀 수 있음 - 조교 화면에서는 나머지 스탬프도 비활성화.
-                disabled: st === "일정변경" && !isDirector,
-                title: st === "일정변경" && !isDirector ? "일정변경은 원장님만 수정할 수 있어요" : undefined,
+                // 출근 기록이 없는 조교는 명단을 볼 수는 있지만(미리보기), 체크 자체는 못 하도록 스탬프를 잠근다.
+                disabled: locked || (st === "일정변경" && !isDirector),
+                title: locked ? "출근 기록 후 체크할 수 있어요" : (st === "일정변경" && !isDirector ? "일정변경은 원장님만 수정할 수 있어요" : undefined),
             }))),
-            session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "목록에서 제거" }, "✕")
+            session === "extra" && React.createElement("button", { onClick: () => { if (!locked) removeFromExtra(s.id); }, disabled: locked, style: { fontSize: 11, color: SUBINK, flexShrink: 0, opacity: locked ? 0.4 : 1, cursor: locked ? "not-allowed" : "pointer" }, className: "px-2 py-1 rounded-md", title: locked ? "출근 기록 후 가능해요" : "목록에서 제거" }, "✕")
         ),
         st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note), isDirector: isDirector }),
-        st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val) }),
+        st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val), locked: locked }),
         showNoteLine && (noteEditing
             ? React.createElement(ExtraNoteField, {
                 initialValue: planNote,
@@ -2700,9 +2714,10 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                         "div",
                         { className: "flex items-center gap-1.5 flex-shrink-0" },
                         React.createElement("button", {
-                            onClick: () => toggleNoteDone(s.id, !noteMeta.done),
-                            style: { width: 20, height: 20, borderRadius: 999, border: noteMeta.done ? "none" : `2px solid ${LINE}`, background: noteMeta.done ? TEAL : "#fff", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-                            title: noteMeta.done ? "완료 취소" : "완료로 표시"
+                            onClick: () => { if (!locked) toggleNoteDone(s.id, !noteMeta.done); },
+                            disabled: locked,
+                            style: { width: 20, height: 20, borderRadius: 999, border: noteMeta.done ? "none" : `2px solid ${LINE}`, background: noteMeta.done ? TEAL : "#fff", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: locked ? 0.5 : 1, cursor: locked ? "not-allowed" : "pointer" },
+                            title: locked ? "출근 기록 후 가능해요" : (noteMeta.done ? "완료 취소" : "완료로 표시")
                         }, noteMeta.done ? "✓" : ""),
                         React.createElement("span", { style: { fontSize: 10.5, fontWeight: noteMeta.done ? 700 : 500, color: noteMeta.done ? TEAL : SUBINK } }, noteMeta.done ? "완료" : "미완료")
                     ),
@@ -2720,7 +2735,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
 }
 // 특강(추가강좌) 출석체크 행 - 정규수업 AttendanceRow와 비슷하지만 훨씬 단순함(수업계획/일정변경/보강예정시간 없음).
 // 출석/지각/결석 3가지만 체크하고, 지각·결석이면 사유를 남길 수 있음(ReasonBlock 재사용).
-function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, goToWorkLog }) {
+function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, goToWorkLog, locked }) {
     const st = current[c.courseId]?.status;
     const reason = current[c.courseId]?.reason || "";
     const clickableName = !!(goToWorkLog && (st === "출석" || st === "지각"));
@@ -2739,9 +2754,9 @@ function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, goToWo
                     : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (c.school || c.grade) ? `${c.school || ""}${c.school && c.grade ? " · " : ""}${c.grade ? c.grade + "학년" : ""}` : "학교/학년 미지정", c.className ? ` · ${c.className}` : "", c.courseTime ? ` · ${c.courseTime}` : "")
             ),
-            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, COURSE_STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(c.courseId, c.studentId, stt) })))
+            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, COURSE_STATUS_ORDER.map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(c.courseId, c.studentId, stt), disabled: locked, title: locked ? "출근 기록 후 체크할 수 있어요" : undefined })))
         ),
-        st && st !== "출석" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(c.courseId, val) })
+        st && st !== "출석" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(c.courseId, val), locked: locked })
     );
 }
 function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
