@@ -1815,29 +1815,46 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const GATED_SESSIONS = ["regular", "clinic", "extra", "course"];
     const [hasClockInForDate, setHasClockInForDate] = useState(true);
     const [checkingClockIn, setCheckingClockIn] = useState(true);
+    const refreshClockInStatus = async (dateStr) => {
+        let ok = true;
+        if (!isDirector) {
+            if (!myAssistant) {
+                ok = false;
+            } else {
+                try {
+                    const rows = await fetchAssistantAttendance(dateStr, dateStr);
+                    ok = rows.some((r) => r.assistantId === myAssistant.id);
+                } catch (e) {
+                    console.error(e);
+                    ok = false;
+                }
+            }
+        }
+        return ok;
+    };
     useEffect(() => {
         let cancelled = false;
         setCheckingClockIn(true);
         (async () => {
-            let ok = true;
-            if (!isDirector) {
-                if (!myAssistant) {
-                    ok = false;
-                } else {
-                    try {
-                        const rows = await fetchAssistantAttendance(selectedDate, selectedDate);
-                        ok = rows.some((r) => r.assistantId === myAssistant.id);
-                    } catch (e) {
-                        console.error(e);
-                        ok = false;
-                    }
-                }
-            }
+            const ok = await refreshClockInStatus(selectedDate);
             if (cancelled) return;
             setHasClockInForDate(ok);
             setCheckingClockIn(false);
         })();
         return () => { cancelled = true; };
+    }, [selectedDate, isDirector, myAssistant]);
+    // 원장(또는 다른 조교)이 출퇴근기록에서 이 조교의 출근 기록을 삭제/수정하면, 화면을 이동하지 않아도
+    // 즉시 다시 잠기도록 실시간으로 재확인한다(날짜를 바꿔야만 재확인되던 문제 수정).
+    useEffect(() => {
+        if (isDirector) return;
+        const channel = supabaseClient
+            .channel(`attn_attendance_clockin_gate_${selectedDate}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistant_attendance" }, async () => {
+                const ok = await refreshClockInStatus(selectedDate);
+                setHasClockInForDate(ok);
+            })
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate, isDirector, myAssistant]);
     const blockedByClockIn = !isDirector && !checkingClockIn && !hasClockInForDate && GATED_SESSIONS.includes(session);
     // 세션(로그인) 중 이 알림을 아직 한 번도 보여주지 않았으면, 막힌 상태가 되는 첫 순간 팝업으로 강하게 알림.
@@ -4563,6 +4580,17 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
         })();
         return () => { cancelled = true; };
     }, [writeDate]);
+    // 근무일지도 출석체크와 같은 이유로, 화면 이동 없이 출근 기록이 지워지면 즉시 다시 잠기도록 실시간 재확인.
+    useEffect(() => {
+        if (isDirector) return;
+        const channel = supabaseClient
+            .channel(`attn_worklog_clockin_gate_${writeDate}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistant_attendance" }, async () => {
+                setHasClockInForDate(await checkClockIn(writeDate));
+            })
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, [writeDate, isDirector, myAssistant]);
     const nameOf = (id) => (students.find((s) => s.id === id) || {}).name || "?";
     const entryForStudent = (id) => todayEntries.find((r) => r.studentIds.includes(id));
     const extraEntries = todayEntries.filter((r) => r.studentIds.length === 0);
