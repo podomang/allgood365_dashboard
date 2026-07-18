@@ -1237,6 +1237,11 @@ function MainApp({ session }) {
     // 출석체크에서 출석/지각으로 체크된 학생 이름을 누르면 스태프룸 > 근무일지 작성 화면으로 바로 이동시키는 다리 역할 상태.
     const [workLogFocus, setWorkLogFocus] = useState(null); // { studentId, date, token } | null
     const goToWorkLog = (studentId, date) => { setWorkLogFocus({ studentId, date, token: Date.now() }); setTab("assistants"); };
+    // 출석체크에서 "출근 기록 없음"으로 막혔을 때 [출퇴근] 탭으로 바로 이동시키는 용도.
+    const [staffroomFocusSubTab, setStaffroomFocusSubTab] = useState(null); // { tab, token } | null
+    const goToClockIn = () => { setStaffroomFocusSubTab({ tab: "attendance", token: Date.now() }); setTab("assistants"); };
+    // 로그인 세션 동안(=이 화면을 새로고침하기 전까지) 출근 안내 팝업은 딱 한 번만 뜨도록 하는 플래그.
+    const [clockInAlertShown, setClockInAlertShown] = useState(false);
     const reloadStudents = async () => {
         try {
             setStudents(await fetchStudentsRoster());
@@ -1351,9 +1356,9 @@ function MainApp({ session }) {
         : React.createElement(
             React.Fragment,
             null,
-            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog, myAssistant: myAssistant }),
+            tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog, myAssistant: myAssistant, goToClockIn: goToClockIn, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true) }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector, students: students }),
-            tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students, focusWorkLog: workLogFocus, onFocusWorkLogConsumed: () => setWorkLogFocus(null) }),
+            tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students, focusWorkLog: workLogFocus, onFocusWorkLogConsumed: () => setWorkLogFocus(null), focusSubTab: staffroomFocusSubTab }),
             tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses })
         );
     return React.createElement(
@@ -1774,7 +1779,7 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
 function emptyDiagForm() {
     return { name: "", phone: "", school: "", grade: "", time: "", note: "", sourceNote: "" };
 }
-function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses, goToWorkLog, myAssistant }) {
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses, goToWorkLog, myAssistant, goToClockIn, clockInAlertShown, markClockInAlertShown }) {
     // 수업계획/보강계획을 "완료"로 표시할 때 기록할 이름(원장 전용 상세 표시에 쓰임).
     const noteAuthorName = isDirector ? "원장" : (myAssistant ? myAssistant.name : "");
     const session = attSession;
@@ -1805,6 +1810,63 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [showUpcomingDiag, setShowUpcomingDiag] = useState(false);
     const [upcomingDiag, setUpcomingDiag] = useState([]);
     const [showPastDiag, setShowPastDiag] = useState(false);
+    // 출석체크(정규/클리닉/보강/특강)는 "그날 실제로 출근 체크한 근무자"만 가능(원장은 예외).
+    // 진단평가 탭은 신규등록 전 접수 목록이라 이 제한 대상이 아님.
+    const GATED_SESSIONS = ["regular", "clinic", "extra", "course"];
+    const [hasClockInForDate, setHasClockInForDate] = useState(true);
+    const [checkingClockIn, setCheckingClockIn] = useState(true);
+    useEffect(() => {
+        let cancelled = false;
+        setCheckingClockIn(true);
+        (async () => {
+            let ok = true;
+            if (!isDirector) {
+                if (!myAssistant) {
+                    ok = false;
+                } else {
+                    try {
+                        const rows = await fetchAssistantAttendance(selectedDate, selectedDate);
+                        ok = rows.some((r) => r.assistantId === myAssistant.id);
+                    } catch (e) {
+                        console.error(e);
+                        ok = false;
+                    }
+                }
+            }
+            if (cancelled) return;
+            setHasClockInForDate(ok);
+            setCheckingClockIn(false);
+        })();
+        return () => { cancelled = true; };
+    }, [selectedDate, isDirector, myAssistant]);
+    const blockedByClockIn = !isDirector && !checkingClockIn && !hasClockInForDate && GATED_SESSIONS.includes(session);
+    // 세션(로그인) 중 이 알림을 아직 한 번도 보여주지 않았으면, 막힌 상태가 되는 첫 순간 팝업으로 강하게 알림.
+    // 이후엔 부모(MainApp)의 clockInAlertShown이 true로 유지되어 다시 뜨지 않고, 화면의 안내 배너로만 인지.
+    const [showClockInModal, setShowClockInModal] = useState(false);
+    useEffect(() => {
+        if (blockedByClockIn && !clockInAlertShown) {
+            setShowClockInModal(true);
+            if (markClockInAlertShown) markClockInAlertShown();
+        }
+    }, [blockedByClockIn]);
+    const clockInBlockedBanner = React.createElement(
+        "div",
+        { className: "rounded-2xl p-8 text-center", style: { background: AMBER_SOFT, border: `1px solid ${AMBER}` } },
+        React.createElement("div", { style: { fontSize: 14.5, fontWeight: 800, color: AMBER, marginBottom: 6 } }, "\uD83D\uDD12 ", selectedDate, "\uC740 \uCD9C\uADFC \uAE30\uB85D\uC774 \uC5C6\uC5B4\uC11C \uCD9C\uC11D\uCCB4\uD06C\uB97C \uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."),
+        React.createElement("div", { style: { fontSize: 12.5, color: AMBER, marginBottom: 16 } }, "[\uCD9C\uD1F4\uADFC] \uD0ED\uC5D0\uC11C \uBA3C\uC800 \uCD9C\uADFC\uC744 \uAE30\uB85D\uD574\uC8FC\uC138\uC694."),
+        goToClockIn && React.createElement("button", { onClick: goToClockIn, className: "px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "\uCD9C\uD1F4\uADFC \uD0ED\uC73C\uB85C \uC774\uB3D9")
+    );
+    const clockInModal = showClockInModal && React.createElement(
+        "div",
+        { className: "fixed inset-0 flex items-center justify-center p-4", style: { background: "rgba(15,23,42,0.45)", zIndex: 100 } },
+        React.createElement(
+            "div",
+            { className: "rounded-2xl p-6 w-full", style: { background: "#fff", maxWidth: 360 } },
+            React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: AMBER, marginBottom: 8 } }, "\uD83D\uDD12 ", selectedDate, "\uC740 \uCD9C\uADFC \uAE30\uB85D\uC774 \uC5C6\uC5B4\uC11C \uCD9C\uC11D\uCCB4\uD06C\uB97C \uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."),
+            React.createElement("div", { style: { fontSize: 13, color: SUBINK, marginBottom: 18 } }, "[\uCD9C\uD1F4\uADFC] \uD0ED\uC5D0\uC11C \uBA3C\uC800 \uCD9C\uADFC\uC744 \uAE30\uB85D\uD574\uC8FC\uC138\uC694."),
+            React.createElement("button", { onClick: () => { setShowClockInModal(false); if (goToClockIn) goToClockIn(); }, className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold", style: { background: AMBER, color: "#fff" } }, "\uCD9C\uD1F4\uADFC \uD0ED\uC73C\uB85C \uC774\uB3D9")
+        )
+    );
     const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
     const weekday = korWeekdayOf(selectedDate);
     const load = async () => {
@@ -2402,9 +2464,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         );
     }
     if (session === "diagnostic") {
-        return React.createElement("div", null, header, dateInput, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget);
+        return React.createElement("div", null, header, dateInput, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
     if (session === "course") {
+        if (blockedByClockIn) {
+            return React.createElement("div", null, header, dateInput, sessionTabs, clockInBlockedBanner, clockInModal);
+        }
         const courseListBody = courseGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 특강이 없습니다.")
             : React.createElement(
@@ -2430,9 +2495,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                     );
                 })
             );
-        return React.createElement("div", null, header, dateInput, sessionTabs, courseListBody);
+        return React.createElement("div", null, header, dateInput, sessionTabs, courseListBody, clockInModal);
     }
-    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody);
+    if (blockedByClockIn) {
+        return React.createElement("div", null, header, dateInput, sessionTabs, clockInBlockedBanner, clockInModal);
+    }
+    return React.createElement("div", null, header, dateInput, sessionTabs, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
 }
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
 // 결석/지각/조퇴 사유: 값이 있으면 평소엔 배지로 접혀있고, 연필을 눌러야 편집창이 열림
@@ -3332,12 +3400,14 @@ const ASSISTANT_SUBTABS_STAFF = [
     { key: "attendance", label: "출퇴근" },
     { key: "worklog", label: "근무일지" },
 ];
-function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssistant, myEmail, students, focusWorkLog, onFocusWorkLogConsumed }) {
+function AssistantManagement({ isDirector, assistants, reloadAssistants, myAssistant, myEmail, students, focusWorkLog, onFocusWorkLogConsumed, focusSubTab }) {
     const subtabs = isDirector ? ASSISTANT_SUBTABS_DIRECTOR : ASSISTANT_SUBTABS_STAFF;
     const [subTab, setSubTab] = useState(subtabs[0].key);
     useEffect(() => { if (!subtabs.find((t) => t.key === subTab)) setSubTab(subtabs[0].key); }, [isDirector]);
     // 출석체크에서 학생 이름을 눌러서 넘어온 경우, 근무일지 탭으로 자동 전환.
     useEffect(() => { if (focusWorkLog) setSubTab("worklog"); }, [focusWorkLog && focusWorkLog.token]);
+    // 출석체크가 "출근 기록 없음"으로 막혀서 넘어온 경우, 출퇴근 탭으로 자동 전환.
+    useEffect(() => { if (focusSubTab) setSubTab(focusSubTab.tab); }, [focusSubTab && focusSubTab.token]);
     // 근무일정에서 조교를 선택하면 출퇴근기록 탭으로 넘어가면서 해당 조교로 필터링
     const [attendanceFocus, setAttendanceFocus] = useState({ assistantId: null, token: 0 });
     const goToAssistantAttendance = (assistantId) => {
