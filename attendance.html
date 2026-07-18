@@ -1085,16 +1085,17 @@ async function setScheduleChange(date, session, studentId, targetDate, targetTim
     }
 }
 // ---------- small atoms ----------
-function StampButton({ status, active, onClick }) {
+function StampButton({ status, active, onClick, disabled, title }) {
     const cfg = STATUS[status];
     const [popped, setPopped] = useState(false);
-    return (React.createElement("button", { onClick: () => { onClick(); if (status === "출석") {
+    return (React.createElement("button", { disabled: !!disabled, title: title, onClick: () => { if (disabled) return; onClick(); if (status === "출석") {
             setPopped(true);
             setTimeout(() => setPopped(false), 260);
         } }, className: "px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-transform whitespace-nowrap", style: {
             background: active ? cfg.color : "#fff", color: active ? "#fff" : cfg.color, borderColor: active ? cfg.color : LINE,
             transform: popped ? "scale(1.08)" : "scale(1)",
             transition: "transform 150ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease",
+            opacity: disabled ? 0.4 : 1, cursor: disabled ? "not-allowed" : "pointer",
         } }, status));
 }
 // ============================================================
@@ -2551,7 +2552,12 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t) }),
             showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: `${noteLabel} 추가` }, "📝"),
-            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.filter((stt) => stt !== "일정변경" || isDirector).map((stt) => React.createElement(StampButton, { key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt) }))),
+            React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, STATUS_ORDER.filter((stt) => stt !== "일정변경" || isDirector).map((stt) => React.createElement(StampButton, {
+                key: stt, status: stt, active: st === stt, onClick: () => setStatus(s.id, stt),
+                // 이미 일정변경된 학생은 원장만 상태를 바꿀 수 있음 - 조교 화면에서는 나머지 스탬프도 비활성화.
+                disabled: st === "일정변경" && !isDirector,
+                title: st === "일정변경" && !isDirector ? "일정변경은 원장님만 수정할 수 있어요" : undefined,
+            }))),
             session === "extra" && React.createElement("button", { onClick: () => removeFromExtra(s.id), style: { fontSize: 11, color: SUBINK, flexShrink: 0 }, className: "px-2 py-1 rounded-md", title: "목록에서 제거" }, "✕")
         ),
         st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note), isDirector: isDirector }),
@@ -2569,7 +2575,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                 React.createElement(
                     "div",
                     { className: "flex items-center gap-2 flex-wrap" },
-                    // 업무공지 확인 체크와 같은 스타일 - 동그란 버튼 + "확인 전"/"완료" 라벨. 조교/원장 누구나 눌러서 완료 처리할 수 있음.
+                    // 업무공지 확인 체크와 같은 스타일이지만, 이건 "읽었는지"가 아니라 "지도를 끝냈는지"라서 확인 대신 완료 어휘로 통일.
                     React.createElement(
                         "div",
                         { className: "flex items-center gap-1.5 flex-shrink-0" },
@@ -2578,7 +2584,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                             style: { width: 20, height: 20, borderRadius: 999, border: noteMeta.done ? "none" : `2px solid ${LINE}`, background: noteMeta.done ? TEAL : "#fff", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
                             title: noteMeta.done ? "완료 취소" : "완료로 표시"
                         }, noteMeta.done ? "✓" : ""),
-                        React.createElement("span", { style: { fontSize: 10.5, fontWeight: noteMeta.done ? 700 : 500, color: noteMeta.done ? TEAL : SUBINK } }, noteMeta.done ? "완료" : "확인 전")
+                        React.createElement("span", { style: { fontSize: 10.5, fontWeight: noteMeta.done ? 700 : 500, color: noteMeta.done ? TEAL : SUBINK } }, noteMeta.done ? "완료" : "미완료")
                     ),
                     React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: noteMeta.done ? "#f0f0ee" : PURPLE_SOFT, color: noteMeta.done ? SUBINK : PURPLE, borderRadius: 5, padding: "2px 7px", textDecoration: noteMeta.done ? "line-through" : "none" } }, planNote),
                     notesEditable && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: `${noteLabel} 수정` }, "📝")
@@ -4328,6 +4334,21 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     const [savingInline, setSavingInline] = useState(false);
     const [pendingFocusStudentId, setPendingFocusStudentId] = useState(() => (focusWorkLog && focusWorkLog.studentId) || null);
     useEffect(() => { if (focusWorkLog && onFocusWorkLogConsumed) onFocusWorkLogConsumed(); }, []);
+    // 근무일지는 "그날 실제로 출근 체크한 근무자"만 작성 가능(원장은 예외). attn_assistant_attendance에
+    // 그 날짜 + 본인 assistant_id로 출근 기록이 있는지 확인한다.
+    const [hasClockInForDate, setHasClockInForDate] = useState(true);
+    const [checkingClockIn, setCheckingClockIn] = useState(false);
+    const checkClockIn = async (dateStr) => {
+        if (isDirector) return true;
+        if (!myAssistant) return false;
+        try {
+            const rows = await fetchAssistantAttendance(dateStr, dateStr);
+            return rows.some((r) => r.assistantId === myAssistant.id);
+        } catch (e) {
+            console.error(e);
+            return false;
+        }
+    };
     const load = async () => {
         setLoading(true);
         try {
@@ -4376,16 +4397,23 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     useEffect(() => {
         let cancelled = false;
         loadPresent(writeDate);
+        setCheckingClockIn(true);
         (async () => {
+            const clockedOk = await checkClockIn(writeDate);
+            if (cancelled) return;
+            setHasClockInForDate(clockedOk);
+            setCheckingClockIn(false);
             const entries = await loadTodayEntries(writeDate);
             if (cancelled) return;
-            if (pendingFocusStudentId) {
+            // 출석체크에서 넘어온 학생이 있어도, 그 날짜에 출근 기록이 없으면(=작성 권한이 없으면) 자동으로 펼치지 않는다.
+            if (pendingFocusStudentId && clockedOk) {
                 const sid = pendingFocusStudentId;
                 setPendingFocusStudentId(null);
                 const existing = entries.find((r) => r.studentIds.includes(sid));
                 setDraft({ content: existing ? existing.content : "", noteToDirector: existing ? existing.noteToDirector : "" });
                 setExpandedKey("student:" + sid);
             } else {
+                setPendingFocusStudentId(null);
                 setExpandedKey(null);
             }
         })();
@@ -4568,18 +4596,32 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
             expandedKey === "extraNew" && inlineEditor(true)
         )
     );
+    // 그날 출근 체크를 한 근무자만 작성 가능(원장 예외) - 출근 기록이 없는 날짜면 작성 영역 대신 안내 문구만 보여준다.
+    const blockedByClockIn = !isDirector && !checkingClockIn && !hasClockInForDate;
     const writeSection = React.createElement(
         "div",
         { className: "rounded-2xl p-4 mb-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 2 } }, "근무일지 작성"),
         React.createElement("p", { style: { color: SUBINK, fontSize: 12, marginBottom: 10 } }, "출석한 학생을 누르면 지도내용·전달사항을 남길 수 있어요. 이미 기록한 학생은 색이 다르게 표시됩니다."),
         React.createElement("input", { type: "date", value: writeDate, onChange: (e) => setWriteDate(e.target.value), className: "px-3 py-2 rounded-lg text-sm outline-none mb-3", style: { border: `1px solid ${LINE}` } }),
-        loadingPresent
-            ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "출석 정보 불러오는 중...")
-            : presentStudents.length === 0
-                ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "이 날짜에 기록된 출석 정보가 없습니다. 아래 \"기타 메모\"로 남겨주세요.")
-                : React.createElement("div", { className: "grid gap-2 mb-2", style: { gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" } }, studentButtons),
-        extraSection
+        checkingClockIn
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "확인 중...")
+            : blockedByClockIn
+                ? React.createElement(
+                    "div",
+                    { className: "rounded-xl p-3.5", style: { background: AMBER_SOFT, color: AMBER, fontSize: 12.5, fontWeight: 600 } },
+                    "이 날짜(", writeDate, ")엔 출근 기록이 없어서 근무일지를 작성할 수 없어요. [출퇴근] 탭에서 먼저 출근을 기록해주세요."
+                )
+                : React.createElement(
+                    React.Fragment,
+                    null,
+                    loadingPresent
+                        ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "출석 정보 불러오는 중...")
+                        : presentStudents.length === 0
+                            ? React.createElement("div", { style: { color: SUBINK, fontSize: 12.5, padding: "10px 0" } }, "이 날짜에 기록된 출석 정보가 없습니다. 아래 \"기타 메모\"로 남겨주세요.")
+                            : React.createElement("div", { className: "grid gap-2 mb-2", style: { gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" } }, studentButtons),
+                    extraSection
+                )
     );
     const renderRow = (r) => React.createElement(
         "div",
