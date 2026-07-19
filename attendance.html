@@ -5168,96 +5168,118 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
         학교행사: "예: 수련회, 축제, 체육대회, 사제동행",
     };
     const titlePlaceholder = (form.scope === "학교" && titlePlaceholderByType[form.type]) || "예: 수능일, 설날, 여름방학";
-    const formCard = showForm && isDirector && React.createElement(
+    // 등록/수정 폼의 입력 필드들 - "새 일정 추가"(맨 위)와 "기존 일정 수정"(그 항목 바로 아래)에서 공통으로 사용한다.
+    const formFields = React.createElement(
         "div",
-        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, form.id ? "일정 수정" : "연간 학사일정 추가"),
+        { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
         React.createElement(
             "div",
-            { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+            null,
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "시작일"),
+            React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+        ),
+        React.createElement(
+            "div",
+            null,
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종료일 (기간 일정이면 입력, 아니면 비워두세요)"),
+            React.createElement("input", { type: "date", value: form.endDate, onChange: (e) => setForm({ ...form, endDate: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+        ),
+        React.createElement(
+            "div",
+            { className: "sm:col-span-2" },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, form.scope === "학교" && form.type === "학교행사" ? "제목 (행사명을 적어주세요)" : "제목"),
+            React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: titlePlaceholder, className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+        ),
+        React.createElement(
+            "div",
+            null,
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종류"),
             React.createElement(
-                "div",
-                null,
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "시작일"),
-                React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-            ),
-            React.createElement(
-                "div",
-                null,
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종료일 (기간 일정이면 입력, 아니면 비워두세요)"),
-                React.createElement("input", { type: "date", value: form.endDate, onChange: (e) => setForm({ ...form, endDate: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-            ),
-            React.createElement(
-                "div",
-                { className: "sm:col-span-2" },
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, form.scope === "학교" && form.type === "학교행사" ? "제목 (행사명을 적어주세요)" : "제목"),
-                React.createElement("input", { value: form.title, onChange: (e) => setForm({ ...form, title: e.target.value }), placeholder: titlePlaceholder, className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-            ),
-            React.createElement(
-                "div",
-                null,
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "종류"),
-                React.createElement(
-                    "select",
-                    { value: form.type, onChange: (e) => setForm({ ...form, type: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } },
-                    (form.scope === "학교" ? SCHOOL_EVENT_TYPES : ACADEMIC_EVENT_TYPES).map((t) => React.createElement("option", { key: t, value: t }, t))
-                )
-            ),
-            React.createElement(
-                "div",
-                null,
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용범위"),
-                React.createElement(
-                    "select",
-                    {
-                        value: form.scope,
-                        onChange: (e) => {
-                            const nextScope = e.target.value;
-                            setForm({ ...form, scope: nextScope, type: nextScope === "학교" ? "방학식" : "기타" });
-                        },
-                        className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` }
-                    },
-                    React.createElement("option", { value: "전체" }, "전체 공통"),
-                    React.createElement("option", { value: "학교" }, "특정 학교")
-                )
-            ),
-            form.scope === "학교" && React.createElement(
-                "div",
-                { className: "sm:col-span-2" },
-                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용 학교"),
-                React.createElement("input", {
-                    value: form.school, onChange: (e) => setForm({ ...form, school: e.target.value }),
-                    placeholder: "예: 경산여중 (목록에 없으면 직접 입력)", list: "academic-school-options",
-                    className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` }
-                }),
-                React.createElement("datalist", { id: "academic-school-options" }, schoolOptions.map((s) => React.createElement("option", { key: s, value: s })))
+                "select",
+                { value: form.type, onChange: (e) => setForm({ ...form, type: e.target.value }), className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` } },
+                (form.scope === "학교" ? SCHOOL_EVENT_TYPES : ACADEMIC_EVENT_TYPES).map((t) => React.createElement("option", { key: t, value: t }, t))
             )
         ),
         React.createElement(
             "div",
-            { className: "flex gap-2 mt-4" },
-            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : (form.id ? "수정 저장" : "저장")),
-            React.createElement("button", { onClick: cancelForm, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+            null,
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용범위"),
+            React.createElement(
+                "select",
+                {
+                    value: form.scope,
+                    onChange: (e) => {
+                        const nextScope = e.target.value;
+                        setForm({ ...form, scope: nextScope, type: nextScope === "학교" ? "방학식" : "기타" });
+                    },
+                    className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` }
+                },
+                React.createElement("option", { value: "전체" }, "전체 공통"),
+                React.createElement("option", { value: "학교" }, "특정 학교")
+            )
+        ),
+        form.scope === "학교" && React.createElement(
+            "div",
+            { className: "sm:col-span-2" },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "적용 학교"),
+            React.createElement("input", {
+                value: form.school, onChange: (e) => setForm({ ...form, school: e.target.value }),
+                placeholder: "예: 경산여중 (목록에 없으면 직접 입력)", list: "academic-school-options",
+                className: "w-full px-3 py-2 rounded-lg text-sm outline-none mt-1", style: { border: `1px solid ${LINE}` }
+            }),
+            React.createElement("datalist", { id: "academic-school-options" }, schoolOptions.map((s) => React.createElement("option", { key: s, value: s })))
         )
     );
-    const rows = visibleEvents.map((e) => React.createElement(
+    const formButtons = React.createElement(
         "div",
-        { key: e.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
-        React.createElement(
+        { className: "flex gap-2 mt-4" },
+        React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: PURPLE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : (form.id ? "수정 저장" : "저장")),
+        React.createElement("button", { onClick: cancelForm, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+    );
+    // "+ 일정 추가"로 연 새 일정 등록 폼은 맨 위에 뜬다. 기존 일정 수정(form.id 있음)은 그 항목 바로 아래에 펼쳐지므로 여기선 안 띄운다.
+    const formCard = showForm && isDirector && !form.id && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-5", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "연간 학사일정 추가"),
+        formFields,
+        formButtons
+    );
+    const rows = visibleEvents.map((e) => {
+        const row = React.createElement(
             "div",
-            { className: "flex items-center gap-3 min-w-0 flex-wrap" },
-            React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#fff", background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, borderRadius: 6, padding: "2px 7px", flexShrink: 0 } }, e.type),
-            React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, flexShrink: 0 } }, e.date + (e.endDate && e.endDate !== e.date ? " ~ " + e.endDate : "")),
-            React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700 } }, e.title),
-            e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "(" + e.school + ")")
-        ),
-        isDirector && React.createElement(
-            "div",
-            { className: "flex items-center gap-3 flex-shrink-0" },
-            React.createElement("button", { onClick: () => startEdit(e), style: { color: SUBINK } }, "✏️"),
-            React.createElement("button", { onClick: () => remove(e.id), style: { color: SUBINK } }, "🗑")
-        )
-    ));
+            { key: e.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-3 min-w-0 flex-wrap" },
+                React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#fff", background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, borderRadius: 6, padding: "2px 7px", flexShrink: 0 } }, e.type),
+                React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, flexShrink: 0 } }, e.date + (e.endDate && e.endDate !== e.date ? " ~ " + e.endDate : "")),
+                React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700 } }, e.title),
+                e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "(" + e.school + ")")
+            ),
+            isDirector && React.createElement(
+                "div",
+                { className: "flex items-center gap-3 flex-shrink-0" },
+                React.createElement("button", { onClick: () => startEdit(e), style: { color: SUBINK } }, "✏️"),
+                React.createElement("button", { onClick: () => remove(e.id), style: { color: SUBINK } }, "🗑")
+            )
+        );
+        // 이 항목을 수정 중이면, 바로 아래에 수정 폼을 펼쳐서 스크롤 없이 그 자리에서 고칠 수 있게 한다.
+        if (showForm && isDirector && form.id === e.id) {
+            return React.createElement(
+                React.Fragment,
+                { key: "wrap" + e.id },
+                row,
+                React.createElement(
+                    "div",
+                    { className: "p-5", style: { background: PAPER, borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("div", { style: { fontWeight: 800, fontSize: 14, marginBottom: 12 } }, "일정 수정"),
+                    formFields,
+                    formButtons
+                )
+            );
+        }
+        return row;
+    });
     return React.createElement(
         "div",
         null,
