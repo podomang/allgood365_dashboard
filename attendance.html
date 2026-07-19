@@ -1575,10 +1575,12 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
             let cur = start;
             let guard = 0;
             while (cur <= end && guard < 60) {
-                // 방학 기간(ev.type === "방학식")만 공휴일·명절·일요일을 건너뛴다.
+                // 방학 기간(ev.type === "방학식")만 공휴일·명절·토요일·일요일을 건너뛴다.
+                // 학교가 주5일제라 토요일도 일요일처럼 원래 등교하지 않는 날이라 함께 제외한다.
                 // (입학식·시험·개학 등 하루짜리 항목은 원래 그 날짜에만 찍히는 항목이라 그대로 둔다)
-                const isSunday = new Date(cur + "T00:00:00").getDay() === 0;
-                const skip = ev.type === "방학식" && (isSunday || holidayDates.has(cur));
+                const dow = new Date(cur + "T00:00:00").getDay();
+                const isWeekend = dow === 0 || dow === 6;
+                const skip = ev.type === "방학식" && (isWeekend || holidayDates.has(cur));
                 if (!skip) (m[cur] = m[cur] || []).push(ev);
                 cur = addDays(cur, 1);
                 guard++;
