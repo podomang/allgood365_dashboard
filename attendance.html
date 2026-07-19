@@ -5134,6 +5134,9 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    // "유형: 전체"로 볼 때 목록을 유형별로 접어두는 아코디언 상태. true인 유형만 펼쳐진다.
+    const [expandedGroups, setExpandedGroups] = useState({});
+    const toggleGroup = (k) => setExpandedGroups((prev) => ({ ...prev, [k]: !prev[k] }));
     const save = async () => {
         if (!form.title.trim()) { alert("일정 제목을 입력해주세요."); return; }
         if (form.scope === "학교" && !form.school.trim()) { alert("적용 학교를 입력해주세요."); return; }
@@ -5144,6 +5147,8 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
             } else {
                 await addAcademicEventRow(form);
             }
+            // 방금 저장한 유형의 그룹을 펼쳐서, 접힌 목록 속으로 사라진 것처럼 보이지 않게 한다.
+            setExpandedGroups((prev) => ({ ...prev, [form.type]: true }));
             setForm(emptyAcademicEventForm());
             setShowForm(false);
             await load();
@@ -5155,6 +5160,8 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
     const startEdit = (e) => {
         setForm({ id: e.id, date: e.date, endDate: e.endDate || "", title: e.title, type: e.type, scope: e.scope, school: e.school || "" });
         setShowForm(true);
+        // 수정하려는 항목의 그룹이 접혀있으면 함께 펼쳐서 바로 보이게 한다.
+        setExpandedGroups((prev) => ({ ...prev, [e.type]: true }));
     };
     const cancelForm = () => { setShowForm(false); setForm(emptyAcademicEventForm()); };
     const remove = async (id) => {
@@ -5263,7 +5270,9 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
         formFields,
         formButtons
     );
-    const rows = visibleEvents.map((e) => {
+    // 항목 하나를 행(+ 수정 중이면 그 아래 수정 폼)으로 그린다. "유형: 전체" 아코디언과
+    // 특정 유형으로 필터링된 목록 양쪽에서 공통으로 쓴다.
+    const renderRow = (e) => {
         const row = React.createElement(
             "div",
             { key: e.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
@@ -5298,7 +5307,42 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
             );
         }
         return row;
-    });
+    };
+    // "유형: 전체"일 때는 200개 가까운 항목을 쭉 나열하는 대신, 유형별로 묶어 접어둔다
+    // (범례 순서와 같은 순서로: 공휴일→명절→수능→학원휴무→학원일정→방학식→개학→시험→학교행사→기타).
+    // 특정 유형으로 이미 필터링된 상태(범례 클릭 등)라면 그룹핑 없이 기존처럼 평평한 목록으로 보여준다.
+    const groupedByType = useMemo(() => {
+        if (typeFilter && typeFilter !== "전체") return null;
+        const groups = {};
+        visibleEvents.forEach((e) => { (groups[e.type] = groups[e.type] || []).push(e); });
+        // 학교별 일정(방학식/시험 등)이 섞인 그룹은 학교 이름순 → 날짜순으로 정렬해 같은 학교끼리 모아 보이게 한다.
+        Object.keys(groups).forEach((k) => {
+            groups[k] = groups[k].slice().sort((a, b) => (a.school || "").localeCompare((b.school || ""), "ko") || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+        });
+        return groups;
+    }, [visibleEvents, typeFilter]);
+    const rows = groupedByType
+        ? Object.keys(ACADEMIC_EVENT_COLORS).filter((k) => groupedByType[k] && groupedByType[k].length > 0).map((k) => {
+              const list = groupedByType[k];
+              const isOpen = !!expandedGroups[k];
+              return React.createElement(
+                  React.Fragment,
+                  { key: "grp" + k },
+                  React.createElement(
+                      "button",
+                      { onClick: () => toggleGroup(k), className: "w-full flex items-center justify-between gap-2 px-5 py-3", style: { borderBottom: `1px solid ${LINE}`, background: isOpen ? PAPER : "#fff" } },
+                      React.createElement(
+                          "div", { className: "flex items-center gap-2" },
+                          React.createElement("span", { style: { width: 8, height: 8, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[k] || SUBINK, display: "inline-block", flexShrink: 0 } }),
+                          React.createElement("span", { style: { fontSize: 13.5, fontWeight: 800 } }, k),
+                          React.createElement("span", { style: { fontSize: 12, color: SUBINK } }, "(" + list.length + "건)")
+                      ),
+                      React.createElement("span", { style: { fontSize: 12, color: SUBINK } }, isOpen ? "▲ 접기" : "▼ 펼치기")
+                  ),
+                  isOpen && list.map(renderRow)
+              );
+          })
+        : visibleEvents.map(renderRow);
     return React.createElement(
         "div",
         null,
