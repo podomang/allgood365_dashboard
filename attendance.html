@@ -1557,6 +1557,17 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
         () => schoolFilter === "전체" ? majorAcademicEvents : majorAcademicEvents.filter((ev) => ev.scope !== "학교" || ev.school === schoolFilter),
         [majorAcademicEvents, schoolFilter]
     );
+    // 공휴일·명절(대체공휴일 포함, "공휴일" 종류로 함께 저장됨)이 걸린 날짜 목록.
+    // 방학 기간 표시에서 이 날짜와 일요일은 제외해서, 이미 나라가 정한 휴일인 날을 학교 방학으로 중복 표시하지 않는다.
+    const holidayDates = useMemo(() => {
+        const set = new Set();
+        academicEvents.forEach((e) => {
+            if (e.scope === "학교" || (e.type !== "공휴일" && e.type !== "명절")) return;
+            let cur = e.date, end = e.endDate || e.date, guard = 0;
+            while (cur <= end && guard < 60) { set.add(cur); cur = addDays(cur, 1); guard++; }
+        });
+        return set;
+    }, [academicEvents]);
     const acadByDate = useMemo(() => {
         const m = {};
         filteredAcademicEvents.forEach((ev) => {
@@ -1564,13 +1575,17 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
             let cur = start;
             let guard = 0;
             while (cur <= end && guard < 60) {
-                (m[cur] = m[cur] || []).push(ev);
+                // 방학 기간(ev.type === "방학식")만 공휴일·명절·일요일을 건너뛴다.
+                // (입학식·시험·개학 등 하루짜리 항목은 원래 그 날짜에만 찍히는 항목이라 그대로 둔다)
+                const isSunday = new Date(cur + "T00:00:00").getDay() === 0;
+                const skip = ev.type === "방학식" && (isSunday || holidayDates.has(cur));
+                if (!skip) (m[cur] = m[cur] || []).push(ev);
                 cur = addDays(cur, 1);
                 guard++;
             }
         });
         return m;
-    }, [filteredAcademicEvents]);
+    }, [filteredAcademicEvents, holidayDates]);
     const selEvents = events[selectedDate] || [];
     const selAcadEvents = acadByDate[selectedDate] || [];
     const selJeolgi = selAcadEvents.find((e) => e.type === "절기");
@@ -5083,7 +5098,9 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
 function emptyAcademicEventForm() {
     return { id: null, date: todayStr(), endDate: "", title: "", type: "기타", scope: "전체", school: "" };
 }
-const ACADEMIC_EVENT_TYPES = ["공휴일", "명절", "수능", "학원휴무", "학원일정", "절기", "기타"];
+// "절기"는 여기 포함하지 않는다 - 24절기는 자동 등록되고 대시보드 캘린더 날짜 옆에 작게 표시되는
+// 참고용 정보일 뿐, 원장님이 직접 관리하는 "학사일정"으로 취급하지 않기로 했다(아래 load()에서도 목록에서 제외).
+const ACADEMIC_EVENT_TYPES = ["공휴일", "명절", "수능", "학원휴무", "학원일정", "기타"];
 const SCHOOL_EVENT_TYPES = ["방학식", "개학", "시험", "학교행사"];
 function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter }) {
     const [events, setEvents] = useState([]);
@@ -5101,7 +5118,9 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
     const load = async () => {
         setLoading(true);
         try {
-            setEvents(await fetchAllAcademicEvents());
+            // 절기(24절기)는 자동 등록되는 참고용 정보일 뿐 원장님이 직접 관리하는
+            // "학사일정"이 아니므로 이 관리 목록에서는 제외한다(대시보드 캘린더 표시는 별도 로직으로 그대로 유지됨).
+            setEvents((await fetchAllAcademicEvents()).filter((e) => e.type !== "절기"));
         } catch (e) {
             console.error(e);
         }
