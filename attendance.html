@@ -345,16 +345,6 @@ async function deleteStudentRow(id) {
     if (error)
         throw error;
 }
-// 퇴원처리/재원복귀 원클릭 버튼용. 전체 수정 폼을 열지 않고 상태(+퇴원일)만 바로 바꾼다.
-// 퇴원일은 나중에 학생 수정 폼에서 다시 정확히 고칠 수 있다.
-async function setStudentWithdrawn(id, withdrawn, withdrawDate) {
-    const payload = withdrawn
-        ? { status: "퇴원", withdraw_date: withdrawDate || todayStr() }
-        : { status: "재원", withdraw_date: null };
-    const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", id);
-    if (error)
-        throw error;
-}
 // ---------- 학생 정보 변경 이력(타임라인) ----------
 // attn_student_history: 학생의 학교/학년/반/시간/클리닉 여부 등이 언제부터 언제까지
 // 어떤 값이었는지 구간(effective_from ~ effective_to)으로 기록해두는 테이블.
@@ -3235,26 +3225,6 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             alert("삭제 중 오류: " + e.message);
         }
     };
-    // 퇴원처리/재원복귀는 전체 수정 폼을 열지 않아도 되는 원클릭 버튼. 퇴원일은 오늘 날짜로 우선 채워두고,
-    // 정확한 날짜는 ✎ 수정 폼에서 나중에 고칠 수 있다.
-    const withdrawStudent = async (s) => {
-        if (!confirm(`${s.name} 학생을 퇴원 처리할까요? 퇴원일은 오늘(${todayStr()})로 우선 기록되고, 나중에 ✎ 버튼으로 정확한 날짜를 수정할 수 있습니다.`)) return;
-        try {
-            await setStudentWithdrawn(s.id, true, todayStr());
-            await reload();
-        } catch (e) {
-            alert("처리 중 오류: " + e.message);
-        }
-    };
-    const reactivateStudent = async (s) => {
-        if (!confirm(`${s.name} 학생을 다시 재원 상태로 되돌릴까요?`)) return;
-        try {
-            await setStudentWithdrawn(s.id, false);
-            await reload();
-        } catch (e) {
-            alert("처리 중 오류: " + e.message);
-        }
-    };
     const toggleHistory = async (id) => {
         if (historyTarget === id) { setHistoryTarget(null); return; }
         setHistoryTarget(id);
@@ -3446,9 +3416,6 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             { className: "flex items-center gap-1 flex-shrink-0" },
             React.createElement("button", { onClick: () => toggleHistory(s.id), className: "p-2 rounded-lg", style: { background: historyTarget === s.id ? SKY_SOFT : PAPER, color: SKY }, title: "\uBCC0\uACBD \uC774\uB825 \uBCF4\uAE30" }, "\uD83D\uDD0D"),
             React.createElement("button", { onClick: () => toggleCourses(s.id), className: "p-2 rounded-lg", style: { background: courseTarget === s.id ? TEAL_SOFT : PAPER, color: TEAL }, title: "\uCD94\uAC00\uAC15\uC88C \uAD00\uB9AC" }, "\uD83D\uDCDA"),
-            s.status === "\uD1F4\uC6D0"
-                ? React.createElement("button", { onClick: () => reactivateStudent(s), className: "px-2.5 py-2 rounded-lg text-xs font-bold", style: { background: TEAL_SOFT, color: TEAL }, title: "\uC7AC\uC6D0\uC73C\uB85C \uBCF5\uADC0" }, "\uC7AC\uC6D0 \uBCF5\uADC0")
-                : React.createElement("button", { onClick: () => withdrawStudent(s), className: "px-2.5 py-2 rounded-lg text-xs font-bold", style: { background: RED_SOFT, color: RED }, title: "\uD1F4\uC6D0 \uCC98\uB9AC" }, "\uD1F4\uC6D0\uCC98\uB9AC"),
             React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
             React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
         )
