@@ -3174,6 +3174,17 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    // 보기 모드를 바꿀 때마다(예: 학년별 → 학교별) 그룹은 항상 전체 접힘 상태로 새로 시작한다 —
+    // 펼쳐진 채로 시작하면 전체보기와 다를 게 없어서, 접힌 "요약 인덱스"로 쓰이도록 함.
+    // (아래 "!loaded 이면 return"보다 반드시 앞에 있어야 함 — 그 뒤에 두면 로딩 전/후로 훅 호출 순서가 달라져
+    // "Rendered more hooks than during the previous render" 오류로 화면이 통째로 하얗게 빈다.)
+    useEffect(() => {
+        if (!loaded) return;
+        if (groupMode === "none") { setCollapsedGroups({}); return; }
+        const active = students.filter((s) => s.status !== "퇴원");
+        const newGroups = groupMode === "grade" ? groupByGrade(active) : groupMode === "school" ? groupBySchool(active) : groupMode === "day" ? groupByDay(active) : groupByClass(active);
+        setCollapsedGroups(Object.fromEntries(newGroups.map((g) => [g.className, true])));
+    }, [groupMode, loaded]);
     const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
     const openEdit = (s) => {
         setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "" });
@@ -3531,16 +3542,9 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     // \uD1F4\uC6D0\uC0DD\uC740 \uD559\uB144\uBCC4/\uD559\uAD50\uBCC4/\uBC18\uBCC4/\uC694\uC77C\uBCC4 \uADF8\uB8F9\uD551 \uB300\uC0C1\uC5D0\uC11C \uBE7C\uACE0, \uD654\uBA74 \uB9E8 \uC544\uB798\uC5D0 \uBCC4\uB3C4 "\uD1F4\uC6D0\uC0DD" \uADF8\uB8F9\uC73C\uB85C \uBAA8\uC544 \uBCF4\uC5EC\uC900\uB2E4.
     const activeStudents = students.filter((s) => s.status !== "\uD1F4\uC6D0");
     const withdrawnStudents = students.filter((s) => s.status === "\uD1F4\uC6D0");
-    const computeGroupsFor = (mode) => mode === "none" ? [] : mode === "grade" ? groupByGrade(activeStudents) : mode === "school" ? groupBySchool(activeStudents) : mode === "day" ? groupByDay(activeStudents) : groupByClass(activeStudents);
-    const groups = computeGroupsFor(groupMode);
+    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(activeStudents) : groupMode === "school" ? groupBySchool(activeStudents) : groupMode === "day" ? groupByDay(activeStudents) : groupByClass(activeStudents);
     const expandAllGroups = () => setCollapsedGroups({});
     const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
-    // \uBCF4\uAE30 \uBAA8\uB4DC\uB97C \uBC14\uAFC0 \uB54C\uB9C8\uB2E4(\uC608: \uD559\uB144\uBCC4 \u2192 \uD559\uAD50\uBCC4) \uADF8\uB8F9\uC740 \uD56D\uC0C1 \uC804\uCCB4 \uC811\uD798 \uC0C1\uD0DC\uB85C \uC0C8\uB85C \uC2DC\uC791\uD55C\uB2E4 \u2014
-    // \uD3BC\uCCD0\uC9C4 \uCC44\uB85C \uC2DC\uC791\uD558\uBA74 \uC804\uCCB4\uBCF4\uAE30\uC640 \uB2E4\uB97C \uAC8C \uC5C6\uC5B4\uC11C, \uC811\uD78C "\uC694\uC57D \uC778\uB371\uC2A4"\uB85C \uC4F0\uC774\uB3C4\uB85D \uD568.
-    useEffect(() => {
-        if (!loaded) return;
-        setCollapsedGroups(groupMode === "none" ? {} : Object.fromEntries(computeGroupsFor(groupMode).map((g) => [g.className, true])));
-    }, [groupMode, loaded]);
     const groupToggle = React.createElement(
         "div",
         { className: "flex items-center justify-between gap-3 mb-4 flex-wrap" },
