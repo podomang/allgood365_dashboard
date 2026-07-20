@@ -1489,6 +1489,10 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     const [editingAcadId, setEditingAcadId] = useState(null);
     const [acadEditForm, setAcadEditForm] = useState(null);
     const [savingAcadEdit, setSavingAcadEdit] = useState(false);
+    // 같은 이름의 학교별 일정(예: "여름방학")이 여러 학교에 겹칠 때, 처음엔 접어서 요약만 보여주고
+    // 클릭하면 학교별 목록이 펼쳐지게 하는 상태("제목|유형" 키 기준).
+    const [expandedAcadGroups, setExpandedAcadGroups] = useState({});
+    const toggleAcadGroup = (key) => setExpandedAcadGroups((prev) => ({ ...prev, [key]: !prev[key] }));
     const startAcadEdit = (e) => {
         setEditingAcadId(e.id);
         setAcadEditForm({ id: e.id, date: e.date, endDate: e.endDate || "", title: e.title, type: e.type, scope: e.scope, school: e.school || "" });
@@ -1594,6 +1598,56 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
     const selAcadEvents = acadByDate[selectedDate] || [];
     const selJeolgi = selAcadEvents.find((e) => e.type === "절기");
     const selOtherAcadEvents = selAcadEvents.filter((e) => e.type !== "절기");
+    // "선택한 날짜" 패널에 뜨는 일정 목록을 표시용으로 재구성한다. 학원 전체(scope="전체") 일정이나
+    // 학력평가처럼 이미 합쳐진(_merged) 항목은 지금처럼 한 줄씩 그대로 보여주고, 같은 이름의 학교별
+    // (scope="학교") 일정이 2개 학교 이상 겹칠 때만 "여름방학 · 9개교" 요약 한 줄로 접어서 보여준다
+    // (1개 학교만 해당하면 접었다 펼치는 게 번거로우므로 그냥 한 줄로 표시).
+    const acadDisplayItems = useMemo(() => {
+        const groupByKey = {};
+        const order = [];
+        selOtherAcadEvents.forEach((e) => {
+            if (e.scope !== "학교" || e._merged) {
+                order.push({ kind: "single", event: e });
+                return;
+            }
+            const key = (e.displayTitle || e.title) + "|" + e.type;
+            if (!groupByKey[key]) {
+                groupByKey[key] = { kind: "group", key: key, title: e.displayTitle || e.title, type: e.type, events: [] };
+                order.push(groupByKey[key]);
+            }
+            groupByKey[key].events.push(e);
+        });
+        return order.map((item) => (item.kind === "group" && item.events.length < 2 ? { kind: "single", event: item.events[0] } : item));
+    }, [selOtherAcadEvents]);
+    const renderAcadEventRow = (e) => {
+        if (editingAcadId === e.id) {
+            return React.createElement("div", { key: "acadedit" + e.id, className: "flex flex-col gap-2 px-3 py-3 rounded-lg", style: { background: NAVY_SOFT, border: `1px solid ${NAVY}` } },
+                React.createElement("input", { value: acadEditForm.title, onChange: (ev) => setAcadEditForm({ ...acadEditForm, title: ev.target.value }), placeholder: "제목", className: "w-full px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("input", { type: "date", value: acadEditForm.date, onChange: (ev) => setAcadEditForm({ ...acadEditForm, date: ev.target.value }), className: "flex-1 px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                    React.createElement("input", { type: "date", value: acadEditForm.endDate, onChange: (ev) => setAcadEditForm({ ...acadEditForm, endDate: ev.target.value }), placeholder: "종료일", className: "flex-1 px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } })
+                ),
+                e.type === "방학식" && React.createElement("p", { style: { fontSize: 11, color: SUBINK, margin: 0 } }, "종료일을 비워두면 다음 개학일 전날로 자동 계산돼요. 직접 입력하면 그 값이 우선 사용됩니다."),
+                React.createElement("div", { className: "flex gap-2 mt-1" },
+                    React.createElement("button", { onClick: saveAcadEdit, disabled: savingAcadEdit, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingAcadEdit ? 0.6 : 1 } }, savingAcadEdit ? "저장 중..." : "저장"),
+                    React.createElement("button", { onClick: cancelAcadEdit, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+                )
+            );
+        }
+        return React.createElement("div", { key: "acad" + e.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg flex-wrap", style: { background: (ACADEMIC_EVENT_COLORS[e.type] || SUBINK) + "1a" } },
+            React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, flexShrink: 0 } }),
+            React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[e.type] || SUBINK } }, e.displayTitle || e.title),
+            e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "(" + e.school + ")"),
+            isDirector && React.createElement(
+                "div",
+                { className: "flex items-center gap-2", style: { marginLeft: "auto" } },
+                e._merged
+                    ? React.createElement("button", { onClick: () => openManagerWithType(e.type), style: { fontSize: 11, color: SUBINK, textDecoration: "underline" } }, "관리에서 보기")
+                    : React.createElement("button", { onClick: () => startAcadEdit(e), style: { color: SUBINK } }, "✏️"),
+                !e._merged && React.createElement("button", { onClick: () => removeAcadEvent(e.id), style: { color: SUBINK } }, "🗑")
+            )
+        );
+    };
     const addEvent = async () => {
         if (!newEvent.trim())
             return;
@@ -1669,33 +1723,25 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                 isDirector && React.createElement("div", { className: "flex gap-2 mt-4" },
                     React.createElement("input", { value: newEvent, onChange: (e) => setNewEvent(e.target.value), onKeyDown: (e) => e.key === "Enter" && addEvent(), placeholder: "\uC77C\uC815 \uCD94\uAC00 (\uC608: \uC911\uAC04\uACE0\uC0AC)", className: "flex-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
                     React.createElement("button", { onClick: addEvent, className: "px-3 rounded-lg", style: { background: NAVY, color: "#fff" } }, "+")),
-                selOtherAcadEvents.length > 0 && React.createElement("div", { className: "flex flex-col gap-1.5 mt-3" },
-                    selOtherAcadEvents.map((e) => {
-                        if (editingAcadId === e.id) {
-                            return React.createElement("div", { key: "acadedit" + e.id, className: "flex flex-col gap-2 px-3 py-3 rounded-lg", style: { background: NAVY_SOFT, border: `1px solid ${NAVY}` } },
-                                React.createElement("input", { value: acadEditForm.title, onChange: (ev) => setAcadEditForm({ ...acadEditForm, title: ev.target.value }), placeholder: "제목", className: "w-full px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
-                                React.createElement("div", { className: "flex gap-2" },
-                                    React.createElement("input", { type: "date", value: acadEditForm.date, onChange: (ev) => setAcadEditForm({ ...acadEditForm, date: ev.target.value }), className: "flex-1 px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
-                                    React.createElement("input", { type: "date", value: acadEditForm.endDate, onChange: (ev) => setAcadEditForm({ ...acadEditForm, endDate: ev.target.value }), placeholder: "종료일", className: "flex-1 px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } })
-                                ),
-                                e.type === "방학식" && React.createElement("p", { style: { fontSize: 11, color: SUBINK, margin: 0 } }, "종료일을 비워두면 다음 개학일 전날로 자동 계산돼요. 직접 입력하면 그 값이 우선 사용됩니다."),
-                                React.createElement("div", { className: "flex gap-2 mt-1" },
-                                    React.createElement("button", { onClick: saveAcadEdit, disabled: savingAcadEdit, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingAcadEdit ? 0.6 : 1 } }, savingAcadEdit ? "저장 중..." : "저장"),
-                                    React.createElement("button", { onClick: cancelAcadEdit, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
-                                )
-                            );
+                acadDisplayItems.length > 0 && React.createElement("div", { className: "flex flex-col gap-1.5 mt-3" },
+                    acadDisplayItems.map((item) => {
+                        if (item.kind === "single") {
+                            return renderAcadEventRow(item.event);
                         }
-                        return React.createElement("div", { key: "acad" + e.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg flex-wrap", style: { background: (ACADEMIC_EVENT_COLORS[e.type] || SUBINK) + "1a" } },
-                            React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, flexShrink: 0 } }),
-                            React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[e.type] || SUBINK } }, e.displayTitle || e.title),
-                            e.scope === "학교" && e.school && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "(" + e.school + ")"),
-                            isDirector && React.createElement(
-                                "div",
-                                { className: "flex items-center gap-2", style: { marginLeft: "auto" } },
-                                e._merged
-                                    ? React.createElement("button", { onClick: () => openManagerWithType(e.type), style: { fontSize: 11, color: SUBINK, textDecoration: "underline" } }, "관리에서 보기")
-                                    : React.createElement("button", { onClick: () => startAcadEdit(e), style: { color: SUBINK } }, "✏️"),
-                                !e._merged && React.createElement("button", { onClick: () => removeAcadEvent(e.id), style: { color: SUBINK } }, "🗑")
+                        const isOpen = !!expandedAcadGroups[item.key];
+                        return React.createElement("div", { key: "acadgroup" + item.key, className: "flex flex-col gap-1.5" },
+                            React.createElement("button", {
+                                onClick: () => toggleAcadGroup(item.key),
+                                className: "flex items-center gap-2 px-3 py-2 rounded-lg flex-wrap w-full text-left",
+                                style: { background: (ACADEMIC_EVENT_COLORS[item.type] || SUBINK) + "1a" }
+                            },
+                                React.createElement("span", { style: { width: 7, height: 7, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[item.type] || SUBINK, flexShrink: 0 } }),
+                                React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[item.type] || SUBINK } }, item.title),
+                                React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "· " + item.events.length + "개교"),
+                                React.createElement("span", { style: { fontSize: 11, color: SUBINK, marginLeft: "auto" } }, isOpen ? "▲ 접기" : "▼ 펼치기")
+                            ),
+                            isOpen && React.createElement("div", { className: "flex flex-col gap-1.5 pl-3" },
+                                item.events.map((e) => renderAcadEventRow(e))
                             )
                         );
                     })),
