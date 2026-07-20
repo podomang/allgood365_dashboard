@@ -3240,12 +3240,15 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     if (!loaded) {
         return React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...");
     }
+    const activeCount = students.filter((s) => s.status !== "\uD1F4\uC6D0").length;
     const header = React.createElement(
         "div",
         { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
         React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uD559\uC0DD\uAD00\uB9AC"),
         React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ \uD559\uC0DD \uCD94\uAC00")
     );
+    // \uC804\uCCB4 \uC7AC\uC6D0\uC0DD \uC218\uB97C \uC81C\uBAA9 \uC544\uB798 \uD55C\uB208\uC5D0 \uBCF4\uC774\uB3C4\uB85D \uD45C\uC2DC(\uD1F4\uC6D0\uC0DD \uC218\uB294 \uC544\uB798 "\uD1F4\uC6D0\uC0DD" \uC139\uC158\uC5D0\uC11C \uBCC4\uB3C4 \uD655\uC778).
+    const statLine = React.createElement("p", { style: { color: NAVY, fontSize: 13, fontWeight: 700, marginTop: 4, marginBottom: 2 } }, `\uC7AC\uC6D0\uC0DD ${activeCount}\uBA85`);
     const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "\uD559\uC0DD\uBCC4 \uBC18\uACFC \uB4F1\uC6D0 \uC694\uC77C\uC744 \uB4F1\uB85D\uD558\uBA74 \uCD9C\uC11D\uCCB4\uD06C \uD654\uBA74\uC5D0 \uC790\uB3D9\uC73C\uB85C \uBC18\uC601\uB429\uB2C8\uB2E4.");
     const studentFormEl = React.createElement(
         "div",
@@ -3528,9 +3531,16 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     // \uD1F4\uC6D0\uC0DD\uC740 \uD559\uB144\uBCC4/\uD559\uAD50\uBCC4/\uBC18\uBCC4/\uC694\uC77C\uBCC4 \uADF8\uB8F9\uD551 \uB300\uC0C1\uC5D0\uC11C \uBE7C\uACE0, \uD654\uBA74 \uB9E8 \uC544\uB798\uC5D0 \uBCC4\uB3C4 "\uD1F4\uC6D0\uC0DD" \uADF8\uB8F9\uC73C\uB85C \uBAA8\uC544 \uBCF4\uC5EC\uC900\uB2E4.
     const activeStudents = students.filter((s) => s.status !== "\uD1F4\uC6D0");
     const withdrawnStudents = students.filter((s) => s.status === "\uD1F4\uC6D0");
-    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(activeStudents) : groupMode === "school" ? groupBySchool(activeStudents) : groupMode === "day" ? groupByDay(activeStudents) : groupByClass(activeStudents);
+    const computeGroupsFor = (mode) => mode === "none" ? [] : mode === "grade" ? groupByGrade(activeStudents) : mode === "school" ? groupBySchool(activeStudents) : mode === "day" ? groupByDay(activeStudents) : groupByClass(activeStudents);
+    const groups = computeGroupsFor(groupMode);
     const expandAllGroups = () => setCollapsedGroups({});
     const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
+    // \uBCF4\uAE30 \uBAA8\uB4DC\uB97C \uBC14\uAFC0 \uB54C\uB9C8\uB2E4(\uC608: \uD559\uB144\uBCC4 \u2192 \uD559\uAD50\uBCC4) \uADF8\uB8F9\uC740 \uD56D\uC0C1 \uC804\uCCB4 \uC811\uD798 \uC0C1\uD0DC\uB85C \uC0C8\uB85C \uC2DC\uC791\uD55C\uB2E4 \u2014
+    // \uD3BC\uCCD0\uC9C4 \uCC44\uB85C \uC2DC\uC791\uD558\uBA74 \uC804\uCCB4\uBCF4\uAE30\uC640 \uB2E4\uB97C \uAC8C \uC5C6\uC5B4\uC11C, \uC811\uD78C "\uC694\uC57D \uC778\uB371\uC2A4"\uB85C \uC4F0\uC774\uB3C4\uB85D \uD568.
+    useEffect(() => {
+        if (!loaded) return;
+        setCollapsedGroups(groupMode === "none" ? {} : Object.fromEntries(computeGroupsFor(groupMode).map((g) => [g.className, true])));
+    }, [groupMode, loaded]);
     const groupToggle = React.createElement(
         "div",
         { className: "flex items-center justify-between gap-3 mb-4 flex-wrap" },
@@ -3616,6 +3626,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         "div",
         null,
         header,
+        statLine,
         subText,
         groupToggle,
         editTarget === "new" && studentFormEl,
@@ -3855,6 +3866,7 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant, goToAssistan
     const [editSlot, setEditSlot] = useState(null); // "assistantId|day" 키
     const [editForm, setEditForm] = useState({ effectiveFrom: todayStr(), start: "", end: "", note: "" });
     const [savingEdit, setSavingEdit] = useState(false);
+    const [expandedChip, setExpandedChip] = useState(null); // "assistantId|day" — 조교별 카드에서 어느 요일 칩이 펼쳐졌는지
     const [historySlot, setHistorySlot] = useState(null);
     const [historyRows, setHistoryRows] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
@@ -4330,6 +4342,18 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant, goToAssistan
         if (an !== bn) return an.localeCompare(bn, "ko");
         return dayOrderIndex(a.day) - dayOrderIndex(b.day);
     });
+    // 조교별로 묶어서(이름 한 번만) 그 아래 요일들을 pill로 나열 — 칩을 누르면 그 요일만 아래로 펼쳐져
+    // 이력/수정/삭제 버튼이 나타난다(평소엔 칩만 보여서 목록이 압축적으로 보이도록 함).
+    const detailGroups = [];
+    const detailGroupMap = {};
+    detailEntries.forEach((entry) => {
+        if (!detailGroupMap[entry.assistantId]) {
+            detailGroupMap[entry.assistantId] = { assistantId: entry.assistantId, name: nameOfAssistant(entry.assistantId), entries: [] };
+            detailGroups.push(detailGroupMap[entry.assistantId]);
+        }
+        detailGroupMap[entry.assistantId].entries.push(entry);
+    });
+    const chipColorOf = (entry) => entry.day === "일" ? RED : entry.day === "토" ? NAVY : SUBINK;
     const detailList = isDirector && React.createElement(
         "div",
         { className: "mt-6 rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -4340,97 +4364,119 @@ function WorkScheduleManager({ isDirector, assistants, myAssistant, goToAssistan
                 "div",
                 null,
                 React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "근무일정 상세 목록"),
-                React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginTop: 1 } }, "시간을 수정하면 적용일을 입력받아, 이전 시간은 이력(🔍)으로 남습니다.")
+                React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginTop: 1 } }, "요일 칩을 누르면 이력(🔍)·수정(✎)·삭제(🗑) 버튼이 나타납니다. 시간을 수정하면 적용일을 입력받아, 이전 시간은 이력으로 남습니다.")
             ),
             React.createElement("button", { onClick: () => setShowDetailList((v) => !v), className: "px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0", style: { background: showDetailList ? PAPER : NAVY, color: showDetailList ? SUBINK : "#fff" } }, showDetailList ? "접기" : "펼치기")
         ),
-        showDetailList && (detailEntries.length === 0
+        showDetailList && (detailGroups.length === 0
             ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "24px 0" } }, "등록된 근무일정이 없습니다.")
             : React.createElement(
                 "div",
                 null,
-                detailEntries.map((entry) => {
-                    const key = entry.assistantId + "|" + entry.day;
-                    const isEditing = editSlot === key;
-                    const isHistoryOpen = historySlot === key;
-                    return React.createElement(
-                        React.Fragment,
-                        { key },
-                        React.createElement(
-                            "div",
-                            { className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+                detailGroups.map((grp) => React.createElement(
+                    "div",
+                    { key: grp.assistantId, className: "px-5 py-3", style: { borderBottom: `1px solid ${LINE}` } },
+                    React.createElement(
+                        "div",
+                        { className: "flex items-center gap-2 flex-wrap" },
+                        React.createElement("span", { style: { fontWeight: 700, fontSize: 13, minWidth: 56 } }, grp.name),
+                        grp.entries.map((entry) => {
+                            const key = entry.assistantId + "|" + entry.day;
+                            const isChipOpen = expandedChip === key;
+                            return React.createElement(
+                                "button",
+                                {
+                                    key,
+                                    onClick: () => setExpandedChip((prev) => (prev === key ? null : key)),
+                                    className: "px-3 py-1.5 rounded-full text-xs font-bold",
+                                    style: { background: isChipOpen ? NAVY : PAPER, color: isChipOpen ? "#fff" : chipColorOf(entry), border: `1px solid ${isChipOpen ? NAVY : LINE}` }
+                                },
+                                entry.day + " " + entry.start + "-" + entry.end
+                            );
+                        })
+                    ),
+                    grp.entries.map((entry) => {
+                        const key = entry.assistantId + "|" + entry.day;
+                        if (expandedChip !== key) return null;
+                        const isEditing = editSlot === key;
+                        const isHistoryOpen = historySlot === key;
+                        return React.createElement(
+                            React.Fragment,
+                            { key: key + "-detail" },
                             React.createElement(
                                 "div",
-                                { className: "flex items-center gap-3 min-w-0 flex-wrap" },
-                                React.createElement("span", { style: { fontWeight: 700, fontSize: 13, minWidth: 56 } }, nameOfAssistant(entry.assistantId)),
-                                React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: entry.day === "일" ? RED : entry.day === "토" ? NAVY : SUBINK, minWidth: 20 } }, entry.day),
-                                React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: PURPLE } }, entry.start + " - " + entry.end),
-                                entry.note && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, entry.note)
-                            ),
-                            React.createElement(
-                                "div",
-                                { className: "flex items-center gap-1 flex-shrink-0" },
-                                React.createElement("button", { onClick: () => toggleHistorySlot(entry), className: "p-2 rounded-lg", style: { background: isHistoryOpen ? SKY_SOFT : PAPER, color: SKY }, title: "변경 이력 보기" }, "🔍"),
-                                React.createElement("button", { onClick: () => (isEditing ? closeEditSlot() : openEditSlot(entry)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY }, title: "수정" }, "✎"),
-                                React.createElement("button", { onClick: () => remove(entry), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED }, title: "삭제" }, "🗑")
-                            )
-                        ),
-                        isHistoryOpen && React.createElement(
-                            "div",
-                            { className: "px-5 py-3", style: { background: SKY_SOFT, borderBottom: `1px solid ${LINE}` } },
-                            historyLoading
-                                ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "불러오는 중...")
-                                : React.createElement(
+                                { className: "flex items-center justify-between gap-3 flex-wrap rounded-lg px-3 py-2 mt-2", style: { background: PAPER } },
+                                React.createElement(
                                     "div",
-                                    { className: "flex flex-col gap-1.5" },
-                                    historyRows.slice().reverse().map((h) => React.createElement(
+                                    { className: "flex items-center gap-2 flex-wrap" },
+                                    React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: chipColorOf(entry) } }, entry.day + "요일 " + entry.start + " - " + entry.end),
+                                    entry.note && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, entry.note)
+                                ),
+                                React.createElement(
+                                    "div",
+                                    { className: "flex items-center gap-1 flex-shrink-0" },
+                                    React.createElement("button", { onClick: () => toggleHistorySlot(entry), className: "p-2 rounded-lg", style: { background: isHistoryOpen ? SKY_SOFT : "#fff", color: SKY }, title: "변경 이력 보기" }, "🔍"),
+                                    React.createElement("button", { onClick: () => (isEditing ? closeEditSlot() : openEditSlot(entry)), className: "p-2 rounded-lg", style: { background: isEditing ? NAVY_SOFT : "#fff", color: NAVY }, title: "수정" }, "✎"),
+                                    React.createElement("button", { onClick: () => remove(entry), className: "p-2 rounded-lg", style: { background: "#fff", color: RED }, title: "삭제" }, "🗑")
+                                )
+                            ),
+                            isHistoryOpen && React.createElement(
+                                "div",
+                                { className: "px-3 py-3 rounded-lg mt-1", style: { background: SKY_SOFT } },
+                                historyLoading
+                                    ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "불러오는 중...")
+                                    : React.createElement(
                                         "div",
-                                        { key: h.id, className: "flex items-center gap-2 flex-wrap" },
-                                        React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: SKY, minWidth: 150 } }, h.effectiveFrom + " ~ " + (h.effectiveTo || "현재")),
-                                        React.createElement("span", { style: { fontSize: 12, color: INK } }, h.start + " - " + h.end + (h.note ? " · " + h.note : ""))
-                                    ))
-                                )
-                        ),
-                        isEditing && React.createElement(
-                            "div",
-                            { className: "px-5 py-4", style: { background: PAPER, borderBottom: `1px solid ${LINE}` } },
-                            React.createElement(
-                                "div",
-                                { className: "grid grid-cols-2 sm:grid-cols-4 gap-2" },
-                                React.createElement(
-                                    "div",
-                                    null,
-                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "적용일"),
-                                    React.createElement("input", { type: "date", value: editForm.effectiveFrom, onChange: (e) => setEditForm({ ...editForm, effectiveFrom: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-                                ),
-                                React.createElement(
-                                    "div",
-                                    null,
-                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "시작"),
-                                    React.createElement("input", { type: "time", value: editForm.start, onChange: (e) => setEditForm({ ...editForm, start: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-                                ),
-                                React.createElement(
-                                    "div",
-                                    null,
-                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "종료"),
-                                    React.createElement("input", { type: "time", value: editForm.end, onChange: (e) => setEditForm({ ...editForm, end: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-                                ),
-                                React.createElement(
-                                    "div",
-                                    null,
-                                    React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "메모"),
-                                    React.createElement("input", { value: editForm.note, onChange: (e) => setEditForm({ ...editForm, note: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
-                                )
+                                        { className: "flex flex-col gap-1.5" },
+                                        historyRows.slice().reverse().map((h) => React.createElement(
+                                            "div",
+                                            { key: h.id, className: "flex items-center gap-2 flex-wrap" },
+                                            React.createElement("span", { style: { fontSize: 11, fontWeight: 800, color: SKY, minWidth: 150 } }, h.effectiveFrom + " ~ " + (h.effectiveTo || "현재")),
+                                            React.createElement("span", { style: { fontSize: 12, color: INK } }, h.start + " - " + h.end + (h.note ? " · " + h.note : ""))
+                                        ))
+                                    )
                             ),
-                            React.createElement(
+                            isEditing && React.createElement(
                                 "div",
-                                { className: "flex gap-2 mt-3" },
-                                React.createElement("button", { onClick: () => saveEditSlot(entry), disabled: savingEdit, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingEdit ? 0.6 : 1 } }, savingEdit ? "저장 중..." : "저장"),
-                                React.createElement("button", { onClick: closeEditSlot, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+                                { className: "px-3 py-4 rounded-lg mt-1", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                                React.createElement(
+                                    "div",
+                                    { className: "grid grid-cols-2 sm:grid-cols-4 gap-2" },
+                                    React.createElement(
+                                        "div",
+                                        null,
+                                        React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "적용일"),
+                                        React.createElement("input", { type: "date", value: editForm.effectiveFrom, onChange: (e) => setEditForm({ ...editForm, effectiveFrom: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                    ),
+                                    React.createElement(
+                                        "div",
+                                        null,
+                                        React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "시작"),
+                                        React.createElement("input", { type: "time", value: editForm.start, onChange: (e) => setEditForm({ ...editForm, start: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                    ),
+                                    React.createElement(
+                                        "div",
+                                        null,
+                                        React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "종료"),
+                                        React.createElement("input", { type: "time", value: editForm.end, onChange: (e) => setEditForm({ ...editForm, end: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                    ),
+                                    React.createElement(
+                                        "div",
+                                        null,
+                                        React.createElement("label", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "메모"),
+                                        React.createElement("input", { value: editForm.note, onChange: (e) => setEditForm({ ...editForm, note: e.target.value }), className: "w-full px-2.5 py-1.5 rounded-lg text-xs outline-none mt-1", style: { border: `1px solid ${LINE}` } })
+                                    )
+                                ),
+                                React.createElement(
+                                    "div",
+                                    { className: "flex gap-2 mt-3" },
+                                    React.createElement("button", { onClick: () => saveEditSlot(entry), disabled: savingEdit, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff", opacity: savingEdit ? 0.6 : 1 } }, savingEdit ? "저장 중..." : "저장"),
+                                    React.createElement("button", { onClick: closeEditSlot, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+                                )
                             )
-                        )
-                    );
-                })
+                        );
+                    })
+                ))
             ))
     );
     return React.createElement(
