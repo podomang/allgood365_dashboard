@@ -605,8 +605,26 @@ function buildMajorAcademicEvents(allEvents) {
     });
     return common.concat(merged);
 }
+// 학사일정 유형별 전용 색상(10종). 기존엔 RED/SKY/PURPLE 등 앱 전역에서 다른 용도로도 쓰이는 상수를
+// 그대로 재사용하다 보니 공휴일·명절·시험이 전부 같은 RED, 수능·학교행사가 같은 PURPLE, 학원휴무·방학식이
+// 같은 SKY로 겹쳐서 구분이 안 되는 문제가 있었다(2026-07-20 원장님 제보). 이 색들은 다른 화면(🔍 버튼,
+// 근무일지 편집 등)에서 쓰는 전역 상수(SKY/TEAL/PURPLE/RED/AMBER)와는 완전히 분리된 전용 값이라, 여기서
+// 바꿔도 다른 화면 색상엔 영향이 없다. 색약 시뮬레이션까지 통과하도록 검증된 8색을 기본으로 하고,
+// 원장님이 가장 자주 챙겨야 하는 학원휴무·학원일정은 기존에 쓰던 파랑·주황을 그대로 유지했다.
+// 공휴일·명절은 "나라가 정한 쉬는 날"로 이미 같이 묶여 관리되고 있어(방학기간 중복표시 제외 로직 등)
+// 같은 색 계열(마젠타)에서 톤만 다르게 배정했다.
+const ACAD_BLUE = "#2a78d6"; // 학원휴무
+const ACAD_ORANGE = "#eb6834"; // 학원일정
+const ACAD_RED = "#e34948"; // 시험
+const ACAD_VIOLET = "#4a3aa7"; // 학교행사
+const ACAD_AQUA = "#1baf7a"; // 방학식
+const ACAD_GREEN = "#008300"; // 개학
+const ACAD_MAGENTA = "#e87ba4"; // 공휴일
+const ACAD_MAGENTA_LIGHT = "#f3aecb"; // 명절 (공휴일과 같은 계열, 밝은 톤)
+const ACAD_YELLOW = "#eda100"; // 수능
 const ACADEMIC_EVENT_COLORS = {
-    공휴일: RED, 명절: RED, 수능: PURPLE, 학원휴무: SKY, 학원일정: AMBER, 방학식: SKY, 개학: TEAL, 시험: RED, 학교행사: PURPLE, 기타: SUBINK,
+    공휴일: ACAD_MAGENTA, 명절: ACAD_MAGENTA_LIGHT, 수능: ACAD_YELLOW, 학원휴무: ACAD_BLUE, 학원일정: ACAD_ORANGE,
+    방학식: ACAD_AQUA, 개학: ACAD_GREEN, 시험: ACAD_RED, 학교행사: ACAD_VIOLET, 기타: SUBINK,
 };
 
 // ---------- 공휴일 자동 계산 (신정/삼일절/어린이날/현충일/제헌절/광복절/개천절/한글날/크리스마스 + 설날/추석/부처님오신날 + 대체공휴일) ----------
@@ -1320,7 +1338,7 @@ function MainApp({ session }) {
     const goRegisterStudentFromDiagnostic = (prefillData) => { setStudentPrefill(prefillData); setTab("students"); };
     // 출석체크에서 출석/지각으로 체크된 학생 이름을 누르면 스태프룸 > 근무일지 작성 화면으로 바로 이동시키는 다리 역할 상태.
     const [workLogFocus, setWorkLogFocus] = useState(null); // { studentId, date, token } | null
-    const goToWorkLog = (studentId, date) => { setWorkLogFocus({ studentId, date, token: Date.now() }); setTab("assistants"); };
+    const goToWorkLog = (studentId, date, mode) => { setWorkLogFocus({ studentId, date, mode: mode || "write", token: Date.now() }); setTab("assistants"); };
     // 출석체크에서 "출근 기록 없음"으로 막혔을 때 [출퇴근] 탭으로 바로 이동시키는 용도.
     const [staffroomFocusSubTab, setStaffroomFocusSubTab] = useState(null); // { tab, token } | null
     const goToClockIn = () => { setStaffroomFocusSubTab({ tab: "attendance", token: Date.now() }); setTab("assistants"); };
@@ -1443,7 +1461,7 @@ function MainApp({ session }) {
             tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog, myAssistant: myAssistant, goToClockIn: goToClockIn, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true) }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector, students: students }),
             tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students, focusWorkLog: workLogFocus, onFocusWorkLogConsumed: () => setWorkLogFocus(null), focusSubTab: staffroomFocusSubTab }),
-            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses })
+            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses, goToWorkLog: goToWorkLog })
         );
     return React.createElement(
         "div",
@@ -1594,6 +1612,19 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
         });
         return m;
     }, [filteredAcademicEvents, holidayDates]);
+    // 대시보드 캘린더 위쪽/아래쪽 어디에 있든 한눈에 보이도록, 오늘 이후 가장 가까운 학원휴무·학원일정
+    // 몇 건을 따로 뽑아 요약 카드로 보여준다(진단평가의 "다가오는 진단평가" 위젯과 같은 패턴).
+    const upcomingAcadOps = useMemo(() => {
+        return academicEvents
+            .filter((e) => e.scope !== "학교" && (e.type === "학원휴무" || e.type === "학원일정") && e.date >= today)
+            .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+            .slice(0, 6);
+    }, [academicEvents, today]);
+    const jumpToAcadEvent = (e) => {
+        const d = new Date(e.date + "T00:00:00");
+        setMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+        setSelectedDate(e.date);
+    };
     const selEvents = events[selectedDate] || [];
     const selAcadEvents = acadByDate[selectedDate] || [];
     const selJeolgi = selAcadEvents.find((e) => e.type === "절기");
@@ -1697,13 +1728,24 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                     const evs = events[ds] || [];
                     const acadEvs = acadByDate[ds] || [];
                     const jeolgiEv = acadEvs.find((e) => e.type === "절기");
-                    const pillAcadEvs = acadEvs.filter((e) => e.type !== "절기");
-                    return (React.createElement("button", { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: isSel ? NAVY_SOFT : "#fff", border: isToday ? `1.5px solid ${RED}` : `1px solid ${LINE}` } },
+                    const PRIORITY_ACAD_TYPES = ["학원휴무", "학원일정"];
+                    const pillAcadEvs = acadEvs.filter((e) => e.type !== "절기").slice().sort((a, b) => {
+                        const pa = PRIORITY_ACAD_TYPES.indexOf(a.type), pb = PRIORITY_ACAD_TYPES.indexOf(b.type);
+                        return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+                    });
+                    const hasClosure = acadEvs.some((e) => e.type === "학원휴무");
+                    const hasAcadPlan = !hasClosure && acadEvs.some((e) => e.type === "학원일정");
+                    const cellBg = isSel ? NAVY_SOFT : hasClosure ? ACAD_BLUE + "14" : hasAcadPlan ? ACAD_ORANGE + "14" : "#fff";
+                    const cellBorder = isToday ? `1.5px solid ${RED}` : hasClosure ? `1.5px solid ${ACAD_BLUE}` : hasAcadPlan ? `1.5px solid ${ACAD_ORANGE}` : `1px solid ${LINE}`;
+                    return (React.createElement("button", { key: i, onClick: () => setSelectedDate(ds), className: "text-left rounded-xl p-1.5 flex flex-col", style: { minHeight: 62, background: cellBg, border: cellBorder } },
                         React.createElement("div", { className: "flex items-center justify-between gap-1" },
                             React.createElement("span", { style: { fontSize: 12, fontWeight: isToday ? 800 : 600, color: isToday ? RED : d.getDay() === 0 ? "#c0625c" : d.getDay() === 6 ? NAVY : INK } }, d.getDate()),
                             jeolgiEv && React.createElement("span", { style: { fontSize: 8.5, color: SUBINK, fontWeight: 600, flexShrink: 0 } }, jeolgiEv.title)),
                         React.createElement("div", { className: "flex flex-col gap-0.5 mt-1" },
-                            pillAcadEvs.slice(0, 1).map((e) => (React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.displayTitle || e.title))),
+                            pillAcadEvs.slice(0, 1).map((e) => {
+                                const isPriority = e.type === "학원휴무" || e.type === "학원일정";
+                                return React.createElement("span", { key: "a" + e.id, style: { fontSize: 9.5, fontWeight: isPriority ? 800 : 600, background: ACADEMIC_EVENT_COLORS[e.type] || SUBINK, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", boxShadow: isPriority ? "0 0 0 1.5px #fff" : "none" } }, e.displayTitle || e.title);
+                            }),
                             evs.slice(0, 2).map((e) => (React.createElement("span", { key: e.id, style: { fontSize: 9.5, background: NAVY, color: "#fff", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.title))),
                             (evs.length + pillAcadEvs.length) > 3 && React.createElement("span", { style: { fontSize: 9, color: SUBINK, fontWeight: 600 } },
                                 "+",
@@ -1751,6 +1793,21 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                         React.createElement("span", { style: { fontSize: 13, fontWeight: 600 } }, e.title),
                         isDirector && React.createElement("button", { onClick: () => removeEvent(e.id), style: { color: SUBINK } }, "\u2715"))))),
                 React.createElement("button", { onClick: goToAttendance, className: "w-full mt-4 py-2.5 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "\uC774 \uB0A0\uC9DC\uB85C \uCD9C\uC11D\uCCB4\uD06C \uD558\uB7EC\uAC00\uAE30"))),
+        upcomingAcadOps.length > 0 && React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 10 } }, "\uD83D\uDCCC \uB2E4\uAC00\uC624\uB294 \uD559\uC6D0\uD734\uBB34\u00B7\uD559\uC6D0\uC77C\uC815"),
+            React.createElement("div", { className: "flex flex-col gap-2" },
+                upcomingAcadOps.map((e) => React.createElement("button", {
+                    key: "up" + e.id,
+                    onClick: () => jumpToAcadEvent(e),
+                    className: "flex items-center gap-2 px-3 py-2 rounded-lg w-full text-left flex-wrap",
+                    style: { background: ACADEMIC_EVENT_COLORS[e.type] + "14" }
+                },
+                    React.createElement("span", { style: { width: 8, height: 8, borderRadius: 999, background: ACADEMIC_EVENT_COLORS[e.type], flexShrink: 0 } }),
+                    React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: ACADEMIC_EVENT_COLORS[e.type] } }, e.title),
+                    React.createElement("span", { style: { fontSize: 11, color: SUBINK, marginLeft: "auto" } }, e.date + " (" + korWeekdayOf(e.date) + ")")
+                ))
+            )
+        ),
         React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 1 } }, "\uD83D\uDCE3 \uACF5\uC9C0\uC0AC\uD56D"),
             React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 12 } }, "\uD55C \uC904\uC529 \uAE30\uB85D\uD574\uB450\uB294 \uC6D0\uB0B4 \uACF5\uC9C0 \uB85C\uADF8\uC785\uB2C8\uB2E4."),
@@ -3138,7 +3195,7 @@ function TimeRangeInput({ value, onChange, borderColor, background, durationMinu
         React.createElement("input", { type: "time", value: end, onChange: (e) => onChange(composeTimeRange(start, e.target.value)), className: "px-2 py-2 rounded-lg text-sm outline-none", style: inputStyle })
     );
 }
-function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses, reloadStudentCourses }) {
+function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses, reloadStudentCourses, goToWorkLog }) {
     const [students, setStudents] = useState([]);
     const [loaded, setLoaded] = useState(false);
     const [form, setForm] = useState(emptyForm());
@@ -3476,6 +3533,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             { className: "flex items-center gap-1 flex-shrink-0" },
             React.createElement("button", { onClick: () => toggleHistory(s.id), className: "p-2 rounded-lg", style: { background: historyTarget === s.id ? SKY_SOFT : PAPER, color: SKY }, title: "\uBCC0\uACBD \uC774\uB825 \uBCF4\uAE30" }, "\uD83D\uDD0D"),
             React.createElement("button", { onClick: () => toggleCourses(s.id), className: "p-2 rounded-lg", style: { background: courseTarget === s.id ? TEAL_SOFT : PAPER, color: TEAL }, title: "\uCD94\uAC00\uAC15\uC88C \uAD00\uB9AC" }, "\uD83D\uDCDA"),
+            goToWorkLog && React.createElement("button", { onClick: () => goToWorkLog(s.id, null, "view"), className: "p-2 rounded-lg", style: { background: PAPER, color: PURPLE }, title: "\uADFC\uBB34\uC77C\uC9C0(\uC9C0\uB3C4 \uC774\uB825) \uBCF4\uAE30" }, "\uD83D\uDCD4"),
             React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "\u270E"),
             React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "\uD83D\uDDD1")
         )
@@ -4808,7 +4866,20 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     const [draft, setDraft] = useState({ content: "", noteToDirector: "" });
     const [extraLabel, setExtraLabel] = useState("");
     const [savingInline, setSavingInline] = useState(false);
-    const [pendingFocusStudentId, setPendingFocusStudentId] = useState(() => (focusWorkLog && focusWorkLog.studentId) || null);
+    // focusWorkLog.mode가 "view"면(학생관리의 📔 버튼으로 넘어온 경우) 글쓰기 입력창을 자동으로 여는 게
+    // 아니라, 아래 "근무일지 목록"을 곧바로 "학생별" 보기로 전환해서 그 학생의 지도 이력을 보여준다.
+    const [pendingFocusStudentId, setPendingFocusStudentId] = useState(() => (focusWorkLog && focusWorkLog.mode !== "view" && focusWorkLog.studentId) || null);
+    // 근무일지 목록을 [작성자별 | 날짜별 | 학생별]로 바꿔가며 볼 수 있는 보기 모드.
+    const [viewMode, setViewMode] = useState(() => (focusWorkLog && focusWorkLog.mode === "view") ? "student" : "author");
+    const [logDate, setLogDate] = useState(todayStr());
+    const [studentViewId, setStudentViewId] = useState(() => (focusWorkLog && focusWorkLog.mode === "view" && focusWorkLog.studentId) || null);
+    const [studentQuery, setStudentQuery] = useState(() => {
+        if (focusWorkLog && focusWorkLog.mode === "view" && focusWorkLog.studentId) {
+            const s = (students || []).find((x) => x.id === focusWorkLog.studentId);
+            return s ? s.name : "";
+        }
+        return "";
+    });
     useEffect(() => { if (focusWorkLog && onFocusWorkLogConsumed) onFocusWorkLogConsumed(); }, []);
     // 근무일지는 "그날 실제로 출근 체크한 근무자"만 작성 가능(원장은 예외). attn_assistant_attendance에
     // 그 날짜 + 본인 assistant_id로 출근 기록이 있는지 확인한다.
@@ -4828,7 +4899,10 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     const load = async () => {
         setLoading(true);
         try {
-            const start = isDirector ? addDays(todayStr(), -30 * rangeMonths) : null;
+            // "날짜별"/"학생별" 보기는 원장님이 설정해둔 최근 N개월 범위를 넘어선 과거 기록도 찾아야 하므로
+            // (예: 학생 전체 지도 이력), 그 두 모드에서는 기간 제한 없이 전체를 불러온다. "작성자별" 모드일 때만
+            // 기존처럼 원장 계정에 한해 rangeMonths로 범위를 제한한다.
+            const start = (isDirector && viewMode === "author") ? addDays(todayStr(), -30 * rangeMonths) : null;
             setRows(await fetchWorkLogs(start));
         } catch (e) {
             console.error(e);
@@ -4846,14 +4920,14 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
             return [];
         }
     };
-    useEffect(() => { load(); }, [isDirector, rangeMonths]);
+    useEffect(() => { load(); }, [isDirector, rangeMonths, viewMode]);
     useEffect(() => {
         const channel = supabaseClient
             .channel("attn_work_logs_changes")
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_work_logs" }, () => { load(); loadTodayEntries(writeDate); })
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
-    }, [isDirector, rangeMonths, writeDate]);
+    }, [isDirector, rangeMonths, viewMode, writeDate]);
     const loadPresent = async (dateStr) => {
         setLoadingPresent(true);
         try {
@@ -5120,7 +5194,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
                 "div",
                 { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, fontWeight: 700 } }, r.date + " (" + korWeekdayOf(r.date) + ")"),
-                isDirector && React.createElement("span", { style: { fontSize: 11.5, color: PURPLE, fontWeight: 700, background: PURPLE_SOFT, borderRadius: 6, padding: "2px 7px" } }, r.authorName || r.authorEmail)
+                (isDirector || viewMode !== "author") && React.createElement("span", { style: { fontSize: 11.5, color: PURPLE, fontWeight: 700, background: PURPLE_SOFT, borderRadius: 6, padding: "2px 7px" } }, r.authorName || r.authorEmail)
             ),
             React.createElement(
                 "div",
@@ -5179,61 +5253,108 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     }
     const authorGroups = Object.keys(groupedByAuthor).map((email) => groupedByAuthor[email]).sort((a, b) => a.name.localeCompare(b.name, "ko"));
     const myMonthKeys = monthKeysOf(visibleRows);
+    // "날짜별" 보기: 고른 날짜에 여러 조교가 쓴 기록을 한 화면에 모아서 보여준다.
+    const dateRows = rows.filter((r) => r.date === logDate);
+    // "학생별" 보기: 학생 한 명을 고르면 그동안 쌓인 지도 이력을 시간순(최신순)으로 보여준다(=사실상 수업일지).
+    const studentRows = studentViewId ? rows.filter((r) => r.studentIds.includes(studentViewId)) : [];
+    const VIEW_MODE_TABS = [["author", "작성자별"], ["date", "날짜별"], ["student", "학생별"]];
+    const modeToggle = React.createElement(
+        "div",
+        { className: "flex gap-0.5 p-0.5 rounded-lg flex-shrink-0", style: { background: PAPER } },
+        VIEW_MODE_TABS.map(([key, label]) => React.createElement("button", {
+            key,
+            onClick: () => setViewMode(key),
+            className: "px-2.5 py-1.5 rounded-md text-xs font-bold",
+            style: viewMode === key ? { background: PURPLE, color: "#fff" } : { background: "transparent", color: SUBINK }
+        }, label))
+    );
     const listCard = React.createElement(
         "div",
         { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
         React.createElement(
             "div",
             { className: "px-5 py-4 flex items-center justify-between gap-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
-            React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, isDirector ? "전체 근무일지" : "내 근무일지"),
-            isDirector && React.createElement(
+            React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, "근무일지 목록"),
+            React.createElement(
                 "div",
                 { className: "flex items-center gap-2 flex-wrap" },
-                React.createElement(
+                modeToggle,
+                viewMode === "author" && isDirector && React.createElement(
                     "select",
                     { value: authorFilter, onChange: (e) => setAuthorFilter(e.target.value), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
                     React.createElement("option", { value: "" }, "전체 작성자"),
                     authorOptions.map((a) => React.createElement("option", { key: a.email, value: a.email }, a.name))
                 ),
-                React.createElement(
+                viewMode === "author" && isDirector && React.createElement(
                     "select",
                     { value: rangeMonths, onChange: (e) => setRangeMonths(Number(e.target.value)), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
                     [1, 2, 3].map((n) => React.createElement("option", { key: n, value: n }, "최근 " + n + "개월"))
+                ),
+                viewMode === "date" && React.createElement("input", {
+                    type: "date", value: logDate, onChange: (e) => setLogDate(e.target.value),
+                    className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` }
+                }),
+                viewMode === "student" && React.createElement(
+                    React.Fragment,
+                    null,
+                    React.createElement("input", {
+                        list: "worklog-student-datalist", value: studentQuery,
+                        onChange: (e) => {
+                            setStudentQuery(e.target.value);
+                            const match = students.find((s) => s.name === e.target.value);
+                            setStudentViewId(match ? match.id : null);
+                        },
+                        placeholder: "학생 이름 검색",
+                        className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, width: 140 }
+                    }),
+                    React.createElement("datalist", { id: "worklog-student-datalist" },
+                        students.map((s) => React.createElement("option", { key: s.id, value: s.name }))
+                    )
                 )
             )
         ),
         loading
             ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
-            : visibleRows.length === 0
-                ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "작성된 근무일지가 없습니다.")
-                : React.createElement(
-                    "div",
-                    null,
-                    isDirector
-                        ? authorGroups.map((g) => React.createElement(
+            : viewMode === "date"
+                ? (dateRows.length === 0
+                    ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "이 날짜엔 작성된 근무일지가 없습니다.")
+                    : React.createElement("div", null, dateRows.map((r) => renderRow(r))))
+                : viewMode === "student"
+                    ? (!studentViewId
+                        ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "학생을 선택하면 그동안 기록된 지도 이력을 시간순으로 볼 수 있어요.")
+                        : studentRows.length === 0
+                            ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "아직 기록된 근무일지가 없습니다.")
+                            : React.createElement("div", null, studentRows.map((r) => renderRow(r))))
+                    : visibleRows.length === 0
+                        ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "작성된 근무일지가 없습니다.")
+                        : React.createElement(
                             "div",
-                            { key: g.name },
-                            React.createElement("div", { className: "px-5 py-2", style: { background: PAPER, fontWeight: 800, fontSize: 13 } }, g.name),
-                            Object.keys(g.months).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map((mk) => React.createElement(
-                                "div",
-                                { key: mk },
-                                React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
-                                g.months[mk].map((r) => renderRow(r))
-                            ))
-                        ))
-                        : myMonthKeys.map((mk) => React.createElement(
-                            "div",
-                            { key: mk },
-                            React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
-                            visibleRows.filter((r) => monthKeyOf(r.date) === mk).map((r) => renderRow(r))
-                        ))
-                )
+                            null,
+                            isDirector
+                                ? authorGroups.map((g) => React.createElement(
+                                    "div",
+                                    { key: g.name },
+                                    React.createElement("div", { className: "px-5 py-2", style: { background: PAPER, fontWeight: 800, fontSize: 13 } }, g.name),
+                                    Object.keys(g.months).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map((mk) => React.createElement(
+                                        "div",
+                                        { key: mk },
+                                        React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                                        g.months[mk].map((r) => renderRow(r))
+                                    ))
+                                ))
+                                : myMonthKeys.map((mk) => React.createElement(
+                                    "div",
+                                    { key: mk },
+                                    React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                                    visibleRows.filter((r) => monthKeyOf(r.date) === mk).map((r) => renderRow(r))
+                                ))
+                        )
     );
     return React.createElement(
         "div",
         null,
         React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, "근무일지"),
-        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교별·월별로 정리된 근무일지를 조회하고, 전달사항을 확인 처리할 수 있습니다." : "출석한 학생을 눌러 지도내용을 남기고, 원장님께 전달할 사항을 기록하세요."),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "작성자별·날짜별·학생별로 근무일지를 조회하고, 전달사항을 확인 처리할 수 있습니다." : "출석한 학생을 눌러 지도내용을 남기고, 아래에서 날짜별·학생별로 근무일지를 조회할 수 있습니다."),
         !isDirector && !myAssistant && React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "이 계정이 조교명단에 아직 연결되지 않았습니다."),
         (isDirector || myAssistant) && writeSection,
         (isDirector || myAssistant) && listCard
