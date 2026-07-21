@@ -985,21 +985,23 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
 }
 // ---------- 보강(extra) 명단 ----------
 async function fetchExtraRoster(date) {
-    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at, origin_session, origin_time, origin_label").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at, origin_session, origin_date, origin_time, origin_label").eq("attn_date", date);
     if (error)
         throw error;
     const map = {};
-    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", originSession: r.origin_session || "", originTime: r.origin_time || "", originLabel: r.origin_label || "" }; });
+    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", originSession: r.origin_session || "", originDate: r.origin_date || "", originTime: r.origin_time || "", originLabel: r.origin_label || "" }; });
     return map;
 }
-// origin: { session: "regular"|"clinic"|"course", time: "원래 시간", label: "특강이면 강좌명" } - 일정변경으로
-// 자동 등록될 때만 넘어오고, "+추가"로 직접 보강 명단에 넣을 때는 undefined(출처 배지 없이 그냥 표시됨).
+// origin: { session: "regular"|"clinic"|"course", date: "원래 수업이 있던 날짜(일정변경을 누른 그 날)",
+// time: "원래 시간", label: "특강이면 강좌명" } - 일정변경으로 자동 등록될 때만 넘어오고, "+추가"로 직접
+// 보강 명단에 넣을 때는 undefined(출처 배지 없이 그냥 표시됨).
 async function addExtraRosterRow(date, studentId, addedBy, scheduledTime, origin) {
     const payload = { attn_date: date, student_id: studentId, added_by: addedBy };
     if (scheduledTime !== undefined)
         payload.scheduled_time = scheduledTime || null;
     if (origin) {
         payload.origin_session = origin.session || null;
+        payload.origin_date = origin.date || null;
         payload.origin_time = origin.time || null;
         payload.origin_label = origin.label || null;
     }
@@ -2326,7 +2328,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         const courseInfo = (studentCourses || []).find((c) => c.id === courseId);
         try {
             await setCourseScheduleChange(selectedDate, courseId, studentId, targetDate, targetTime, note, authorEmail, prevTargetDate, {
-                session: "course", time: courseInfo ? courseInfo.courseTime : "", label: courseInfo ? courseInfo.courseName : "",
+                session: "course", date: selectedDate, time: courseInfo ? courseInfo.courseTime : "", label: courseInfo ? courseInfo.courseName : "",
             });
         } catch (e) {
             console.error(e);
@@ -2376,10 +2378,10 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const saveScheduleChange = async (studentId, targetDate, targetTime, note) => {
         const prevTargetDate = current[studentId]?.targetDate || "";
         setSessionAttendance((prev) => ({ ...prev, [session]: { ...prev[session], [studentId]: { ...prev[session][studentId], reason: note, targetDate, targetTime } } }));
-        // 보강 명단에 "출처"(정규수업/클리닉 + 원래 시간)를 남겨서, 나중에 보강 탭에서 어디서 옮겨온 건지 알 수 있게 한다.
+        // 보강 명단에 "출처"(정규수업/클리닉 + 원래 날짜/시간)를 남겨서, 나중에 보강 탭에서 어디서 옮겨온 건지 알 수 있게 한다.
         const st = studentById[studentId];
         const origin = (session === "regular" || session === "clinic")
-            ? { session, time: (session === "clinic" ? (st && st.clinicTime) : (st && st.regularTime)) || "", label: "" }
+            ? { session, date: selectedDate, time: (session === "clinic" ? (st && st.clinicTime) : (st && st.regularTime)) || "", label: "" }
             : undefined;
         try {
             await setScheduleChange(selectedDate, session, studentId, targetDate, targetTime, note, authorEmail, prevTargetDate, origin);
@@ -3002,7 +3004,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
     // "보강" 탭에서만 쓰이는 출처 정보 - 일정변경으로 자동 등록된 경우에만 값이 있고(정규수업/클리닉/특강),
     // "+추가"로 직접 넣은 경우엔 비어있어 배지가 표시되지 않는다.
     const originSession = (extraMeta[s.id] && extraMeta[s.id].originSession) || "";
-    const originTime = (extraMeta[s.id] && extraMeta[s.id].originTime) || "";
+    const originDate = (extraMeta[s.id] && extraMeta[s.id].originDate) || "";
     const originLabel = (extraMeta[s.id] && extraMeta[s.id].originLabel) || "";
     const [noteEditing, setNoteEditing] = useState(false);
     // 수업계획/보강계획은 업무전달 성격이라 원장 전용 입력 - 조교는 값이 있으면 읽기전용으로만 본다(편집 아이콘 자체가 안 보임).
@@ -3031,9 +3033,10 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                 session === "extra" && originSession && React.createElement(
                     "span",
                     { style: { display: "inline-block", marginTop: 3, fontSize: 10.5, fontWeight: 700, color: SKY, background: SKY_SOFT, borderRadius: 5, padding: "2px 7px" } },
-                    "↩ ", SESSIONS[originSession] || originSession,
-                    originLabel ? ` · ${originLabel}` : "",
-                    originTime ? ` · ${originTime}` : ""
+                    "↪ ",
+                    originDate ? `${originDate}(${korWeekdayOf(originDate)}), ` : "",
+                    SESSIONS[originSession] || originSession,
+                    originLabel ? ` · ${originLabel}` : ""
                 )
             ),
             session === "extra" && React.createElement(ExtraTimeControl, { initialValue: scheduledTime, onSave: (t) => saveExtraTime(s.id, t), locked: locked }),
