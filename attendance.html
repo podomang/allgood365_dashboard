@@ -206,7 +206,8 @@ const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강"
 const SESSION_ORDER = ["regular", "clinic", "extra", "course", "diagnostic"];
 // "특강"(추가강좌) 출석체크는 정규/클리닉/보강과 완전히 분리된 상태(과목·요일·시간이 다름)라 색을 다르게 둠.
 // "일정변경"도 정규수업과 동일하게 지원 - 목표 날짜의 "보강" 명단에 자동 등록됨(원장만 사용 가능).
-const COURSE_STATUS_ORDER = ["출석", "지각", "결석", "일정변경"];
+// 클리닉과 동일한 구성으로 맞추기 위해 "조퇴"도 추가함(2026-07-24 후속).
+const COURSE_STATUS_ORDER = ["출석", "지각", "조퇴", "결석", "일정변경"];
 function fmt(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
@@ -1060,6 +1061,34 @@ async function setSessionNoteDone(date, session, studentId, done, byName) {
 // fetchExtraPlanDoneState와 동일한 목적(클릭 시점 서버 최신값 재확인), 정규/클리닉 수업계획용.
 async function fetchSessionNoteDoneState(date, session, studentId) {
     const { data, error } = await supabaseClient.from("attn_session_notes").select("plan_done, plan_done_by").eq("attn_date", date).eq("session", session).eq("student_id", studentId).maybeSingle();
+    if (error)
+        throw error;
+    return { done: !!(data && data.plan_done), doneBy: (data && data.plan_done_by) || "" };
+}
+// 특강(추가강좌) 세션의 당일 수업계획 메모 (attn_course_notes). attn_session_notes와 같은 이유로 별도
+// 테이블을 씀 - attn_course_attendance는 상태를 미체크로 되돌리면 행 자체가 삭제되기 때문에(setCourseAttendanceRow
+// 참고), 메모를 같은 행에 두면 상태를 지울 때 메모도 같이 사라져버린다. course_id가 (attn_date, course_id)
+// 조합으로 이미 학생을 유일하게 특정하므로 student_id는 참고용으로만 같이 저장.
+async function fetchCourseNotesForDate(date) {
+    const { data, error } = await supabaseClient.from("attn_course_notes").select("course_id, plan_note, plan_done, plan_done_by, plan_done_at").eq("attn_date", date);
+    if (error)
+        throw error;
+    const result = {};
+    data.forEach((r) => { result[r.course_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "" }; });
+    return result;
+}
+async function upsertCourseNote(date, courseId, studentId, note) {
+    const { error } = await supabaseClient.from("attn_course_notes").upsert({ attn_date: date, course_id: courseId, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,course_id" });
+    if (error)
+        throw error;
+}
+async function setCourseNoteDone(date, courseId, done, byName) {
+    const { error } = await supabaseClient.from("attn_course_notes").update({ plan_done: done, plan_done_by: done ? byName : null, plan_done_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString() }).eq("attn_date", date).eq("course_id", courseId);
+    if (error)
+        throw error;
+}
+async function fetchCourseNoteDoneState(date, courseId) {
+    const { data, error } = await supabaseClient.from("attn_course_notes").select("plan_done, plan_done_by").eq("attn_date", date).eq("course_id", courseId).maybeSingle();
     if (error)
         throw error;
     return { done: !!(data && data.plan_done), doneBy: (data && data.plan_done_by) || "" };
@@ -2098,6 +2127,10 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // 특강(추가강좌) 출석체크 - 정규/클리닉/보강 출석(sessionAttendance)과 완전히 분리된 테이블에서 관리.
     // course_id를 키로 사용(한 학생이 특강을 여러 개 들을 수 있어 studentId만으로는 구분이 안 됨).
     const [courseAttendance, setCourseAttendance] = useState({});
+    // 특강 "수업계획" 메모 - attn_course_notes, course_id를 키로 사용(sessionNotes와 같은 이유로 분리된 테이블).
+    const [courseNotes, setCourseNotes] = useState({});
+    // 특강 목록 보기 모드: 강좌별(기본)/시간별. 다른 탭의 groupMode와 별개로 특강 탭 전용으로 둔다.
+    const [courseGroupMode, setCourseGroupMode] = useState("name");
     const [extraMeta, setExtraMeta] = useState({});
     const [sessionNotes, setSessionNotes] = useState({ regular: {}, clinic: {}, extra: {} });
     const [loading, setLoading] = useState(true);
@@ -2196,12 +2229,13 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const load = async () => {
         setLoading(true);
         try {
-            const [att, extra, notes, diag, courseAtt] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate), fetchCourseAttendanceForDate(selectedDate)]);
+            const [att, extra, notes, diag, courseAtt, courseNoteMap] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate), fetchCourseAttendanceForDate(selectedDate), fetchCourseNotesForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
             setSessionNotes(notes);
             setDiagTests(diag);
             setCourseAttendance(courseAtt);
+            setCourseNotes(courseNoteMap);
         } catch (e) {
             console.error(e);
         }
@@ -2250,12 +2284,13 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const resolvedStudents = useMemo(() => students.map((s) => applyHistoryAsOf(s, historyByStudent[s.id], selectedDate)), [students, historyByStudent, selectedDate]);
     const loadQuiet = async () => {
         try {
-            const [att, extra, notes, diag, courseAtt] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate), fetchCourseAttendanceForDate(selectedDate)]);
+            const [att, extra, notes, diag, courseAtt, courseNoteMap] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate), fetchCourseAttendanceForDate(selectedDate), fetchCourseNotesForDate(selectedDate)]);
             setSessionAttendance(att);
             setExtraMeta(extra);
             setSessionNotes(notes);
             setDiagTests(diag);
             setCourseAttendance(courseAtt);
+            setCourseNotes(courseNoteMap);
         } catch (e) {
             console.error(e);
         }
@@ -2271,6 +2306,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_session_notes", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_diagnostic_tests" }, () => loadQuiet())
             .on("postgres_changes", { event: "*", schema: "public", table: "attn_course_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_course_notes", filter: `attn_date=eq.${selectedDate}` }, () => loadQuiet())
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [selectedDate]);
@@ -2295,7 +2331,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             return { id: c.id, courseId: c.id, studentId: c.studentId, name: st.name, school: st.school, grade: st.grade, courseName: c.courseName, className: c.className, courseTime: c.courseTime };
         })
         .filter(Boolean), [activeCourses, studentById]);
-    const courseGroups = useMemo(() => groupByCourseName(courseRoster), [courseRoster]);
+    const courseGroups = useMemo(() => courseGroupMode === "time" ? groupByTime(courseRoster, "courseTime") : groupByCourseName(courseRoster), [courseRoster, courseGroupMode]);
     const setCourseStatus = async (courseId, studentId, status) => {
         const isActive = courseAttendance[courseId]?.status === status;
         setCourseAttendance((prev) => {
@@ -2330,6 +2366,39 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             await setCourseScheduleChange(selectedDate, courseId, studentId, targetDate, targetTime, note, authorEmail, prevTargetDate, {
                 session: "course", date: selectedDate, time: courseInfo ? courseInfo.courseTime : "", label: courseInfo ? courseInfo.courseName : "",
             });
+        } catch (e) {
+            console.error(e);
+            loadQuiet();
+        }
+    };
+    // 특강 "수업계획" 메모 - 클리닉/보강과 동일한 패턴(원장 전용 작성, 조교도 완료 체크 가능).
+    const saveCourseNote = async (courseId, studentId, note) => {
+        setCourseNotes((prev) => ({ ...prev, [courseId]: { note, done: false, doneBy: "", doneAt: "" } }));
+        try {
+            await upsertCourseNote(selectedDate, courseId, studentId, note);
+        } catch (e) {
+            console.error(e);
+            loadQuiet();
+        }
+    };
+    const toggleCourseNoteDone = async (courseId, nextDone) => {
+        try {
+            const fresh = await fetchCourseNoteDoneState(selectedDate, courseId);
+            if (fresh.done && fresh.doneBy && fresh.doneBy !== noteAuthorName) {
+                const msg = nextDone
+                    ? `이미 ${fresh.doneBy}님이 완료 처리했습니다. 완료자를 본인(${noteAuthorName})으로 바꾸시겠어요?`
+                    : `${fresh.doneBy}님이 완료 처리한 항목입니다. 완료를 취소하시겠어요?`;
+                if (!confirm(msg)) {
+                    setCourseNotes((prev) => ({ ...prev, [courseId]: { ...(prev[courseId] || emptyNoteMeta()), done: fresh.done, doneBy: fresh.doneBy } }));
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        setCourseNotes((prev) => ({ ...prev, [courseId]: { ...(prev[courseId] || emptyNoteMeta()), done: nextDone, doneBy: nextDone ? noteAuthorName : "", doneAt: nextDone ? new Date().toISOString() : "" } }));
+        try {
+            await setCourseNoteDone(selectedDate, courseId, nextDone, noteAuthorName);
         } catch (e) {
             console.error(e);
             loadQuiet();
@@ -2811,6 +2880,17 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         return React.createElement("div", null, header, dateInput, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
     if (session === "course") {
+        // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
+        const courseGroupToggle = React.createElement(
+            "div",
+            { className: "flex items-center gap-2 mb-3 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "보기"),
+            ["name", "time"].map((m) => React.createElement(
+                "button",
+                { key: m, onClick: () => setCourseGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: courseGroupMode === m ? TEAL : "#fff", color: courseGroupMode === m ? "#fff" : SUBINK, border: `1px solid ${courseGroupMode === m ? TEAL : LINE}` } },
+                m === "name" ? "강좌별" : "시간별"
+            ))
+        );
         const courseListBody = courseGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 특강이 없습니다.")
             : React.createElement(
@@ -2832,11 +2912,11 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
                     );
                 })
             );
-        return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseListBody, clockInModal);
+        return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseGroupToggle, courseListBody, clockInModal);
     }
     return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
 }
@@ -3089,13 +3169,20 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
             ))
     );
 }
-// 특강(추가강좌) 출석체크 행 - 정규수업 AttendanceRow와 비슷하지만 수업계획/보강예정시간은 없음(단순화).
-// 출석/지각/결석/일정변경 체크하고, 지각·결석이면 사유를, 일정변경이면 목표 날짜/시간을 남길 수 있음.
-function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, saveScheduleChange, isDirector, goToWorkLog, locked }) {
+// 특강(추가강좌) 출석체크 행 - 클리닉 AttendanceRow와 동일한 구성으로 맞춤(2026-07-24 후속):
+// 출석/지각/조퇴/결석/일정변경 체크하고, 지각·조퇴·결석이면 사유를, 일정변경이면 목표 날짜/시간을,
+// 그리고 클리닉과 동일한 "수업계획" 메모(완료 체크 포함)를 남길 수 있음.
+function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, isDirector, goToWorkLog, locked }) {
     const st = current[c.courseId]?.status;
     const reason = current[c.courseId]?.reason || "";
     const targetDate = current[c.courseId]?.targetDate || "";
     const targetTime = current[c.courseId]?.targetTime || "";
+    const [noteEditing, setNoteEditing] = useState(false);
+    // 수업계획은 업무전달 성격이라 원장 전용 입력 - 클리닉/보강과 동일한 권한.
+    const notesEditable = isDirector;
+    const planNote = noteMeta.note;
+    const showNoteLine = planNote || noteEditing;
+    const showNoteInlinePencil = notesEditable && !planNote && !noteEditing;
     const clickableName = !!(goToWorkLog && (st === "출석" || st === "지각"));
     return React.createElement(
         "div",
@@ -3112,6 +3199,7 @@ function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, saveSc
                     : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (c.school || c.grade) ? `${c.school || ""}${c.school && c.grade ? " · " : ""}${c.grade ? c.grade + "학년" : ""}` : "학교/학년 미지정", c.className ? ` · ${c.className}` : "", c.courseTime ? ` · ${c.courseTime}` : "")
             ),
+            showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: "수업계획 추가" }, "📝"),
             React.createElement("div", { className: "flex gap-1.5 flex-shrink-0" }, COURSE_STATUS_ORDER.filter((stt) => stt !== "일정변경" || isDirector).map((stt) => React.createElement(StampButton, {
                 key: stt, status: stt, active: st === stt, onClick: () => setStatus(c.courseId, c.studentId, stt),
                 // 이미 일정변경된 특강도 원장만 상태를 바꿀 수 있음 - 정규수업과 동일한 권한 정책.
@@ -3120,7 +3208,40 @@ function CourseAttendanceRow({ c, isLast, current, setStatus, saveReason, saveSc
             })))
         ),
         st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(c.courseId, c.studentId, td, tt, note), isDirector: isDirector }),
-        st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(c.courseId, val), locked: locked })
+        st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(c.courseId, val), locked: locked }),
+        showNoteLine && (noteEditing
+            ? React.createElement(ExtraNoteField, {
+                initialValue: planNote,
+                placeholder: "수업계획 입력 (예: 3단원 인수분해 복습)",
+                onSave: async (val) => { await saveNote(c.courseId, c.studentId, val); setNoteEditing(false); },
+                onCancel: () => setNoteEditing(false),
+            })
+            : React.createElement(
+                "div",
+                { className: "mt-2 flex flex-col gap-1" },
+                React.createElement(
+                    "div",
+                    { className: "flex items-center gap-2 flex-wrap" },
+                    React.createElement(
+                        "div",
+                        { className: "flex items-center gap-1.5 flex-shrink-0" },
+                        React.createElement("button", {
+                            onClick: () => { if (!locked) toggleNoteDone(c.courseId, !noteMeta.done); },
+                            disabled: locked,
+                            style: { width: 20, height: 20, borderRadius: 999, border: noteMeta.done ? "none" : `2px solid ${LINE}`, background: noteMeta.done ? TEAL : "#fff", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: locked ? 0.5 : 1, cursor: locked ? "not-allowed" : "pointer" },
+                            title: locked ? "출근 기록 후 가능해요" : (noteMeta.done ? "완료 취소" : "완료로 표시")
+                        }, noteMeta.done ? "✓" : ""),
+                        React.createElement("span", { style: { fontSize: 10.5, fontWeight: noteMeta.done ? 700 : 500, color: noteMeta.done ? TEAL : SUBINK } }, noteMeta.done ? "완료" : "미완료")
+                    ),
+                    React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: noteMeta.done ? "#f0f0ee" : PURPLE_SOFT, color: noteMeta.done ? SUBINK : PURPLE, borderRadius: 5, padding: "2px 7px", textDecoration: noteMeta.done ? "line-through" : "none" } }, planNote),
+                    notesEditable && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md", style: { color: PURPLE }, title: "수업계획 수정" }, "📝")
+                ),
+                isDirector && noteMeta.done && React.createElement(
+                    "div",
+                    { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
+                    "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
+                )
+            ))
     );
 }
 function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
