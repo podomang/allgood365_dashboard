@@ -202,6 +202,33 @@ function groupByDay(list) {
         groups.push({ className: "요일 미지정", list: unassigned });
     return groups;
 }
+// 학생관리 탭 전용 "추가강좌별" 그룹핑 - 오늘 날짜 기준으로 "진행중"인 추가강좌(시작일~종료일 범위 안,
+// 요일 조건은 보지 않음 - 특강 탭의 activeCourses와 달리 날짜별 출석체크가 아니라 학생 명단 보기이므로)만
+// 대상으로 하고, 강좌명이 같으면 한 그룹으로 묶는다. 정규수업만 듣고 추가강좌가 없는 학생은 이 보기에서
+// 제외된다(그룹핑 확인 시 원장님 확정사항). 한 학생이 같은 강좌를 요일별로 나눠 등록한 경우(예: 박성욱처럼
+// 요일마다 시간이 달라 행이 2개인 경우)에도 같은 그룹 안에 학생 카드는 한 번만 나타나도록 studentId로 중복 제거한다.
+function groupByExtraCourse(students, studentCourses) {
+    const today = todayStr();
+    const activeCourses = (studentCourses || []).filter((c) => {
+        if (c.startDate && today < c.startDate) return false;
+        if (c.endDate && today > c.endDate) return false;
+        return true;
+    });
+    const studentById = {};
+    students.forEach((s) => { studentById[s.id] = s; });
+    const groups = {}; // courseName -> { seen: Set<studentId>, list: Student[] }
+    activeCourses.forEach((c) => {
+        const st = studentById[c.studentId];
+        if (!st) return; // 퇴원 등으로 대상 학생 목록에 없으면 제외
+        const key = c.courseName || "강좌명 미지정";
+        if (!groups[key]) groups[key] = { seen: new Set(), list: [] };
+        if (!groups[key].seen.has(st.id)) {
+            groups[key].seen.add(st.id);
+            groups[key].list.push(st);
+        }
+    });
+    return Object.keys(groups).sort((a, b) => a.localeCompare(b, "ko")).map((k) => ({ className: k, list: groups[k].list }));
+}
 const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강", course: "특강", diagnostic: "진단평가" };
 const SESSION_ORDER = ["regular", "clinic", "extra", "course", "diagnostic"];
 // "특강"(추가강좌) 출석체크는 정규/클리닉/보강과 완전히 분리된 상태(과목·요일·시간이 다름)라 색을 다르게 둠.
@@ -3476,9 +3503,9 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         if (!loaded) return;
         if (groupMode === "none") { setCollapsedGroups({}); return; }
         const active = students.filter((s) => s.status !== "퇴원");
-        const newGroups = groupMode === "grade" ? groupByGrade(active) : groupMode === "school" ? groupBySchool(active) : groupMode === "day" ? groupByDay(active) : groupByClass(active);
+        const newGroups = groupMode === "grade" ? groupByGrade(active) : groupMode === "school" ? groupBySchool(active) : groupMode === "day" ? groupByDay(active) : groupMode === "course" ? groupByExtraCourse(active, studentCourses) : groupByClass(active);
         setCollapsedGroups(Object.fromEntries(newGroups.map((g) => [g.className, true])));
-    }, [groupMode, loaded]);
+    }, [groupMode, loaded, studentCourses]);
     const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
     const openEdit = (s) => {
         setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "" });
@@ -3832,12 +3859,12 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         courseTarget === s.id && renderCoursesPanel(s),
         editTarget === s.id && studentFormEl
     );
-    const GROUP_MODE_LABELS = { none: "\uC804\uCCB4\uBCF4\uAE30", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4", day: "\uC694\uC77C\uBCC4" };
+    const GROUP_MODE_LABELS = { none: "\uC804\uCCB4\uBCF4\uAE30", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4", day: "\uC694\uC77C\uBCC4", course: "\uCD94\uAC00\uAC15\uC88C\uBCC4" };
     const searchTrimmed = searchQuery.trim();
     // \uD1F4\uC6D0\uC0DD\uC740 \uD559\uB144\uBCC4/\uD559\uAD50\uBCC4/\uBC18\uBCC4/\uC694\uC77C\uBCC4 \uADF8\uB8F9\uD551 \uB300\uC0C1\uC5D0\uC11C \uBE7C\uACE0, \uD654\uBA74 \uB9E8 \uC544\uB798\uC5D0 \uBCC4\uB3C4 "\uD1F4\uC6D0\uC0DD" \uADF8\uB8F9\uC73C\uB85C \uBAA8\uC544 \uBCF4\uC5EC\uC900\uB2E4.
     const activeStudents = students.filter((s) => s.status !== "\uD1F4\uC6D0");
     const withdrawnStudents = students.filter((s) => s.status === "\uD1F4\uC6D0");
-    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(activeStudents) : groupMode === "school" ? groupBySchool(activeStudents) : groupMode === "day" ? groupByDay(activeStudents) : groupByClass(activeStudents);
+    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(activeStudents) : groupMode === "school" ? groupBySchool(activeStudents) : groupMode === "day" ? groupByDay(activeStudents) : groupMode === "course" ? groupByExtraCourse(activeStudents, studentCourses) : groupByClass(activeStudents);
     const expandAllGroups = () => setCollapsedGroups({});
     const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
     const groupToggle = React.createElement(
@@ -3858,7 +3885,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                 "div",
                 { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
-                ["none", "grade", "school", "class", "day"].map((m) => React.createElement(
+                ["none", "grade", "school", "class", "day", "course"].map((m) => React.createElement(
                     "button",
                     { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
                     GROUP_MODE_LABELS[m]
@@ -3883,6 +3910,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             : React.createElement("div", { className: "flex flex-col gap-2.5" }, matches.map(renderStudentBlock));
     } else if (groupMode === "none") {
         listBody = React.createElement("div", { className: "flex flex-col gap-2.5" }, activeStudents.map(renderStudentBlock));
+    } else if (groupMode === "course" && groups.length === 0) {
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "진행중인 추가강좌를 듣는 학생이 없습니다.");
     } else {
         listBody = React.createElement(
             "div",
