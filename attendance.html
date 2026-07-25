@@ -5075,6 +5075,15 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     // 조교가 많아질수록 한 화면에 다 펼쳐지면 스크롤이 너무 길어지는 것을 막기 위함). 눌러야 펼쳐짐.
     const [expandedAuthors, setExpandedAuthors] = useState({});
     const [expandedAuthorMonths, setExpandedAuthorMonths] = useState({});
+    // "학생별" 검색란 - 재원생이 많아지면(50~150명) <datalist> 기본 동작(포커스만 줘도 전체 명단이 뜸)이
+    // 너무 불편해서, 타이핑하기 전엔 아무것도 안 보이고 입력한 글자가 포함된 학생만 최대 8명 추려서
+    // 보여주는 자체 드롭다운으로 대체한다.
+    const [studentDropdownOpen, setStudentDropdownOpen] = useState(false);
+    const studentSearchMatches = useMemo(() => {
+        const q = studentQuery.trim();
+        if (!q) return [];
+        return students.filter((s) => s.name.includes(q)).slice(0, 8);
+    }, [studentQuery, students]);
     useEffect(() => { if (focusWorkLog && onFocusWorkLogConsumed) onFocusWorkLogConsumed(); }, []);
     // 근무일지는 "그날 실제로 출근 체크한 근무자"만 작성 가능(원장은 예외). attn_assistant_attendance에
     // 그 날짜 + 본인 assistant_id로 출근 기록이 있는지 확인한다.
@@ -5509,20 +5518,31 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
                     className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` }
                 }),
                 viewMode === "student" && React.createElement(
-                    React.Fragment,
-                    null,
+                    "div",
+                    { style: { position: "relative" } },
                     React.createElement("input", {
-                        list: "worklog-student-datalist", value: studentQuery,
+                        value: studentQuery,
                         onChange: (e) => {
                             setStudentQuery(e.target.value);
+                            setStudentDropdownOpen(true);
                             const match = students.find((s) => s.name === e.target.value);
                             setStudentViewId(match ? match.id : null);
                         },
-                        placeholder: "학생 이름 검색",
-                        className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, width: 140 }
+                        onFocus: () => setStudentDropdownOpen(true),
+                        onBlur: () => setTimeout(() => setStudentDropdownOpen(false), 150),
+                        placeholder: "학생 이름 검색 (2글자 이상 입력)",
+                        className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, width: 170 }
                     }),
-                    React.createElement("datalist", { id: "worklog-student-datalist" },
-                        students.map((s) => React.createElement("option", { key: s.id, value: s.name }))
+                    studentDropdownOpen && studentSearchMatches.length > 0 && React.createElement(
+                        "div",
+                        { className: "absolute rounded-lg overflow-hidden", style: { top: "calc(100% + 4px)", left: 0, zIndex: 20, background: "#fff", border: `1px solid ${LINE}`, boxShadow: "0 6px 16px rgba(0,0,0,0.1)", minWidth: 170, maxHeight: 240, overflowY: "auto" } },
+                        studentSearchMatches.map((s, i) => React.createElement("button", {
+                            key: s.id,
+                            onMouseDown: (e) => e.preventDefault(),
+                            onClick: () => { setStudentQuery(s.name); setStudentViewId(s.id); setStudentDropdownOpen(false); },
+                            className: "w-full text-left px-3 py-2 text-xs",
+                            style: { background: "#fff", color: INK, border: "none", borderTop: i === 0 ? "none" : `1px solid ${LINE}`, cursor: "pointer" }
+                        }, s.name))
                     )
                 )
             )
