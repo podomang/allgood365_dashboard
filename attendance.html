@@ -3451,8 +3451,7 @@ function AssistantCommentField({ initialValue, onSave, placeholder }) {
                 onClick: save, disabled: saving || !value.trim(),
                 className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
                 style: { background: AMBER, color: "#fff", opacity: (saving || !value.trim()) ? 0.5 : 1 },
-            }, saving ? "저장 중..." : "저장"),
-            React.createElement("span", { style: { fontSize: 10, color: SUBINK } }, "저장하면 근무일지 · 원장님께 전달사항에도 자동 기록돼요")
+            }, saving ? "저장 중..." : "저장")
         )
     );
 }
