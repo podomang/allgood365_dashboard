@@ -984,6 +984,41 @@ async function deleteWorkLogRow(id) {
     const { error } = await supabaseClient.from("attn_work_logs").delete().eq("id", id);
     if (error) throw error;
 }
+// 수업계획(정규/클리닉/보강/특강)에서 조교가 실제로 코멘트를 "입력"했을 때만 호출됨(완료/미완료 토글만으로는
+// 호출되지 않음). 오늘 그 조교가 이미 그 학생에 대해 써둔 근무일지가 있으면 지도내용(content)은 그대로
+// 두고 전달사항(noteToDirector)만 이 코멘트로 갱신한다. 근무일지가 아직 없으면 여기서 자동으로 만들지
+// 않는다(필수 항목인 지도내용을 시스템이 임의로 채워 넣지 않기 위함) — 대신 조교가 나중에 그 학생의 근무일지를
+// 새로 열 때 fetchAssistantCommentsForStudentDate로 모아서 전달사항 칸에 프리필해준다.
+async function syncPlanCommentToWorkLog(date, studentId, comment, authorEmail) {
+    const trimmed = (comment || "").trim();
+    if (!trimmed) return;
+    const entries = await fetchWorkLogsForDateAuthor(date, authorEmail);
+    const existing = entries.find((r) => r.studentIds.includes(studentId));
+    if (!existing) return; // 근무일지가 아직 없으면 자동 생성하지 않음 — 조교가 직접 열 때 프리필됨
+    await updateWorkLogRow(existing.id, {
+        date, studentIds: existing.studentIds, studentNote: existing.studentNote,
+        content: existing.content, noteToDirector: trimmed,
+    });
+}
+// 특정 날짜 + 학생에 대해 정규수업/클리닉(attn_session_notes), 보강(attn_extra_roster),
+// 특강(attn_course_notes) 세 테이블에 저장된 assistant_comment를 모두 모아 배열로 반환한다.
+// WorkLogManager에서 그 학생의 근무일지를 새로 열 때 "원장님께 전달사항" 칸을 프리필하는 데 쓰인다.
+async function fetchAssistantCommentsForStudentDate(date, studentId) {
+    const comments = [];
+    const [sessionRes, extraRes, courseRes] = await Promise.all([
+        supabaseClient.from("attn_session_notes").select("assistant_comment").eq("attn_date", date).eq("student_id", studentId),
+        supabaseClient.from("attn_extra_roster").select("assistant_comment").eq("attn_date", date).eq("student_id", studentId),
+        supabaseClient.from("attn_course_notes").select("assistant_comment").eq("attn_date", date).eq("student_id", studentId),
+    ]);
+    [sessionRes, extraRes, courseRes].forEach((res) => {
+        if (res.error) return;
+        (res.data || []).forEach((row) => {
+            const c = (row.assistant_comment || "").trim();
+            if (c) comments.push(c);
+        });
+    });
+    return comments;
+}
 async function fetchAttendanceForDate(date) {
     const { data, error } = await supabaseClient.from("attn_attendance").select("*").eq("attn_date", date);
     if (error)
@@ -1013,11 +1048,11 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
 }
 // ---------- 보강(extra) 명단 ----------
 async function fetchExtraRoster(date) {
-    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at, origin_session, origin_date, origin_time, origin_label").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_extra_roster").select("student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at, assistant_comment, origin_session, origin_date, origin_time, origin_label").eq("attn_date", date);
     if (error)
         throw error;
     const map = {};
-    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", originSession: r.origin_session || "", originDate: r.origin_date || "", originTime: r.origin_time || "", originLabel: r.origin_label || "" }; });
+    data.forEach((r) => { map[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", comment: r.assistant_comment || "", originSession: r.origin_session || "", originDate: r.origin_date || "", originTime: r.origin_time || "", originLabel: r.origin_label || "" }; });
     return map;
 }
 // origin: { session: "regular"|"clinic"|"course", date: "원래 수업이 있던 날짜(일정변경을 누른 그 날)",
@@ -1042,14 +1077,19 @@ async function setExtraScheduledTime(date, studentId, scheduledTime) {
     if (error)
         throw error;
 }
-// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시를 항상 초기화한다.
+// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시와 조교 코멘트를 항상 초기화한다.
 async function setExtraPlanNote(date, studentId, note) {
-    const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null }).eq("attn_date", date).eq("student_id", studentId);
+    const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, assistant_comment: null }).eq("attn_date", date).eq("student_id", studentId);
     if (error)
         throw error;
 }
 async function setExtraPlanDone(date, studentId, done, byName) {
     const { error } = await supabaseClient.from("attn_extra_roster").update({ plan_done: done, plan_done_by: done ? byName : null, plan_done_at: done ? new Date().toISOString() : null }).eq("attn_date", date).eq("student_id", studentId);
+    if (error)
+        throw error;
+}
+async function setExtraAssistantComment(date, studentId, comment) {
+    const { error } = await supabaseClient.from("attn_extra_roster").update({ assistant_comment: comment || null }).eq("attn_date", date).eq("student_id", studentId);
     if (error)
         throw error;
 }
@@ -1062,21 +1102,28 @@ async function fetchExtraPlanDoneState(date, studentId) {
     return { done: !!(data && data.plan_done), doneBy: (data && data.plan_done_by) || "" };
 }
 // 정규/클리닉 세션의 당일 수업계획 메모 (attn_session_notes). 출석 체크 여부와 무관하게 독립적으로 저장됨.
-function emptyNoteMeta() { return { note: "", done: false, doneBy: "", doneAt: "" }; }
+function emptyNoteMeta() { return { note: "", done: false, doneBy: "", doneAt: "", comment: "" }; }
 async function fetchSessionNotesForDate(date) {
-    const { data, error } = await supabaseClient.from("attn_session_notes").select("session, student_id, plan_note, plan_done, plan_done_by, plan_done_at").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_session_notes").select("session, student_id, plan_note, plan_done, plan_done_by, plan_done_at, assistant_comment").eq("attn_date", date);
     if (error)
         throw error;
     const result = { regular: {}, clinic: {}, extra: {} };
     data.forEach((r) => {
         result[r.session] = result[r.session] || {};
-        result[r.session][r.student_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "" };
+        result[r.session][r.student_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", comment: r.assistant_comment || "" };
     });
     return result;
 }
-// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시를 항상 초기화한다.
+// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시와 조교 코멘트를 항상 초기화한다.
 async function upsertSessionNote(date, session, studentId, note) {
-    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, assistant_comment: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+    if (error)
+        throw error;
+}
+// upsert 사용: 정규수업처럼 원장이 계획을 미리 안 써둔 상태에서도(행 자체가 없어도) 조교 코멘트가
+// 저장되어야 하므로 update가 아니라 upsert로 처리한다(plan_note 등 다른 칼럼은 건드리지 않음).
+async function setSessionAssistantComment(date, session, studentId, comment) {
+    const { error } = await supabaseClient.from("attn_session_notes").upsert({ attn_date: date, session, student_id: studentId, assistant_comment: comment || null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
     if (error)
         throw error;
 }
@@ -1097,20 +1144,28 @@ async function fetchSessionNoteDoneState(date, session, studentId) {
 // 참고), 메모를 같은 행에 두면 상태를 지울 때 메모도 같이 사라져버린다. course_id가 (attn_date, course_id)
 // 조합으로 이미 학생을 유일하게 특정하므로 student_id는 참고용으로만 같이 저장.
 async function fetchCourseNotesForDate(date) {
-    const { data, error } = await supabaseClient.from("attn_course_notes").select("course_id, plan_note, plan_done, plan_done_by, plan_done_at").eq("attn_date", date);
+    const { data, error } = await supabaseClient.from("attn_course_notes").select("course_id, student_id, plan_note, plan_done, plan_done_by, plan_done_at, assistant_comment").eq("attn_date", date);
     if (error)
         throw error;
     const result = {};
-    data.forEach((r) => { result[r.course_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "" }; });
+    data.forEach((r) => { result[r.course_id] = { note: r.plan_note || "", done: !!r.plan_done, doneBy: r.plan_done_by || "", doneAt: r.plan_done_at || "", comment: r.assistant_comment || "", studentId: r.student_id || "" }; });
     return result;
 }
+// 계획 내용을 새로 저장할 때는 새 지시이므로 완료 표시와 조교 코멘트를 항상 초기화한다.
 async function upsertCourseNote(date, courseId, studentId, note) {
-    const { error } = await supabaseClient.from("attn_course_notes").upsert({ attn_date: date, course_id: courseId, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,course_id" });
+    const { error } = await supabaseClient.from("attn_course_notes").upsert({ attn_date: date, course_id: courseId, student_id: studentId, plan_note: note || null, plan_done: false, plan_done_by: null, plan_done_at: null, assistant_comment: null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,course_id" });
     if (error)
         throw error;
 }
 async function setCourseNoteDone(date, courseId, done, byName) {
     const { error } = await supabaseClient.from("attn_course_notes").update({ plan_done: done, plan_done_by: done ? byName : null, plan_done_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString() }).eq("attn_date", date).eq("course_id", courseId);
+    if (error)
+        throw error;
+}
+// upsert 사용: 특강도 원장이 계획을 미리 안 써둔 상태에서 조교 코멘트만 먼저 저장될 수 있으므로
+// (course_id는 이미 (attn_date, course_id)만으로 학생을 특정하지만 행 자체가 없을 수 있음).
+async function setCourseAssistantComment(date, courseId, studentId, comment) {
+    const { error } = await supabaseClient.from("attn_course_notes").upsert({ attn_date: date, course_id: courseId, student_id: studentId, assistant_comment: comment || null, updated_at: new Date().toISOString() }, { onConflict: "attn_date,course_id" });
     if (error)
         throw error;
 }
@@ -2415,9 +2470,21 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     };
     // 특강 "수업계획" 메모 - 클리닉/보강과 동일한 패턴(원장 전용 작성, 조교도 완료 체크 가능).
     const saveCourseNote = async (courseId, studentId, note) => {
-        setCourseNotes((prev) => ({ ...prev, [courseId]: { note, done: false, doneBy: "", doneAt: "" } }));
+        setCourseNotes((prev) => ({ ...prev, [courseId]: { note, done: false, doneBy: "", doneAt: "", comment: "" } }));
         try {
             await upsertCourseNote(selectedDate, courseId, studentId, note);
+        } catch (e) {
+            console.error(e);
+            loadQuiet();
+        }
+    };
+    // 조교가 특강 수업계획(미완료 상태)에 지도 코멘트를 "직접 입력해서 저장"했을 때만 호출됨.
+    // 근무일지에도 원장님께 전달사항으로 자동 동기화한다(토글만으로는 호출 안 됨).
+    const saveCourseAssistantComment = async (courseId, studentId, comment) => {
+        setCourseNotes((prev) => ({ ...prev, [courseId]: { ...(prev[courseId] || emptyNoteMeta()), comment } }));
+        try {
+            await setCourseAssistantComment(selectedDate, courseId, studentId, comment);
+            await syncPlanCommentToWorkLog(selectedDate, studentId, comment, authorEmail);
         } catch (e) {
             console.error(e);
             loadQuiet();
@@ -2533,9 +2600,21 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     };
     const saveExtraNote = async (studentId, note) => {
         // 새 지시이므로 완료 표시는 항상 초기화
-        setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), note, done: false, doneBy: "", doneAt: "" } }));
+        setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), note, done: false, doneBy: "", doneAt: "", comment: "" } }));
         try {
             await setExtraPlanNote(selectedDate, studentId, note);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    // 조교가 보강계획(미완료 상태)에 지도 코멘트를 "직접 입력해서 저장"했을 때만 호출됨.
+    // 근무일지에도 원장님께 전달사항으로 자동 동기화한다(완료/미완료 토글만으로는 호출 안 됨).
+    const saveExtraAssistantComment = async (studentId, comment) => {
+        setExtraMeta((prev) => ({ ...prev, [studentId]: { ...(prev[studentId] || emptyNoteMeta()), comment } }));
+        try {
+            await setExtraAssistantComment(selectedDate, studentId, comment);
+            await syncPlanCommentToWorkLog(selectedDate, studentId, comment, authorEmail);
         } catch (e) {
             console.error(e);
             load();
@@ -2604,9 +2683,21 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // 정규/클리닉 세션의 당일 수업계획 메모 저장 (attn_session_notes)
     const saveSessionNote = async (studentId, note) => {
         // 새 지시이므로 완료 표시는 항상 초기화
-        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: { note, done: false, doneBy: "", doneAt: "" } } }));
+        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: { note, done: false, doneBy: "", doneAt: "", comment: "" } } }));
         try {
             await upsertSessionNote(selectedDate, session, studentId, note);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    // 조교가 정규/클리닉 수업계획(미완료 상태)에 지도 코멘트를 "직접 입력해서 저장"했을 때만 호출됨.
+    // 근무일지에도 원장님께 전달사항으로 자동 동기화한다(완료/미완료 토글만으로는 호출 안 됨).
+    const saveSessionAssistantComment = async (studentId, comment) => {
+        setSessionNotes((prev) => ({ ...prev, [session]: { ...(prev[session] || {}), [studentId]: { ...(((prev[session] || {})[studentId]) || emptyNoteMeta()), comment } } }));
+        try {
+            await setSessionAssistantComment(selectedDate, session, studentId, comment);
+            await syncPlanCommentToWorkLog(selectedDate, studentId, comment, authorEmail);
         } catch (e) {
             console.error(e);
             load();
@@ -2615,6 +2706,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // 보강은 attn_extra_roster.plan_note, 정규/클리닉은 attn_session_notes 로 저장 위치가 다름 - 화면에서는 하나로 통일해서 사용
     const noteMetaForStudent = (id) => session === "extra" ? (extraMeta[id] || emptyNoteMeta()) : ((sessionNotes[session] && sessionNotes[session][id]) || emptyNoteMeta());
     const saveNoteForStudent = (id, note) => session === "extra" ? saveExtraNote(id, note) : saveSessionNote(id, note);
+    const saveAssistantComment = (id, comment) => session === "extra" ? saveExtraAssistantComment(id, comment) : saveSessionAssistantComment(id, comment);
     // 수업계획/보강계획 완료 체크 토글 - 조교/원장 누구나 누를 수 있고, 완료 시점의 이름·시각을 함께 저장.
     // 누르는 순간 화면에 남아있는 상태가 아니라 서버의 최신 상태를 다시 확인해서, 이미 다른 사람이 완료
     // 처리한 항목이면(화면이 아직 실시간 동기화로 안 따라잡았어도) 확인 없이 덮어쓰지 않고 한 번 물어본다.
@@ -2891,7 +2983,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
         );
     } else {
         listBody = React.createElement(
@@ -2913,7 +3005,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -2954,7 +3046,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
                     );
                 })
             );
@@ -3117,7 +3209,7 @@ function ExtraTimeControl({ initialValue, onSave, locked }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
@@ -3129,8 +3221,10 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
     const originDate = (extraMeta[s.id] && extraMeta[s.id].originDate) || "";
     const originLabel = (extraMeta[s.id] && extraMeta[s.id].originLabel) || "";
     const [noteEditing, setNoteEditing] = useState(false);
+    const [commentEditing, setCommentEditing] = useState(false);
     // 수업계획/보강계획은 업무전달 성격이라 원장 전용 입력 - 조교는 값이 있으면 읽기전용으로만 본다(편집 아이콘 자체가 안 보임).
-    const notesEnabled = session === "extra" || session === "clinic";
+    // 2026-07-25: 정규수업에도 수업계획/완료토글/조교코멘트를 새로 노출(그동안 클리닉·보강에만 있었음).
+    const notesEnabled = session === "extra" || session === "clinic" || session === "regular";
     const notesEditable = notesEnabled && isDirector;
     const noteLabel = session === "extra" ? "보강계획" : "수업계획";
     const planNote = noteMeta.note;
@@ -3207,19 +3301,34 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                     "div",
                     { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
                     "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
-                )
+                ),
+                // 조교의 지도내용 코멘트 - 미완료면 항상 입력칸을 보여주고, 완료됐어도 이미 남긴 코멘트가
+                // 있으면 읽기전용으로 계속 보여준다(재수정 버튼 제공). "저장"을 눌러 실제 텍스트가 들어갈
+                // 때만 saveComment가 호출되고, 그때만 근무일지에 동기화된다(완료 토글만으로는 호출 안 됨).
+                (!noteMeta.done || commentEditing)
+                    ? React.createElement(AssistantCommentField, {
+                        initialValue: noteMeta.comment,
+                        onSave: async (val) => { await saveComment(s.id, val); setCommentEditing(false); },
+                    })
+                    : (noteMeta.comment && React.createElement(
+                        "div",
+                        { className: "flex items-start gap-1.5 flex-wrap", style: { marginLeft: 26 } },
+                        React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
+                        React.createElement("button", { onClick: () => setCommentEditing(true), className: "px-1.5 py-0.5 rounded-md flex-shrink-0", style: { color: AMBER, fontSize: 10, fontWeight: 700, background: AMBER_SOFT }, title: "코멘트 수정" }, "수정")
+                    ))
             ))
     );
 }
 // 특강(추가강좌) 출석체크 행 - 클리닉 AttendanceRow와 동일한 구성으로 맞춤(2026-07-24 후속):
 // 출석/지각/조퇴/결석/일정변경 체크하고, 지각·조퇴·결석이면 사유를, 일정변경이면 목표 날짜/시간을,
 // 그리고 클리닉과 동일한 "수업계획" 메모(완료 체크 포함)를 남길 수 있음.
-function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, toggleNoteDone, setStatus, saveReason, saveScheduleChange, isDirector, goToWorkLog, locked }) {
+function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveScheduleChange, isDirector, goToWorkLog, locked }) {
     const st = current[c.courseId]?.status;
     const reason = current[c.courseId]?.reason || "";
     const targetDate = current[c.courseId]?.targetDate || "";
     const targetTime = current[c.courseId]?.targetTime || "";
     const [noteEditing, setNoteEditing] = useState(false);
+    const [commentEditing, setCommentEditing] = useState(false);
     // 수업계획은 업무전달 성격이라 원장 전용 입력 - 클리닉/보강과 동일한 권한.
     const notesEditable = isDirector;
     const planNote = noteMeta.note;
@@ -3282,8 +3391,69 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, toggleNot
                     "div",
                     { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
                     "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
-                )
+                ),
+                (!noteMeta.done || commentEditing)
+                    ? React.createElement(AssistantCommentField, {
+                        initialValue: noteMeta.comment,
+                        onSave: async (val) => { await saveComment(c.courseId, c.studentId, val); setCommentEditing(false); },
+                    })
+                    : (noteMeta.comment && React.createElement(
+                        "div",
+                        { className: "flex items-start gap-1.5 flex-wrap", style: { marginLeft: 26 } },
+                        React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
+                        React.createElement("button", { onClick: () => setCommentEditing(true), className: "px-1.5 py-0.5 rounded-md flex-shrink-0", style: { color: AMBER, fontSize: 10, fontWeight: 700, background: AMBER_SOFT }, title: "코멘트 수정" }, "수정")
+                    ))
             ))
+    );
+}
+// 수업계획/보강계획이 "미완료"일 때 조교가 실제로 지도한 내용(또는 못한 이유)을 적어두는 칸.
+// ExtraNoteField와 달리 토글로 마운트/언마운트되지 않고 항상 화면에 붙어있어야 해서(완료 체크와
+// 별개로 계속 보여야 함), 부모가 다른 값으로 initialValue를 바꿔줄 때만 useEffect로 동기화한다.
+// 사용자가 직접 타이핑을 시작한 뒤에는(touchedRef) 실시간 동기화로 인한 값 덮어쓰기를 막는다.
+// 저장 버튼을 눌러 실제로 텍스트가 들어갔을 때만 onSave가 호출되고, 그때만 근무일지에도 동기화된다
+// (완료/미완료 토글 자체는 이 컴포넌트를 거치지 않으므로 토글만으로는 절대 근무일지가 생기지 않음).
+function AssistantCommentField({ initialValue, onSave, placeholder }) {
+    const [value, setValue] = useState(initialValue || "");
+    const [saving, setSaving] = useState(false);
+    const touchedRef = useRef(false);
+    useEffect(() => {
+        if (!touchedRef.current)
+            setValue(initialValue || "");
+    }, [initialValue]);
+    const save = async () => {
+        const trimmed = value.trim();
+        if (!trimmed)
+            return;
+        setSaving(true);
+        try {
+            await onSave(trimmed);
+            touchedRef.current = false;
+        }
+        finally {
+            setSaving(false);
+        }
+    };
+    return React.createElement(
+        "div",
+        { className: "mt-1.5 flex flex-col gap-1.5", style: { marginLeft: 26 } },
+        React.createElement("textarea", {
+            value: value,
+            onChange: (e) => { touchedRef.current = true; setValue(e.target.value); },
+            placeholder: placeholder || "어디까지 진행했는지(또는 못한 부분)와, 별도로 낸 과제가 있으면 적어주세요",
+            rows: 2,
+            className: "w-full px-3 py-2 rounded-lg text-xs outline-none resize-none",
+            style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT, color: INK },
+        }),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-2 flex-wrap" },
+            React.createElement("button", {
+                onClick: save, disabled: saving || !value.trim(),
+                className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+                style: { background: AMBER, color: "#fff", opacity: (saving || !value.trim()) ? 0.5 : 1 },
+            }, saving ? "저장 중..." : "저장"),
+            React.createElement("span", { style: { fontSize: 10, color: SUBINK } }, "저장하면 근무일지 · 원장님께 전달사항에도 자동 기록돼요")
+        )
     );
 }
 function ExtraNoteField({ initialValue, onSave, onCancel, placeholder }) {
@@ -5258,7 +5428,18 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
                 const sid = pendingFocusStudentId;
                 setPendingFocusStudentId(null);
                 const existing = entries.find((r) => r.studentIds.includes(sid));
-                setDraft({ content: existing ? existing.content : "", noteToDirector: existing ? existing.noteToDirector : "" });
+                if (existing) {
+                    setDraft({ content: existing.content, noteToDirector: existing.noteToDirector });
+                } else {
+                    // 아직 근무일지가 없으면, 오늘 그 학생에 대해 수업계획 쪽에 남긴 코멘트들을 모아
+                    // "원장님께 전달사항" 칸에 프리필한다(지도내용은 비워둔 채 직접 작성하도록).
+                    let prefill = "";
+                    try {
+                        const comments = await fetchAssistantCommentsForStudentDate(writeDate, sid);
+                        prefill = comments.join("\n\n");
+                    } catch (e) { console.error(e); }
+                    setDraft({ content: "", noteToDirector: prefill });
+                }
                 setExpandedKey("student:" + sid);
             } else {
                 setPendingFocusStudentId(null);
@@ -5281,11 +5462,22 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     const nameOf = (id) => (students.find((s) => s.id === id) || {}).name || "?";
     const entryForStudent = (id) => todayEntries.find((r) => r.studentIds.includes(id));
     const extraEntries = todayEntries.filter((r) => r.studentIds.length === 0);
-    const openStudent = (s) => {
+    const openStudent = async (s) => {
         const key = "student:" + s.id;
         if (expandedKey === key) { setExpandedKey(null); return; }
         const existing = entryForStudent(s.id);
-        setDraft({ content: existing ? existing.content : "", noteToDirector: existing ? existing.noteToDirector : "" });
+        if (existing) {
+            setDraft({ content: existing.content, noteToDirector: existing.noteToDirector });
+        } else {
+            // 아직 근무일지가 없으면, 오늘 그 학생에 대해 수업계획 쪽에 남긴 코멘트들을 모아
+            // "원장님께 전달사항" 칸에 프리필한다(지도내용은 비워둔 채 직접 작성하도록).
+            let prefill = "";
+            try {
+                const comments = await fetchAssistantCommentsForStudentDate(writeDate, s.id);
+                prefill = comments.join("\n\n");
+            } catch (e) { console.error(e); }
+            setDraft({ content: "", noteToDirector: prefill });
+        }
         setExpandedKey(key);
     };
     const openExtraNew = () => {
