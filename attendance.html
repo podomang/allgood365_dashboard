@@ -3302,20 +3302,32 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                     { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
                     "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
                 ),
-                // 조교의 지도내용 코멘트 - 미완료면 항상 입력칸을 보여주고, 완료됐어도 이미 남긴 코멘트가
-                // 있으면 읽기전용으로 계속 보여준다(재수정 버튼 제공). "저장"을 눌러 실제 텍스트가 들어갈
-                // 때만 saveComment가 호출되고, 그때만 근무일지에 동기화된다(완료 토글만으로는 호출 안 됨).
-                (!noteMeta.done || commentEditing)
+                // 조교의 지도내용 코멘트 - 평소엔 코멘트가 없으면 작은 "코멘트 남기기" 링크만 보이고,
+                // 저장된 코멘트가 있으면 완료 여부와 무관하게 항상 컴팩트하게(💬 + 수정 + 삭제) 보인다.
+                // 입력칸은 "남기기"/"수정"을 눌렀을 때만 펼쳐지고, "저장"을 눌러 실제 텍스트가 들어갈 때만
+                // saveComment가 호출되어 근무일지에 동기화된다(완료 토글만으로는 절대 호출 안 됨).
+                commentEditing
                     ? React.createElement(AssistantCommentField, {
                         initialValue: noteMeta.comment,
                         onSave: async (val) => { await saveComment(s.id, val); setCommentEditing(false); },
+                        onCancel: () => setCommentEditing(false),
                     })
-                    : (noteMeta.comment && React.createElement(
-                        "div",
-                        { className: "flex items-start gap-1.5 flex-wrap", style: { marginLeft: 26 } },
-                        React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
-                        React.createElement("button", { onClick: () => setCommentEditing(true), className: "px-1.5 py-0.5 rounded-md flex-shrink-0", style: { color: AMBER, fontSize: 10, fontWeight: 700, background: AMBER_SOFT }, title: "코멘트 수정" }, "수정")
-                    ))
+                    : (noteMeta.comment
+                        ? React.createElement(
+                            "div",
+                            { className: "flex items-center gap-1.5 flex-wrap", style: { marginLeft: 26 } },
+                            React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
+                            React.createElement("button", { onClick: () => setCommentEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: AMBER, background: AMBER_SOFT }, title: "코멘트 수정" }, "✎"),
+                            React.createElement("button", {
+                                onClick: async () => { if (confirm("코멘트를 삭제할까요?")) await saveComment(s.id, ""); },
+                                className: "p-1 rounded-md flex-shrink-0", style: { color: RED, background: RED_SOFT }, title: "코멘트 삭제"
+                            }, "🗑")
+                        )
+                        : (!noteMeta.done && React.createElement("button", {
+                            onClick: () => setCommentEditing(true),
+                            className: "px-1.5 py-0.5 rounded-md flex-shrink-0",
+                            style: { color: AMBER, fontSize: 10.5, fontWeight: 700, marginLeft: 26 },
+                        }, "💬 코멘트 남기기")))
             ))
     );
 }
@@ -3392,17 +3404,28 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComme
                     { style: { fontSize: 10.5, color: SUBINK, marginLeft: 26 } },
                     "완료: ", noteMeta.doneBy || "?", noteMeta.doneAt ? " · " + fmtDateTimeShort(noteMeta.doneAt) : ""
                 ),
-                (!noteMeta.done || commentEditing)
+                commentEditing
                     ? React.createElement(AssistantCommentField, {
                         initialValue: noteMeta.comment,
                         onSave: async (val) => { await saveComment(c.courseId, c.studentId, val); setCommentEditing(false); },
+                        onCancel: () => setCommentEditing(false),
                     })
-                    : (noteMeta.comment && React.createElement(
-                        "div",
-                        { className: "flex items-start gap-1.5 flex-wrap", style: { marginLeft: 26 } },
-                        React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
-                        React.createElement("button", { onClick: () => setCommentEditing(true), className: "px-1.5 py-0.5 rounded-md flex-shrink-0", style: { color: AMBER, fontSize: 10, fontWeight: 700, background: AMBER_SOFT }, title: "코멘트 수정" }, "수정")
-                    ))
+                    : (noteMeta.comment
+                        ? React.createElement(
+                            "div",
+                            { className: "flex items-center gap-1.5 flex-wrap", style: { marginLeft: 26 } },
+                            React.createElement("span", { style: { fontSize: 11, color: INK, whiteSpace: "pre-wrap" } }, "💬 ", noteMeta.comment),
+                            React.createElement("button", { onClick: () => setCommentEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: AMBER, background: AMBER_SOFT }, title: "코멘트 수정" }, "✎"),
+                            React.createElement("button", {
+                                onClick: async () => { if (confirm("코멘트를 삭제할까요?")) await saveComment(c.courseId, c.studentId, ""); },
+                                className: "p-1 rounded-md flex-shrink-0", style: { color: RED, background: RED_SOFT }, title: "코멘트 삭제"
+                            }, "🗑")
+                        )
+                        : (!noteMeta.done && React.createElement("button", {
+                            onClick: () => setCommentEditing(true),
+                            className: "px-1.5 py-0.5 rounded-md flex-shrink-0",
+                            style: { color: AMBER, fontSize: 10.5, fontWeight: 700, marginLeft: 26 },
+                        }, "💬 코멘트 남기기")))
             ))
     );
 }
@@ -3412,7 +3435,7 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComme
 // 사용자가 직접 타이핑을 시작한 뒤에는(touchedRef) 실시간 동기화로 인한 값 덮어쓰기를 막는다.
 // 저장 버튼을 눌러 실제로 텍스트가 들어갔을 때만 onSave가 호출되고, 그때만 근무일지에도 동기화된다
 // (완료/미완료 토글 자체는 이 컴포넌트를 거치지 않으므로 토글만으로는 절대 근무일지가 생기지 않음).
-function AssistantCommentField({ initialValue, onSave, placeholder }) {
+function AssistantCommentField({ initialValue, onSave, onCancel, placeholder }) {
     const [value, setValue] = useState(initialValue || "");
     const [saving, setSaving] = useState(false);
     const touchedRef = useRef(false);
@@ -3441,6 +3464,7 @@ function AssistantCommentField({ initialValue, onSave, placeholder }) {
             onChange: (e) => { touchedRef.current = true; setValue(e.target.value); },
             placeholder: placeholder || "어디까지 진행했는지(또는 못한 부분)와, 별도로 낸 과제가 있으면 적어주세요",
             rows: 2,
+            autoFocus: true,
             className: "w-full px-3 py-2 rounded-lg text-xs outline-none resize-none",
             style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT, color: INK },
         }),
@@ -3451,7 +3475,12 @@ function AssistantCommentField({ initialValue, onSave, placeholder }) {
                 onClick: save, disabled: saving || !value.trim(),
                 className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
                 style: { background: AMBER, color: "#fff", opacity: (saving || !value.trim()) ? 0.5 : 1 },
-            }, saving ? "저장 중..." : "저장")
+            }, saving ? "저장 중..." : "저장"),
+            onCancel && React.createElement("button", {
+                onClick: onCancel, disabled: saving,
+                className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+                style: { color: SUBINK },
+            }, "취소")
         )
     );
 }
