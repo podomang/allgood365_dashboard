@@ -2983,7 +2983,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
         );
     } else {
         listBody = React.createElement(
@@ -3005,7 +3005,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -3046,7 +3046,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => goToWorkLog(sid, selectedDate) : null, locked: blockedByClockIn }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                     );
                 })
             );
@@ -3243,7 +3243,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
                 clickableName
-                    ? React.createElement("button", { onClick: () => goToWorkLog(s.id), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: NAVY }, title: "근무일지 작성으로 이동" }, s.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                    ? React.createElement("button", { onClick: () => goToWorkLog(s.id), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: NAVY }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, s.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
                     : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (s.school || s.grade) ? `${s.school || ""}${s.school && s.grade ? " · " : ""}${s.grade ? s.grade + "학년" : ""}` : "학교/학년 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`),
                 session === "extra" && originSession && React.createElement(
@@ -3358,7 +3358,7 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComme
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
                 clickableName
-                    ? React.createElement("button", { onClick: () => goToWorkLog(c.studentId), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: TEAL }, title: "근무일지 작성으로 이동" }, c.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                    ? React.createElement("button", { onClick: () => goToWorkLog(c.studentId), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: TEAL }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, c.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
                     : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (c.school || c.grade) ? `${c.school || ""}${c.school && c.grade ? " · " : ""}${c.grade ? c.grade + "학년" : ""}` : "학교/학년 미지정", c.className ? ` · ${c.className}` : "", c.courseTime ? ` · ${c.courseTime}` : "")
             ),
