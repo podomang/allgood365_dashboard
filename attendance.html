@@ -11,6 +11,14 @@
 <style>
   body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f7f8fa; }
   input[type="date"] { -webkit-appearance: none; }
+  /* 월별출석부 인쇄 - #monthlyReportPrintArea 안쪽 내용만 인쇄되고, 사이드바/버튼 등 나머지 화면은 전부 숨김. */
+  @media print {
+    body * { visibility: hidden; }
+    #monthlyReportPrintArea, #monthlyReportPrintArea * { visibility: visible; }
+    #monthlyReportPrintArea { position: absolute; left: 0; top: 0; width: 100%; }
+    #monthlyReportPrintArea .no-print, #monthlyReportPrintArea .no-print * { display: none !important; }
+    @page { size: landscape; margin: 10mm; }
+  }
 </style>
 </head>
 <body>
@@ -235,6 +243,28 @@ const SESSION_ORDER = ["regular", "clinic", "extra", "course", "diagnostic"];
 // "일정변경"도 정규수업과 동일하게 지원 - 목표 날짜의 "보강" 명단에 자동 등록됨(원장만 사용 가능).
 // 클리닉과 동일한 구성으로 맞추기 위해 "조퇴"도 추가함(2026-07-24 후속).
 const COURSE_STATUS_ORDER = ["출석", "지각", "조퇴", "결석", "일정변경"];
+// ---------- 월별출석부(원장 전용) 공용 상수/헬퍼 ----------
+// 격자표 칸에 출결 상태를 짧은 기호로 표시하기 위한 매핑 (인쇄했을 때도 알아보기 쉽도록 한 글자로 통일).
+const REPORT_STATUS_MARK = { 출석: "○", 지각: "△", 조퇴: "◁", 결석: "X", 일정변경: "→" };
+const REPORT_SUB_TABS = [
+    { key: "regular", label: "정규수업" },
+    { key: "clinic", label: "클리닉" },
+    { key: "extra", label: "보강" },
+    { key: "course", label: "특강" },
+    { key: "student", label: "학생별" },
+];
+// 주어진 달(Date)의 1일부터 말일까지 { day, dateStr, weekday } 목록을 만든다.
+function daysInMonthList(monthDate) {
+    const year = monthDate.getFullYear(), month = monthDate.getMonth();
+    const n = new Date(year, month + 1, 0).getDate();
+    const arr = [];
+    for (let day = 1; day <= n; day++) {
+        const dt = new Date(year, month, day);
+        arr.push({ day, dateStr: fmt(dt), weekday: JS_DAY_TO_KOR[dt.getDay()] });
+    }
+    return arr;
+}
+function monthInputValue(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 function fmt(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
@@ -1369,6 +1399,44 @@ async function setCourseScheduleChange(date, courseId, studentId, targetDate, ta
         await addExtraRosterRow(targetDate, studentId, addedBy, targetTime || "", origin);
     }
 }
+// ---------- 월별출석부(원장 전용) - 한 달 범위를 한 번에 불러오는 함수들 ----------
+// 기존 화면(출석체크)의 하루 단위 fetch 함수들과는 완전히 별개로 새로 추가한 것이라 기존 로직에는 영향 없음.
+async function fetchAttendanceRange(startDate, endDate) {
+    const { data, error } = await supabaseClient.from("attn_attendance").select("attn_date, session, student_id, status").gte("attn_date", startDate).lte("attn_date", endDate);
+    if (error)
+        throw error;
+    const byDate = {};
+    data.forEach((r) => {
+        byDate[r.attn_date] = byDate[r.attn_date] || { regular: {}, clinic: {}, extra: {} };
+        byDate[r.attn_date][r.session][r.student_id] = r.status;
+    });
+    return byDate;
+}
+// 보강은 그날그날 명단에 있어야만 "그 학생이 그날 보강 대상이었다"는 뜻이라, 정규수업/클리닉처럼
+// 요일로 계산할 수 없다 - attn_extra_roster에 실제로 있었던 날짜만 별도로 불러온다.
+async function fetchExtraRosterRange(startDate, endDate) {
+    const { data, error } = await supabaseClient.from("attn_extra_roster").select("attn_date, student_id").gte("attn_date", startDate).lte("attn_date", endDate);
+    if (error)
+        throw error;
+    const byDate = {};
+    data.forEach((r) => {
+        byDate[r.attn_date] = byDate[r.attn_date] || {};
+        byDate[r.attn_date][r.student_id] = true;
+    });
+    return byDate;
+}
+// attn_course_attendance는 (attn_date, course_id)가 이미 학생 한 명을 특정하므로 course_id만으로 충분.
+async function fetchCourseAttendanceRange(startDate, endDate) {
+    const { data, error } = await supabaseClient.from("attn_course_attendance").select("attn_date, course_id, status").gte("attn_date", startDate).lte("attn_date", endDate);
+    if (error)
+        throw error;
+    const byDate = {};
+    data.forEach((r) => {
+        byDate[r.attn_date] = byDate[r.attn_date] || {};
+        byDate[r.attn_date][r.course_id] = r.status;
+    });
+    return byDate;
+}
 // ---------- small atoms ----------
 function StampButton({ status, active, onClick, disabled, title }) {
     const cfg = STATUS[status];
@@ -1443,6 +1511,7 @@ const TAB_DEFS = [
     { key: "attendance", label: "출석체크", icon: "\u2705" },
     { key: "assistants", label: "스태프룸", icon: "\uD83E\uDDD1\u200D\uD83C\uDFEB" },
     { key: "students", label: "학생관리", icon: "\uD83D\uDC65", directorOnly: true },
+    { key: "monthlyReport", label: "월별출석부", icon: "\uD83D\uDDD3\uFE0F", directorOnly: true },
 ];
 const LAST_TAB_KEY = "attn_last_tab";
 function MainApp({ session }) {
@@ -1536,7 +1605,7 @@ function MainApp({ session }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    useEffect(() => { if (tab === "students" && !isDirector)
+    useEffect(() => { if ((tab === "students" || tab === "monthlyReport") && !isDirector)
         setTab("dashboard"); }, [tab, isDirector]);
     // realtime: 다른 사람이 학생 정보를 추가/수정/삭제하면 자동 반영
     useEffect(() => {
@@ -1616,7 +1685,8 @@ function MainApp({ session }) {
             tab === "attendance" && React.createElement(Attendance, { students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email, attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog, myAssistant: myAssistant, goToClockIn: goToClockIn, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true) }),
             tab === "dashboard" && React.createElement(Dashboard, { month: month, setMonth: setMonth, selectedDate: selectedDate, setSelectedDate: setSelectedDate, goToAttendance: () => setTab("attendance"), isDirector: isDirector, students: students }),
             tab === "assistants" && React.createElement(AssistantManagement, { isDirector: isDirector, assistants: assistants, reloadAssistants: reloadAssistants, myAssistant: myAssistant, myEmail: session.user.email, students: students, focusWorkLog: workLogFocus, onFocusWorkLogConsumed: () => setWorkLogFocus(null), focusSubTab: staffroomFocusSubTab }),
-            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses, goToWorkLog: goToWorkLog })
+            tab === "students" && isDirector && React.createElement(StudentManager, { onChanged: reloadStudents, prefill: studentPrefill, onPrefillConsumed: () => setStudentPrefill(null), studentCourses: studentCourses, reloadStudentCourses: reloadStudentCourses, goToWorkLog: goToWorkLog }),
+            tab === "monthlyReport" && isDirector && React.createElement(MonthlyAttendanceReport, { students: students, studentCourses: studentCourses })
         );
     return React.createElement(
         "div",
@@ -3032,12 +3102,32 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                 { className: "flex flex-col gap-3" },
                 courseGroups.map((g) => {
                     const collapsed = collapsedGroups[g.className];
+                    // 강좌별 출결현황 요약 - 정규수업/클리닉/보강 탭에 있던 "미체크/출석/지각/조퇴/결석/일정변경" 카드를
+                    // 특강도 강좌별로 각각 볼 수 있게 추가함(원장님 요청, 2026-07-31). 접혀있어도 한눈에 보이도록 항상 표시.
+                    const gCounts = COURSE_STATUS_ORDER.reduce((acc, st) => { acc[st] = g.list.filter((c) => courseAttendance[c.courseId]?.status === st).length; return acc; }, {});
+                    const gUnchecked = g.list.filter((c) => !courseAttendance[c.courseId]?.status).length;
+                    const gStatCards = React.createElement(
+                        "div",
+                        { className: "grid grid-cols-3 sm:grid-cols-6 gap-2 px-4 sm:px-5 py-3", style: { borderBottom: collapsed ? "none" : `1px solid ${LINE}` } },
+                        React.createElement(
+                            "div",
+                            { className: "rounded-lg px-2 py-2", style: { background: PAPER } },
+                            React.createElement("div", { style: { fontSize: 10, color: SUBINK, fontWeight: 700 } }, "미체크"),
+                            React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: SUBINK } }, gUnchecked, "명")
+                        ),
+                        COURSE_STATUS_ORDER.map((st) => React.createElement(
+                            "div",
+                            { key: st, className: "rounded-lg px-2 py-2", style: { background: PAPER } },
+                            React.createElement("div", { style: { fontSize: 10, color: SUBINK, fontWeight: 700 } }, st),
+                            React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: STATUS[st].color } }, gCounts[st], "명")
+                        ))
+                    );
                     return React.createElement(
                         "div",
                         { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
                         React.createElement(
                             "button",
-                            { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: TEAL_SOFT, borderBottom: collapsed ? "none" : `1px solid ${LINE}` } },
+                            { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: TEAL_SOFT, borderBottom: `1px solid ${LINE}` } },
                             React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5, color: TEAL } }, g.className),
                             React.createElement(
                                 "span",
@@ -3046,6 +3136,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
+                        gStatCards,
                         !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                     );
                 })
@@ -3427,6 +3518,335 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComme
                             style: { color: AMBER, fontSize: 10.5, fontWeight: 700, marginLeft: 26 },
                         }, "💬 코멘트 남기기")))
             ))
+    );
+}
+// ============================================================
+// 월별출석부 (원장 전용) - 한 달 치 출석 현황을 학생 x 날짜 격자로 모아보고 인쇄까지 할 수 있는 화면.
+// 정규수업/클리닉/보강/특강 4개 세션 + 학생별 종합현황, 총 5개 서브탭으로 구성.
+// 조교 화면에는 노출되지 않음(MainApp의 TAB_DEFS에서 directorOnly로 막혀 있음).
+// ============================================================
+const reportThStyle = { padding: "5px 3px", textAlign: "center", fontWeight: 700, fontSize: 10.5, borderBottom: `1px solid ${LINE}`, borderRight: `1px solid ${LINE}`, background: PAPER, whiteSpace: "nowrap" };
+const reportTdStyle = { padding: "4px 3px", textAlign: "center", borderBottom: `1px solid ${LINE}`, borderRight: `1px solid ${LINE}`, fontSize: 11 };
+const reportNameTdStyle = { ...reportTdStyle, textAlign: "left", padding: "5px 8px", position: "sticky", left: 0, background: "#fff", fontWeight: 700, minWidth: 96, zIndex: 1 };
+const reportNameThStyle = { ...reportThStyle, textAlign: "left", padding: "5px 8px", position: "sticky", left: 0, background: PAPER, minWidth: 96, zIndex: 2 };
+// 일정변경/미체크는 출결 집계(출석·지각·조퇴·결석 일수, 출석률)에서 제외한다 - 원장님 확인사항.
+function computeReportRowStats(cells) {
+    const stats = { 출석: 0, 지각: 0, 조퇴: 0, 결석: 0 };
+    let total = 0;
+    (cells || []).forEach((c) => {
+        if (!c || !c.scheduled || !c.status || c.status === "일정변경")
+            return;
+        if (stats[c.status] !== undefined) {
+            stats[c.status]++;
+            total++;
+        }
+    });
+    const rate = total > 0 ? Math.round(((stats.출석 + stats.지각) / total) * 1000) / 10 : null;
+    return { ...stats, total, rate };
+}
+function reportStatTds(stats) {
+    return [
+        React.createElement("td", { key: "s1", style: reportTdStyle }, stats.출석 || 0),
+        React.createElement("td", { key: "s2", style: reportTdStyle }, stats.지각 || 0),
+        React.createElement("td", { key: "s3", style: reportTdStyle }, stats.조퇴 || 0),
+        React.createElement("td", { key: "s4", style: reportTdStyle }, stats.결석 || 0),
+        React.createElement("td", { key: "s5", style: { ...reportTdStyle, fontWeight: 800, color: NAVY } }, stats.rate === null || stats.rate === undefined ? "-" : `${stats.rate}%`),
+    ];
+}
+function reportCellMark(c) {
+    if (!c || !c.scheduled)
+        return null;
+    if (!c.status)
+        return React.createElement("span", { style: { color: "#c7cbd1" } }, "·");
+    const cfg = STATUS[c.status];
+    return React.createElement("span", { style: { color: cfg ? cfg.color : INK, fontWeight: 800 } }, REPORT_STATUS_MARK[c.status] || c.status);
+}
+// 학생(행) x 날짜(열) 격자표 하나 - 정규수업/클리닉/보강/특강(강좌별)에서 공통으로 재사용.
+function ReportGridTable({ title, days, rows, accentColor }) {
+    if (!rows || rows.length === 0) {
+        return React.createElement("div", { className: "rounded-2xl p-8 text-center mb-4", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } }, "이 달에 표시할 기록이 없습니다.");
+    }
+    const accent = accentColor || NAVY;
+    return React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden mb-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        title && React.createElement("div", { className: "px-4 py-2.5", style: { background: accent + "1a", borderBottom: `1px solid ${LINE}`, fontWeight: 800, fontSize: 13.5, color: accent } }, title, " · ", rows.length, "명"),
+        React.createElement(
+            "div",
+            { className: "overflow-x-auto" },
+            React.createElement(
+                "table",
+                { style: { borderCollapse: "collapse", width: "100%" } },
+                React.createElement(
+                    "thead",
+                    null,
+                    React.createElement(
+                        "tr",
+                        null,
+                        React.createElement("th", { style: reportNameThStyle }, "이름"),
+                        days.map((d) => React.createElement(
+                            "th",
+                            { key: d.dateStr, style: { ...reportThStyle, color: d.weekday === "일" ? RED : d.weekday === "토" ? SKY : INK, minWidth: 22 } },
+                            d.day,
+                            React.createElement("div", { style: { fontSize: 9, fontWeight: 500 } }, d.weekday)
+                        )),
+                        ["출석", "지각", "조퇴", "결석", "출석률"].map((h) => React.createElement("th", { key: h, style: { ...reportThStyle, minWidth: 36 } }, h))
+                    )
+                ),
+                React.createElement(
+                    "tbody",
+                    null,
+                    rows.map((row) => {
+                        const stats = computeReportRowStats(row.cells);
+                        return React.createElement(
+                            "tr",
+                            { key: row.student.id },
+                            React.createElement(
+                                "td",
+                                { style: reportNameTdStyle },
+                                row.student.name,
+                                React.createElement("div", { style: { fontSize: 9.5, color: SUBINK, fontWeight: 500 } }, [row.student.school, row.student.grade ? row.student.grade + "학년" : ""].filter(Boolean).join(" · "))
+                            ),
+                            row.cells.map((c, i) => React.createElement("td", { key: i, style: { ...reportTdStyle, background: c.scheduled ? "#fff" : "#f4f5f7" } }, reportCellMark(c))),
+                            reportStatTds(stats)
+                        );
+                    })
+                )
+            )
+        )
+    );
+}
+function ReportLegend() {
+    return React.createElement(
+        "div",
+        { className: "flex flex-wrap items-center gap-x-4 gap-y-1 px-1 mb-4", style: { fontSize: 11.5, color: SUBINK } },
+        STATUS_ORDER.map((s) => React.createElement("span", { key: s, className: "flex items-center gap-1" }, React.createElement("span", { style: { color: STATUS[s].color, fontWeight: 800 } }, REPORT_STATUS_MARK[s]), s)),
+        React.createElement("span", { className: "flex items-center gap-1" }, React.createElement("span", { style: { color: "#c7cbd1", fontWeight: 800 } }, "·"), "미체크"),
+        React.createElement("span", null, "(일정변경은 출석률 집계에서 제외됩니다)")
+    );
+}
+function MonthlyAttendanceReport({ students, studentCourses }) {
+    const [month, setMonth] = useState(() => new Date());
+    const [subTab, setSubTab] = useState("regular");
+    const [history, setHistory] = useState([]);
+    const [attByDate, setAttByDate] = useState({});
+    const [extraByDate, setExtraByDate] = useState({});
+    const [courseAttByDate, setCourseAttByDate] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [studentSort, setStudentSort] = useState("rate");
+    const [expandedStudentId, setExpandedStudentId] = useState(null);
+    useEffect(() => { fetchAllStudentHistory().then(setHistory).catch((e) => console.error(e)); }, []);
+    const days = useMemo(() => daysInMonthList(month), [month]);
+    const startDate = days[0] ? days[0].dateStr : todayStr();
+    const endDate = days.length ? days[days.length - 1].dateStr : todayStr();
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        Promise.all([fetchAttendanceRange(startDate, endDate), fetchExtraRosterRange(startDate, endDate), fetchCourseAttendanceRange(startDate, endDate)])
+            .then(([att, extra, courseAtt]) => {
+            if (cancelled) return;
+            setAttByDate(att);
+            setExtraByDate(extra);
+            setCourseAttByDate(courseAtt);
+        })
+            .catch((e) => console.error(e))
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [startDate, endDate]);
+    const historyByStudent = useMemo(() => {
+        const map = {};
+        history.forEach((h) => { (map[h.studentId] = map[h.studentId] || []).push(h); });
+        return map;
+    }, [history]);
+    const resolvedFor = (student, dateStr) => applyHistoryAsOf(student, historyByStudent[student.id], dateStr);
+    const regularRows = useMemo(() => (students || []).map((s) => {
+        const cells = days.map((d) => {
+            const rs = resolvedFor(s, d.dateStr);
+            if (!(rs.days || []).includes(d.weekday))
+                return { scheduled: false };
+            return { scheduled: true, status: attByDate[d.dateStr]?.regular?.[s.id] || "" };
+        });
+        return { student: s, cells };
+    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate]);
+    const clinicRows = useMemo(() => (students || []).map((s) => {
+        const cells = days.map((d) => {
+            const rs = resolvedFor(s, d.dateStr);
+            if (!(rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday)))
+                return { scheduled: false };
+            return { scheduled: true, status: attByDate[d.dateStr]?.clinic?.[s.id] || "" };
+        });
+        return { student: s, cells };
+    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate]);
+    const extraRows = useMemo(() => {
+        const ids = new Set();
+        days.forEach((d) => { const m = extraByDate[d.dateStr]; if (m) Object.keys(m).forEach((sid) => ids.add(sid)); });
+        return (students || []).filter((s) => ids.has(s.id)).map((s) => {
+            const cells = days.map((d) => {
+                const onRoster = !!(extraByDate[d.dateStr] && extraByDate[d.dateStr][s.id]);
+                if (!onRoster)
+                    return { scheduled: false };
+                return { scheduled: true, status: attByDate[d.dateStr]?.extra?.[s.id] || "" };
+            });
+            return { student: s, cells };
+        });
+    }, [students, days, extraByDate, attByDate]);
+    const courseGroups = useMemo(() => {
+        const byName = {};
+        (studentCourses || []).forEach((c) => {
+            const st = (students || []).find((s) => s.id === c.studentId);
+            if (!st) return;
+            const key = c.courseName || "강좌명 미지정";
+            byName[key] = byName[key] || {};
+            byName[key][st.id] = byName[key][st.id] || { student: st, courses: [] };
+            byName[key][st.id].courses.push(c);
+        });
+        return Object.keys(byName).sort((a, b) => a.localeCompare(b, "ko")).map((name) => {
+            const rows = Object.values(byName[name]).map(({ student, courses }) => {
+                const cells = days.map((d) => {
+                    const match = courses.find((c) => (c.days || []).includes(d.weekday) && (!c.startDate || d.dateStr >= c.startDate) && (!c.endDate || d.dateStr <= c.endDate));
+                    if (!match)
+                        return { scheduled: false };
+                    return { scheduled: true, status: courseAttByDate[d.dateStr]?.[match.id] || "" };
+                });
+                return { student, cells };
+            }).filter((row) => row.cells.some((c) => c.scheduled));
+            return { courseName: name, rows };
+        }).filter((g) => g.rows.length > 0);
+    }, [studentCourses, students, days, courseAttByDate]);
+    const studentRows = useMemo(() => {
+        return (students || []).map((s) => {
+            const detail = [];
+            let stats = { 출석: 0, 지각: 0, 조퇴: 0, 결석: 0 };
+            let total = 0;
+            const addHit = (label, status, dateStr, weekday) => {
+                if (!status) return;
+                detail.push({ dateStr, weekday, label, status });
+                if (status !== "일정변경" && stats[status] !== undefined) { stats[status]++; total++; }
+            };
+            days.forEach((d) => {
+                const rs = resolvedFor(s, d.dateStr);
+                if ((rs.days || []).includes(d.weekday))
+                    addHit("정규수업", attByDate[d.dateStr]?.regular?.[s.id] || "", d.dateStr, d.weekday);
+                if (rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday))
+                    addHit("클리닉", attByDate[d.dateStr]?.clinic?.[s.id] || "", d.dateStr, d.weekday);
+                if (extraByDate[d.dateStr] && extraByDate[d.dateStr][s.id])
+                    addHit("보강", attByDate[d.dateStr]?.extra?.[s.id] || "", d.dateStr, d.weekday);
+            });
+            (studentCourses || []).filter((c) => c.studentId === s.id).forEach((c) => {
+                days.forEach((d) => {
+                    if ((c.days || []).includes(d.weekday) && (!c.startDate || d.dateStr >= c.startDate) && (!c.endDate || d.dateStr <= c.endDate))
+                        addHit(`특강 · ${c.courseName}`, courseAttByDate[d.dateStr]?.[c.id] || "", d.dateStr, d.weekday);
+                });
+            });
+            detail.sort((a, b) => a.dateStr < b.dateStr ? -1 : a.dateStr > b.dateStr ? 1 : 0);
+            const rate = total > 0 ? Math.round(((stats.출석 + stats.지각) / total) * 1000) / 10 : null;
+            return { student: s, stats, rate, detail };
+        }).filter((row) => row.detail.length > 0);
+    }, [students, studentCourses, days, historyByStudent, attByDate, extraByDate, courseAttByDate]);
+    const sortedStudentRows = useMemo(() => {
+        const list = studentRows.slice();
+        if (studentSort === "name")
+            list.sort((a, b) => a.student.name.localeCompare(b.student.name, "ko"));
+        else
+            list.sort((a, b) => (a.rate === null ? 1 : b.rate === null ? -1 : a.rate - b.rate));
+        return list;
+    }, [studentRows, studentSort]);
+    const header = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "월별출석부"),
+        React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: NAVY, background: NAVY_SOFT, borderRadius: 8, padding: "6px 10px" } }, monthLabel(month))
+    );
+    const monthPicker = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-2 mt-3 mb-3 no-print" },
+        React.createElement("input", { type: "month", value: monthInputValue(month), onChange: (e) => { const v = e.target.value; if (!v) return; const parts = v.split("-").map(Number); if (parts[0] && parts[1]) setMonth(new Date(parts[0], parts[1] - 1, 1)); }, className: "px-3 py-2 rounded-xl text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+        React.createElement("button", { onClick: () => window.print(), className: "px-4 py-2 rounded-xl text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "🖨️ 인쇄")
+    );
+    const subTabButtons = React.createElement(
+        "div",
+        { className: "grid grid-cols-5 gap-2 p-1.5 rounded-2xl mb-4 no-print", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        REPORT_SUB_TABS.map((t) => React.createElement("button", { key: t.key, onClick: () => setSubTab(t.key), className: "px-2 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: subTab === t.key ? NAVY : "transparent", color: subTab === t.key ? "#fff" : SUBINK } }, t.label))
+    );
+    const printNote = React.createElement("div", { className: "no-print", style: { fontSize: 11.5, color: SUBINK, marginBottom: 8 } }, "📄 인쇄할 때는 가로(landscape) 방향을 선택하면 더 깔끔하게 나옵니다.");
+    let body;
+    if (loading) {
+        body = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "40px 0" } }, "불러오는 중...");
+    } else if (subTab === "regular") {
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 정규수업 출석부`, days: days, rows: regularRows, accentColor: NAVY }));
+    } else if (subTab === "clinic") {
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 클리닉 출석부`, days: days, rows: clinicRows, accentColor: AMBER }));
+    } else if (subTab === "extra") {
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 보강 출석부`, days: days, rows: extraRows, accentColor: PURPLE }));
+    } else if (subTab === "course") {
+        body = courseGroups.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "이 달에 특강 출석 기록이 없습니다.")
+            : React.createElement("div", null, React.createElement(ReportLegend, null), courseGroups.map((g) => React.createElement(ReportGridTable, { key: g.courseName, title: `${monthLabel(month)} 특강 출석부 · ${g.courseName}`, days: days, rows: g.rows, accentColor: TEAL })));
+    } else {
+        const sortToggle = React.createElement(
+            "div",
+            { className: "flex items-center gap-2 mb-3 no-print" },
+            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "정렬"),
+            [["rate", "출석률 낮은순"], ["name", "이름순"]].map((pair) => React.createElement("button", { key: pair[0], onClick: () => setStudentSort(pair[0]), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: studentSort === pair[0] ? NAVY : "#fff", color: studentSort === pair[0] ? "#fff" : SUBINK, border: `1px solid ${studentSort === pair[0] ? NAVY : LINE}` } }, pair[1]))
+        );
+        const table = sortedStudentRows.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "이 달에 출석 기록이 있는 학생이 없습니다.")
+            : React.createElement(
+                "div",
+                { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                React.createElement(
+                    "table",
+                    { style: { borderCollapse: "collapse", width: "100%", fontSize: 12.5 } },
+                    React.createElement("thead", null, React.createElement("tr", null,
+                        React.createElement("th", { style: { ...reportThStyle, textAlign: "left", padding: "7px 10px" } }, "이름"),
+                        ["출석", "지각", "조퇴", "결석", "출석률"].map((h) => React.createElement("th", { key: h, style: reportThStyle }, h)))),
+                    React.createElement("tbody", null, sortedStudentRows.map((row) => {
+                        const expanded = expandedStudentId === row.student.id;
+                        return React.createElement(
+                            React.Fragment,
+                            { key: row.student.id },
+                            React.createElement(
+                                "tr",
+                                { onClick: () => setExpandedStudentId(expanded ? null : row.student.id), style: { cursor: "pointer" } },
+                                React.createElement(
+                                    "td",
+                                    { style: { ...reportTdStyle, textAlign: "left", padding: "7px 10px", fontWeight: 700 } },
+                                    expanded ? "▼ " : "▶ ", row.student.name,
+                                    React.createElement("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 500, marginLeft: 6 } }, [row.student.school, row.student.grade ? row.student.grade + "학년" : ""].filter(Boolean).join(" · "))
+                                ),
+                                reportStatTds({ ...row.stats, rate: row.rate })
+                            ),
+                            expanded && React.createElement(
+                                "tr",
+                                null,
+                                React.createElement(
+                                    "td",
+                                    { colSpan: 6, style: { padding: "8px 10px 12px 26px", background: PAPER, borderBottom: `1px solid ${LINE}` } },
+                                    row.detail.length === 0
+                                        ? React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, "이 달에 기록이 없습니다.")
+                                        : row.detail.map((d, i) => React.createElement(
+                                            "div",
+                                            { key: i, style: { display: "flex", gap: 8, fontSize: 11.5, padding: "2px 0" } },
+                                            React.createElement("span", { style: { color: SUBINK, minWidth: 70 } }, d.dateStr.slice(5), "(", d.weekday, ")"),
+                                            React.createElement("span", { style: { minWidth: 110, color: SUBINK } }, d.label),
+                                            React.createElement("span", { style: { fontWeight: 700, color: STATUS[d.status] ? STATUS[d.status].color : INK } }, d.status)
+                                        ))
+                                )
+                            )
+                        );
+                    }))
+                )
+            );
+        body = React.createElement("div", null, sortToggle, table);
+    }
+    return React.createElement(
+        "div",
+        null,
+        header,
+        monthPicker,
+        subTabButtons,
+        printNote,
+        React.createElement("div", { id: "monthlyReportPrintArea" }, body)
     );
 }
 // 수업계획/보강계획이 "미완료"일 때 조교가 실제로 지도한 내용(또는 못한 이유)을 적어두는 칸.
