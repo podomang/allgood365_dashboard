@@ -944,7 +944,7 @@ async function deleteAttendanceRow(id) {
 function mapWorkLog(r) {
     return {
         id: r.id, date: r.log_date, authorEmail: r.author_email, authorName: r.author_name || "",
-        studentIds: r.student_ids || [], studentNote: r.student_note || "",
+        studentIds: r.student_ids || [], studentNames: r.student_names || [], studentNote: r.student_note || "",
         content: r.content || "", noteToDirector: r.note_to_director || "",
         directorConfirmed: !!r.director_confirmed, createdAt: r.created_at,
     };
@@ -964,14 +964,14 @@ async function fetchWorkLogsForDateAuthor(date, authorEmail) {
 async function addWorkLogRow(payload) {
     const { error } = await supabaseClient.from("attn_work_logs").insert({
         log_date: payload.date, author_email: payload.authorEmail, author_name: payload.authorName,
-        student_ids: payload.studentIds, student_note: payload.studentNote || null,
+        student_ids: payload.studentIds, student_names: payload.studentNames || null, student_note: payload.studentNote || null,
         content: payload.content, note_to_director: payload.noteToDirector || null,
     });
     if (error) throw error;
 }
 async function updateWorkLogRow(id, payload) {
     const { error } = await supabaseClient.from("attn_work_logs").update({
-        log_date: payload.date, student_ids: payload.studentIds, student_note: payload.studentNote || null,
+        log_date: payload.date, student_ids: payload.studentIds, student_names: payload.studentNames || null, student_note: payload.studentNote || null,
         content: payload.content, note_to_director: payload.noteToDirector || null, updated_at: new Date().toISOString(),
     }).eq("id", id);
     if (error) throw error;
@@ -996,7 +996,7 @@ async function syncPlanCommentToWorkLog(date, studentId, comment, authorEmail) {
     const existing = entries.find((r) => r.studentIds.includes(studentId));
     if (!existing) return; // 근무일지가 아직 없으면 자동 생성하지 않음 — 조교가 직접 열 때 프리필됨
     await updateWorkLogRow(existing.id, {
-        date, studentIds: existing.studentIds, studentNote: existing.studentNote,
+        date, studentIds: existing.studentIds, studentNames: existing.studentNames, studentNote: existing.studentNote,
         content: existing.content, noteToDirector: trimmed,
     });
 }
@@ -5371,11 +5371,29 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     // 너무 불편해서, 타이핑하기 전엔 아무것도 안 보이고 입력한 글자가 포함된 학생만 최대 8명 추려서
     // 보여주는 자체 드롭다운으로 대체한다.
     const [studentDropdownOpen, setStudentDropdownOpen] = useState(false);
+    // 원장 전용 "퇴원생 포함" 체크박스 — 평소엔 재원생만 검색되게 하고, 필요할 때만 켜서 퇴원생도
+    // 검색 대상에 포함시킨다(2026-07-31 확정). 퇴원생 명단은 체크 처음 켤 때만 fetchStudents()로
+    // 불러온다(director 전용 쿼리라 조교 계정에서는 애초에 체크박스 자체가 안 보임).
+    const [includeWithdrawn, setIncludeWithdrawn] = useState(false);
+    const [withdrawnStudents, setWithdrawnStudents] = useState([]);
+    const [withdrawnLoaded, setWithdrawnLoaded] = useState(false);
+    const toggleIncludeWithdrawn = async () => {
+        const next = !includeWithdrawn;
+        setIncludeWithdrawn(next);
+        if (next && !withdrawnLoaded) {
+            try {
+                const all = await fetchStudents();
+                setWithdrawnStudents(all.filter((s) => s.status === "퇴원"));
+            } catch (e) { console.error(e); }
+            setWithdrawnLoaded(true);
+        }
+    };
+    const studentSearchPool = includeWithdrawn ? students.concat(withdrawnStudents) : students;
     const studentSearchMatches = useMemo(() => {
         const q = studentQuery.trim();
         if (!q) return [];
-        return students.filter((s) => s.name.includes(q)).slice(0, 8);
-    }, [studentQuery, students]);
+        return studentSearchPool.filter((s) => s.name.includes(q)).slice(0, 8);
+    }, [studentQuery, students, withdrawnStudents, includeWithdrawn]);
     useEffect(() => { if (focusWorkLog && onFocusWorkLogConsumed) onFocusWorkLogConsumed(); }, []);
     // 근무일지는 "그날 실제로 출근 체크한 근무자"만 작성 가능(원장은 예외). attn_assistant_attendance에
     // 그 날짜 + 본인 assistant_id로 출근 기록이 있는지 확인한다.
@@ -5487,7 +5505,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, [writeDate, isDirector, myAssistant]);
-    const nameOf = (id) => (students.find((s) => s.id === id) || {}).name || "?";
+    const nameOf = (id) => (students.find((s) => s.id === id) || withdrawnStudents.find((s) => s.id === id) || {}).name || "?";
     const entryForStudent = (id) => todayEntries.find((r) => r.studentIds.includes(id));
     const extraEntries = todayEntries.filter((r) => r.studentIds.length === 0);
     const openStudent = async (s) => {
@@ -5530,7 +5548,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
             if (expandedKey.startsWith("student:")) {
                 const sid = expandedKey.slice("student:".length);
                 const existing = entryForStudent(sid);
-                const payload = { date: writeDate, studentIds: [sid], studentNote: "", content: draft.content, noteToDirector: draft.noteToDirector };
+                const payload = { date: writeDate, studentIds: [sid], studentNames: [nameOf(sid)], studentNote: "", content: draft.content, noteToDirector: draft.noteToDirector };
                 if (existing) await updateWorkLogRow(existing.id, payload);
                 else await addWorkLogRow({ ...payload, authorEmail: myEmail, authorName });
             } else if (expandedKey === "extraNew") {
@@ -5584,7 +5602,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
     const saveRowEdit = async (r) => {
         if (!rowDraft.content.trim()) { alert("수업·지도내용을 입력해주세요."); return; }
         try {
-            await updateWorkLogRow(r.id, { date: r.date, studentIds: r.studentIds, studentNote: r.studentNote, content: rowDraft.content, noteToDirector: rowDraft.noteToDirector });
+            await updateWorkLogRow(r.id, { date: r.date, studentIds: r.studentIds, studentNames: r.studentNames, studentNote: r.studentNote, content: rowDraft.content, noteToDirector: rowDraft.noteToDirector });
             setEditingRowId(null);
             await load();
             if (r.date === writeDate) await loadTodayEntries(writeDate);
@@ -5728,7 +5746,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
         (r.studentIds.length > 0 || r.studentNote) && React.createElement(
             "div",
             { style: { fontSize: 12.5, color: INK, fontWeight: 700, marginBottom: 4 } },
-            r.studentIds.map((id) => nameOf(id)).join(", "),
+            (r.studentNames && r.studentNames.length ? r.studentNames : r.studentIds.map((id) => nameOf(id))).join(", "),
             r.studentIds.length > 0 && r.studentNote ? " · " : "",
             r.studentNote
         ),
@@ -5849,7 +5867,7 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
                         onChange: (e) => {
                             setStudentQuery(e.target.value);
                             setStudentDropdownOpen(true);
-                            const match = students.find((s) => s.name === e.target.value);
+                            const match = studentSearchPool.find((s) => s.name === e.target.value);
                             setStudentViewId(match ? match.id : null);
                         },
                         onFocus: () => setStudentDropdownOpen(true),
@@ -5868,6 +5886,12 @@ function WorkLogManager({ isDirector, myAssistant, myEmail, students, focusWorkL
                             style: { background: "#fff", color: INK, border: "none", borderTop: i === 0 ? "none" : `1px solid ${LINE}`, cursor: "pointer" }
                         }, s.name))
                     )
+                ),
+                viewMode === "student" && isDirector && React.createElement(
+                    "label",
+                    { className: "flex items-center gap-1", style: { fontSize: 11, color: SUBINK, cursor: "pointer" } },
+                    React.createElement("input", { type: "checkbox", checked: includeWithdrawn, onChange: toggleIncludeWithdrawn }),
+                    "퇴원생 포함"
                 )
             )
         ),
