@@ -1564,15 +1564,21 @@ function EditableNote({ value, placeholder, color, soft, icon, iconTitle, locked
 // 과제 입력칸 - 상단 공용 템플릿 없이, 새로 만들 때 이 자리에서 과제내용+제출기한을 함께 받고 바로 저장.
 // (수업 끝난 뒤 학생별로 그때그때 과제를 적는 실제 사용 방식에 맞춤 — 미리 뭔가 채워둘 필요 없음)
 // 이미 배정된 과제가 있으면 내용만 수정하는 일반 EditableNote와 같은 방식으로 배지+연필/삭제로 접힘.
-function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDelete }) {
+function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDelete, onToggleStatus }) {
   const [editing, setEditing] = useState(false);
   const [desc, setDesc] = useState("");
   const [due, setDue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+
+  const isDone = !!assignment && assignment.status === "제출완료";
+  const descStyle = { fontSize: 11, fontWeight: 700, borderRadius: 5, padding: "2.5px 8px",
+    background: isDone ? PAPER : TEAL_SOFT, color: isDone ? SUBINK : TEAL,
+    textDecoration: isDone ? "line-through" : "none" };
 
   if (locked && assignment) {
     return h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-      h("span", { style: { fontSize: 11, fontWeight: 700, background: TEAL_SOFT, color: TEAL, borderRadius: 5, padding: "2.5px 8px" } }, assignment.description),
+      h("span", { style: descStyle }, assignment.description),
       h("span", { style: { fontSize: 11, color: SUBINK }, title: "제출/코멘트가 있어 수정할 수 없어요" }, "🔒")
     );
   }
@@ -1582,8 +1588,18 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
       return h("button", { type: "button", onClick: () => { setDesc(""); setDue(""); setEditing(true); },
         className: "p-1 rounded-md flex-shrink-0", style: { color: TEAL, opacity: 0.55 }, title: "과제 추가" }, "✏️");
     }
+    const toggle = async () => {
+      setTogglingStatus(true);
+      try { await onToggleStatus(!isDone); } finally { setTogglingStatus(false); }
+    };
     return h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-      h("span", { style: { fontSize: 11, fontWeight: 700, background: TEAL_SOFT, color: TEAL, borderRadius: 5, padding: "2.5px 8px" } }, assignment.description),
+      h("button", { type: "button", onClick: toggle, disabled: togglingStatus, title: isDone ? "완료 취소" : "완료로 표시",
+        className: "flex items-center justify-center flex-shrink-0", style: {
+          width: 17, height: 17, borderRadius: 5, fontSize: 11, lineHeight: "15px",
+          border: `1.5px solid ${isDone ? TEAL : LINE}`, background: isDone ? TEAL : "#fff", color: "#fff",
+          opacity: togglingStatus ? 0.5 : 1,
+        } }, isDone ? "✓" : ""),
+      h("span", { style: descStyle }, assignment.description),
       assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지"),
       h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
       h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
@@ -1622,7 +1638,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
 // 오른쪽 패널 쪽에서 별도로 그림). 과제는 하루에 여러 건 붙을 수 있어서(예: 과목별로 따로, 또는
 // 수업 중 추가로 더 내주는 경우) 배정된 과제를 목록으로 보여주고, 맨 아래에 "과제 추가" 아이콘을
 // 항상 하나 더 둬서 몇 건이든 계속 추가할 수 있게 했다.
-function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onUpdateAssignment, onDeleteAssignment }) {
+function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onUpdateAssignment, onDeleteAssignment, onToggleAssignmentStatus }) {
   return h("div", { className: "flex flex-col gap-3" },
     h("div", { className: "flex items-center gap-1.5 flex-wrap" },
       h("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 700, width: 32, flexShrink: 0 } }, "수업"),
@@ -1635,11 +1651,14 @@ function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onU
       h("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 700, width: 32, flexShrink: 0, marginTop: 6 } }, "과제"),
       h("div", { className: "flex flex-col gap-1.5", style: { flex: "1 1 220px", minWidth: 200 } },
         (assignments || []).map((a) => {
-          const locked = a.status === "제출완료" || !!a.teacher_comment || !!a.student_note;
+          // 학생이 직접 제출한 메모/사진이 있는 경우에만 잠금 - 완료 체크 자체는 수업 중 원장님/강사가
+          // 언제든 켜고 끌 수 있어야 해서 status는 잠금 조건에서 뺐다.
+          const locked = !!a.teacher_comment || !!a.student_note;
           return h(AssignmentEditableField, {
             key: a.id, assignment: a, locked,
             onUpdate: (desc) => onUpdateAssignment(a.id, desc),
             onDelete: () => onDeleteAssignment(a.id),
+            onToggleStatus: (done) => onToggleAssignmentStatus(a.id, done),
           });
         }),
         h(AssignmentEditableField, {
@@ -1884,6 +1903,15 @@ function ClassLogDashboard({ session }) {
     await loadAll();
   };
 
+  // 수업 중 원장님/강사가 과제 완료 여부를 바로 체크할 수 있도록 상태를 토글한다.
+  // (학생이 조회 페이지에서 직접 제출 체크하는 것과 같은 status 값을 공유해서 쓴다.)
+  const toggleAssignmentStatus = async (assignmentId, done) => {
+    const { error } = await supabaseClient.from("clm_assignments")
+      .update({ status: done ? "제출완료" : null }).eq("id", assignmentId);
+    if (error) { setErrorMsg("과제 상태 변경에 실패했어요: " + error.message); return; }
+    await loadAll();
+  };
+
   const toggleBulkForm = (key) => setBulkFormGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const assignGroup = async (groupKey, items, description, dueDate) => {
@@ -2008,6 +2036,7 @@ function ClassLogDashboard({ session }) {
                   s: selectedStudent, note: noteFor(selectedStudent.id), onSaveNote: (v) => saveNote(selectedStudent.id, v),
                   assignments: selectedAssignments,
                   onCreateAssignment: createAssignment, onUpdateAssignment: updateAssignmentDescription, onDeleteAssignment: deleteAssignmentRow,
+                  onToggleAssignmentStatus: toggleAssignmentStatus,
                 })
               ),
 
