@@ -239,12 +239,12 @@ function AddTextbookForm({ onAdd, onClose }) {
     h("div", { className: "flex flex-wrap items-end gap-3" },
       h("div", { className: "flex-1", style: { minWidth: 180 } },
         h("label", { style: fieldLabel }, "교재명"),
-        h("input", { value: name, onChange: (e) => setName(e.target.value), placeholder: "예: 블랙라벨 1등급 VOCA",
+        h("input", { value: name, onChange: (e) => setName(e.target.value), placeholder: "예: 개념+유형 유형편(파워)",
           className: inputClass, style: { ...selectStyle, background: "#fff" } })
       ),
       h("div", { style: { width: 128 } },
         h("label", { style: fieldLabel }, "출판사"),
-        h("input", { value: publisher, onChange: (e) => setPublisher(e.target.value), placeholder: "예: 미래엔",
+        h("input", { value: publisher, onChange: (e) => setPublisher(e.target.value), placeholder: "예: 비상교육",
           className: inputClass, style: { ...selectStyle, background: "#fff" } })
       ),
       h("div", { style: { width: 128 } },
