@@ -125,7 +125,7 @@ function textbookGroupInfo(tb) {
     const s = SEMESTERS.indexOf(tb.semester);
     return {
       key: "중등|" + (tb.grade || "") + "|" + (tb.semester || ""),
-      label: "중등 · " + (tb.grade || "학년 미지정") + (tb.semester ? " " + tb.semester : ""),
+      label: "중등 · " + (tb.grade || "학년 미지정") + (tb.semester ? "-" + tb.semester : ""),
       order: [0, g === -1 ? 99 : g, s === -1 ? 99 : s],
     };
   }
@@ -277,6 +277,131 @@ function AddTextbookForm({ onAdd, onClose }) {
 }
 
 // ============================================================
+// 교재 수정 폼
+// ============================================================
+function EditTextbookForm({ textbook, onSave, onClose }) {
+  const [track, setTrack] = useState(textbook.track || "");
+  const [grade, setGrade] = useState(textbook.grade || "");
+  const [semester, setSemester] = useState(textbook.semester || "");
+  const [courseName, setCourseName] = useState(textbook.course_name || "");
+  const [name, setName] = useState(textbook.name || "");
+  const [publisher, setPublisher] = useState(textbook.publisher || "");
+  const [category, setCategory] = useState(textbook.category || "개념서");
+  const [unitLabel, setUnitLabel] = useState(textbook.unit_label || "페이지");
+  const [totalUnits, setTotalUnits] = useState(textbook.total_units != null ? String(textbook.total_units) : "");
+  const [saving, setSaving] = useState(false);
+
+  const changeTrack = (value) => {
+    setTrack(value);
+    setGrade("");
+    setSemester("");
+    setCourseName("");
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    await onSave({
+      name: name.trim(),
+      category,
+      unit_label: unitLabel,
+      total_units: totalUnits ? Number(totalUnits) : null,
+      publisher: publisher.trim() || null,
+      track: track || null,
+      grade: track === "중등" ? (grade || null) : null,
+      semester: track === "중등" ? (semester || null) : null,
+      course_name: track === "고등" ? (courseName || null) : null,
+    });
+    setSaving(false);
+    onClose();
+  };
+
+  const selectStyle = { border: `1px solid ${LINE}` };
+  const fieldLabel = { fontSize: 11.5, fontWeight: 700, color: SUBINK, marginBottom: 4, display: "block" };
+  const inputClass = "w-full px-3 py-2 rounded-lg text-sm outline-none";
+
+  return h("form", { onSubmit: submit, className: "rounded-xl p-3 mb-2 flex flex-col gap-3", style: { background: PAPER, border: `1.5px solid ${NAVY_SOFT}` } },
+    h("div", { className: "flex items-center justify-between" },
+      h("span", { style: { fontSize: 12, fontWeight: 800, color: INK } }, "교재 정보 수정"),
+      h("button", { type: "button", onClick: onClose, style: { fontSize: 11.5, color: SUBINK, fontWeight: 600 } }, "닫기")
+    ),
+    h("div", { className: "flex flex-wrap items-end gap-3" },
+      h("div", { style: { width: 128 } },
+        h("label", { style: fieldLabel }, "과정"),
+        h("select", { value: track, onChange: (e) => changeTrack(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          h("option", { value: "" }, "선택"),
+          h("option", { value: "중등" }, "중등과정"),
+          h("option", { value: "고등" }, "고등과정")
+        )
+      ),
+      track === "중등" && h("div", { style: { width: 96 } },
+        h("label", { style: fieldLabel }, "학년"),
+        h("select", { value: grade, onChange: (e) => setGrade(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          h("option", { value: "" }, "선택"),
+          MS_GRADES.map((g) => h("option", { key: g, value: g }, g))
+        )
+      ),
+      track === "중등" && h("div", { style: { width: 96 } },
+        h("label", { style: fieldLabel }, "학기"),
+        h("select", { value: semester, onChange: (e) => setSemester(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          h("option", { value: "" }, "선택"),
+          SEMESTERS.map((s) => h("option", { key: s, value: s }, s))
+        )
+      ),
+      track === "고등" && h("div", { style: { width: 150 } },
+        h("label", { style: fieldLabel }, "과정"),
+        h("select", { value: courseName, onChange: (e) => setCourseName(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          h("option", { value: "" }, "선택"),
+          HS_COURSES.map((c) => h("option", { key: c, value: c }, c))
+        )
+      )
+    ),
+    h("div", { className: "flex flex-wrap items-end gap-3" },
+      h("div", { className: "flex-1", style: { minWidth: 180 } },
+        h("label", { style: fieldLabel }, "교재명"),
+        h("input", { value: name, onChange: (e) => setName(e.target.value), placeholder: "예: 개념+유형 유형편(파워)",
+          className: inputClass, style: { ...selectStyle, background: "#fff" } })
+      ),
+      h("div", { style: { width: 128 } },
+        h("label", { style: fieldLabel }, "출판사"),
+        h("input", { value: publisher, onChange: (e) => setPublisher(e.target.value), placeholder: "예: 비상교육",
+          className: inputClass, style: { ...selectStyle, background: "#fff" } })
+      ),
+      h("div", { style: { width: 128 } },
+        h("label", { style: fieldLabel }, "구분"),
+        h("select", { value: category, onChange: (e) => setCategory(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          ["개념서", "유형서", "학원자체교재", "기타"].map((c) => h("option", { key: c, value: c }, c))
+        )
+      ),
+      h("div", { style: { width: 108 } },
+        h("label", { style: fieldLabel }, "진도 단위"),
+        h("select", { value: unitLabel, onChange: (e) => setUnitLabel(e.target.value),
+          className: inputClass, style: { ...selectStyle, background: "#fff" } },
+          ["페이지", "단원", "회차"].map((u) => h("option", { key: u, value: u }, u))
+        )
+      ),
+      h("div", { style: { width: 108 } },
+        h("label", { style: fieldLabel }, "총 " + unitLabel + "수"),
+        h("input", { type: "number", min: "0", value: totalUnits, onChange: (e) => setTotalUnits(e.target.value), placeholder: "선택",
+          className: inputClass, style: { ...selectStyle, background: "#fff" } })
+      ),
+      h("div", { className: "flex gap-2" },
+        h("button", { type: "submit", disabled: saving, className: "px-4 py-2 rounded-lg text-sm font-bold",
+          style: { background: NAVY, color: "#fff", opacity: saving ? 0.6 : 1 } }, "저장"),
+        h("button", { type: "button", onClick: onClose, className: "px-4 py-2 rounded-lg text-sm font-semibold",
+          style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+      )
+    )
+  );
+}
+
+// ============================================================
 // 학생 배정 선택기 (교재에 학생 추가)
 // ============================================================
 function AssignStudentPicker({ students, excludeIds, onAssign, onClose }) {
@@ -389,27 +514,41 @@ function TextbookListView({ textbooks, progress, students, isDirector, actions }
   });
   const allExpanded = groups.length > 0 && groups.every((g) => expandedGroups.has(g.label));
   const toggleAll = () => setExpandedGroups(allExpanded ? new Set() : new Set(groups.map((g) => g.label)));
+  const [editingId, setEditingId] = useState(null);
 
   const renderRow = (tb) => {
     const rows = progress.filter((p) => p.textbook_id === tb.id);
     const style = catStyle(tb.category);
     const open = expandedBooks.has(tb.id);
+    const editing = editingId === tb.id;
     const avgPercent = (() => {
       const withTotal = rows.map(progressPercent).filter((p) => p !== null);
       if (withTotal.length === 0) return null;
       return Math.round(withTotal.reduce((a, b) => a + b, 0) / withTotal.length);
     })();
+    if (editing) {
+      return h("div", { key: tb.id, className: "mb-2" },
+        h(EditTextbookForm, {
+          textbook: tb,
+          onSave: (payload) => actions.updateTextbook(tb.id, payload),
+          onClose: () => setEditingId(null),
+        })
+      );
+    }
     return h("div", { key: tb.id, className: "rounded-xl overflow-hidden mb-2", style: { background: "#fff", border: `1px solid ${LINE}` } },
       h("button", { type: "button", onClick: () => toggleBook(tb.id),
-        className: "w-full flex items-center gap-2.5 px-4 py-2.5 text-left" },
-        h("span", { style: { fontSize: 10, color: SUBINK, width: 10, flexShrink: 0 } }, open ? "▾" : "▸"),
+        className: "w-full text-left", style: { display: "grid", gridTemplateColumns: "14px auto minmax(0,1fr) auto", alignItems: "center", columnGap: 10, padding: "10px 16px" } },
+        h("span", { style: { fontSize: 10, color: SUBINK } }, open ? "▾" : "▸"),
         h(Badge, { color: style.color, soft: style.soft }, tb.category),
-        h("span", { style: { fontSize: 13, fontWeight: 700, color: INK, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, tb.name),
-        h("span", { className: "hidden sm:inline", style: { fontSize: 11.5, color: SUBINK, flexShrink: 0, maxWidth: 110, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, tb.publisher || ""),
-        h("span", { style: { fontSize: 11.5, color: SUBINK, fontWeight: 700, flexShrink: 0 } },
+        h("span", { style: { fontSize: 13, fontWeight: 700, color: INK, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, tb.name),
+        h("span", { style: { fontSize: 11.5, color: SUBINK, fontWeight: 700, whiteSpace: "nowrap" } },
           rows.length, "명", avgPercent !== null ? " · " + avgPercent + "%" : "")
       ),
       open && h("div", { style: { borderTop: `1px solid ${LINE}` } },
+        h("div", { className: "px-4 pt-2", style: { fontSize: 11.5, color: SUBINK } },
+          tb.publisher ? tb.publisher : "출판사 미등록",
+          tb.total_units ? " · 총 " + tb.total_units + (tb.unit_label || "페이지") : ""
+        ),
         h("div", { className: "px-2 py-1" },
           rows.length === 0
             ? h("p", { style: { fontSize: 12, color: SUBINK, padding: "12px 12px" } }, "아직 배정된 학생이 없어요.")
@@ -425,8 +564,12 @@ function TextbookListView({ textbooks, progress, students, isDirector, actions }
                 onAssign: (studentId) => actions.assignStudent(tb.id, studentId), onClose: () => setAssigningTo(null) })
             : h("button", { type: "button", onClick: () => setAssigningTo(tb.id),
                 style: { fontSize: 12, color: TEAL, fontWeight: 700 } }, "+ 학생 추가"),
-          assigningTo !== tb.id && h("button", { type: "button", onClick: () => actions.deleteTextbook(tb.id),
-            style: { fontSize: 11.5, color: SUBINK, fontWeight: 600, flexShrink: 0 } }, "교재 삭제")
+          assigningTo !== tb.id && h("div", { className: "flex items-center gap-3" },
+            h("button", { type: "button", onClick: () => setEditingId(tb.id),
+              style: { fontSize: 11.5, color: NAVY, fontWeight: 700, flexShrink: 0 } }, "교재 수정"),
+            h("button", { type: "button", onClick: () => actions.deleteTextbook(tb.id),
+              style: { fontSize: 11.5, color: SUBINK, fontWeight: 600, flexShrink: 0 } }, "교재 삭제")
+          )
         )
       )
     );
@@ -489,10 +632,13 @@ function AssignTextbookPicker({ textbooks, excludeIds, onAssign, onClose }) {
       className: "w-full mb-2 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" },
     }),
     candidates.length === 0 && h("p", { style: { fontSize: 12, color: SUBINK } }, "추가할 수 있는 교재가 없어요. 먼저 교재를 등록해주세요."),
-    h("div", { style: { maxHeight: 280, overflowY: "auto" } },
-      groups.map((group) =>
-        h("div", { key: group.label, className: "mb-2.5" },
-          h("div", { style: { fontSize: 10.5, fontWeight: 800, color: SUBINK, marginBottom: 4 } }, group.label),
+    h("div", { style: { maxHeight: 320, overflowY: "auto" } },
+      groups.map((group, idx) =>
+        h("div", { key: group.label, className: "mb-3", style: { paddingTop: idx === 0 ? 0 : 10, borderTop: idx === 0 ? "none" : `1px dashed ${LINE}` } },
+          h("div", { className: "flex items-center gap-1.5 mb-2" },
+            h(Badge, { color: NAVY, soft: NAVY_SOFT }, group.label),
+            h("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 700 } }, group.items.length + "권")
+          ),
           h("div", { className: "flex flex-wrap gap-2" },
             group.items.map((t) => {
               const style = catStyle(t.category);
@@ -713,6 +859,11 @@ function TextbookDashboard({ session, role }) {
       if (!window.confirm("이 교재를 삭제하면 배정된 학생들의 진도 기록도 함께 삭제돼요. 계속할까요?")) return;
       const { error } = await supabaseClient.from("clm_textbooks").delete().eq("id", id);
       if (error) { setErrorMsg("교재 삭제에 실패했어요: " + error.message); return; }
+      await loadAll();
+    },
+    updateTextbook: async (id, payload) => {
+      const { error } = await supabaseClient.from("clm_textbooks").update(payload).eq("id", id);
+      if (error) { setErrorMsg("교재 수정에 실패했어요: " + error.message); return; }
       await loadAll();
     },
     assignStudent: async (textbookId, studentId) => {
