@@ -1449,8 +1449,8 @@ function AssignmentsDashboard({ session, role }) {
 // 수업일지 - 출석체크 명단과 연동된 관제탑 (수업내용 메모 + 과제 배정, 반별 일괄 배정)
 // 원장님 전용 화면 (2026-07-31 확인: 조교는 당분간 출결체크 보조 역할만).
 // ============================================================
-const CLASS_LOG_SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강" };
-const CLASS_LOG_SESSION_ORDER = ["regular", "clinic", "extra"];
+const CLASS_LOG_SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강", course: "특강" };
+const CLASS_LOG_SESSION_ORDER = ["regular", "clinic", "extra", "course"];
 const KOR_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 function korWeekdayOfDate(dateStr) { return KOR_WEEKDAYS[new Date(dateStr + "T00:00:00").getDay()]; }
 
@@ -1564,14 +1564,33 @@ function EditableNote({ value, placeholder, color, soft, icon, iconTitle, locked
 // 과제 입력칸 - 상단 공용 템플릿 없이, 새로 만들 때 이 자리에서 과제내용+제출기한을 함께 받고 바로 저장.
 // (수업 끝난 뒤 학생별로 그때그때 과제를 적는 실제 사용 방식에 맞춤 — 미리 뭔가 채워둘 필요 없음)
 // 이미 배정된 과제가 있으면 내용만 수정하는 일반 EditableNote와 같은 방식으로 배지+연필/삭제로 접힘.
-function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDelete, onToggleStatus }) {
+// 과제에 범위(range_from~range_to)가 있으면 "어디까지 풀었는지"만 입력받아 완성률을 자동 계산한다.
+// 예: 1~20번을 냈는데 15번까지 풀었다고 입력하면 (15-1+1)/(20-1+1) = 75%로 계산.
+function assignmentProgressPercent(a) {
+  if (a.range_from == null || a.range_to == null || a.progress_to == null) return null;
+  const total = a.range_to - a.range_from + 1;
+  if (total <= 0) return null;
+  const done = Math.max(0, a.progress_to - a.range_from + 1);
+  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+}
+
+function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDelete, onToggleStatus, onUpdateProgress }) {
   const [editing, setEditing] = useState(false);
   const [desc, setDesc] = useState("");
   const [due, setDue] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [progressInput, setProgressInput] = useState("");
 
-  const isDone = !!assignment && assignment.status === "제출완료";
+  useEffect(() => {
+    if (assignment) setProgressInput(assignment.progress_to != null ? String(assignment.progress_to) : "");
+  }, [assignment && assignment.progress_to]);
+
+  const hasRange = !!assignment && assignment.range_from != null && assignment.range_to != null;
+  const percent = assignment ? assignmentProgressPercent(assignment) : null;
+  const isDone = !!assignment && (assignment.status === "제출완료" || (hasRange && percent !== null && percent >= 100));
   const descStyle = { fontSize: 11, fontWeight: 700, borderRadius: 5, padding: "2.5px 8px",
     background: isDone ? PAPER : TEAL_SOFT, color: isDone ? SUBINK : TEAL,
     textDecoration: isDone ? "line-through" : "none" };
@@ -1585,24 +1604,45 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
 
   if (!editing) {
     if (!assignment) {
-      return h("button", { type: "button", onClick: () => { setDesc(""); setDue(""); setEditing(true); },
+      return h("button", { type: "button", onClick: () => { setDesc(""); setDue(""); setRangeFrom(""); setRangeTo(""); setEditing(true); },
         className: "p-1 rounded-md flex-shrink-0", style: { color: TEAL, opacity: 0.55 }, title: "과제 추가" }, "✏️");
     }
     const toggle = async () => {
       setTogglingStatus(true);
       try { await onToggleStatus(!isDone); } finally { setTogglingStatus(false); }
     };
-    return h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-      h("button", { type: "button", onClick: toggle, disabled: togglingStatus, title: isDone ? "완료 취소" : "완료로 표시",
-        className: "flex items-center justify-center flex-shrink-0", style: {
-          width: 17, height: 17, borderRadius: 5, fontSize: 11, lineHeight: "15px",
-          border: `1.5px solid ${isDone ? TEAL : LINE}`, background: isDone ? TEAL : "#fff", color: "#fff",
-          opacity: togglingStatus ? 0.5 : 1,
-        } }, isDone ? "✓" : ""),
-      h("span", { style: descStyle }, assignment.description),
-      assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지"),
-      h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
-      h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
+    const commitProgress = () => {
+      const raw = progressInput.trim();
+      if (raw === "") { onUpdateProgress(assignment.id, null); return; }
+      let n = Number(raw);
+      if (!Number.isFinite(n)) { setProgressInput(assignment.progress_to != null ? String(assignment.progress_to) : ""); return; }
+      n = Math.max(assignment.range_from - 1, Math.min(assignment.range_to, Math.round(n)));
+      onUpdateProgress(assignment.id, n);
+    };
+    return h("div", { className: "flex flex-col gap-1" },
+      h("div", { className: "flex items-center gap-1.5 flex-wrap" },
+        !hasRange && h("button", { type: "button", onClick: toggle, disabled: togglingStatus, title: isDone ? "완료 취소" : "완료로 표시",
+          className: "flex items-center justify-center flex-shrink-0", style: {
+            width: 17, height: 17, borderRadius: 5, fontSize: 11, lineHeight: "15px",
+            border: `1.5px solid ${isDone ? TEAL : LINE}`, background: isDone ? TEAL : "#fff", color: "#fff",
+            opacity: togglingStatus ? 0.5 : 1,
+          } }, isDone ? "✓" : ""),
+        h("span", { style: descStyle }, assignment.description),
+        hasRange && h("span", { style: { fontSize: 10, color: SUBINK } }, "(", assignment.range_from, "~", assignment.range_to, ")"),
+        assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지"),
+        h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
+        h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
+      ),
+      hasRange && h("div", { className: "flex items-center gap-1.5", style: { marginLeft: 2 } },
+        h("span", { style: { fontSize: 10, color: SUBINK } }, "진행"),
+        h("input", { type: "number", value: progressInput, onChange: (e) => setProgressInput(e.target.value),
+          onBlur: commitProgress, onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
+          placeholder: String(assignment.range_from),
+          className: "text-center rounded-md text-xs outline-none",
+          style: { width: 44, padding: "2px 2px", border: `1px solid ${LINE}` } }),
+        h("span", { style: { fontSize: 10.5, color: SUBINK } }, "/", assignment.range_to),
+        percent !== null && h("span", { style: { fontSize: 10.5, fontWeight: 700, color: percent >= 100 ? TEAL : AMBER } }, "(" + percent + "%)")
+      )
     );
   }
 
@@ -1612,23 +1652,35 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
     setSaving(true);
     try {
       if (assignment) await onUpdate(desc.trim());
-      else await onCreate(desc.trim(), due);
+      else await onCreate(desc.trim(), due, rangeFrom ? Number(rangeFrom) : null, rangeTo ? Number(rangeTo) : null);
       setEditing(false);
     } finally { setSaving(false); }
   };
 
-  return h("div", { className: "flex gap-2 flex-wrap items-center", style: { flex: "1 1 260px" } },
-    h("input", { type: "text", autoFocus: true, value: desc, onChange: (e) => setDesc(e.target.value),
-      onKeyDown: (e) => { if (e.key === "Enter" && canSave) save(); }, placeholder: "과제 입력 (예: p.32~40 풀어오기)",
-      className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } }),
-    !assignment && h("input", { type: "date", value: due, onChange: (e) => setDue(e.target.value),
-      className: "px-3 py-2 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } }),
-    h("button", { type: "button", onClick: save, disabled: saving || !canSave,
-      className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
-      style: { background: TEAL, color: "#fff", opacity: (saving || !canSave) ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
-    h("button", { type: "button", onClick: () => setEditing(false),
-      className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
-      style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+  return h("div", { className: "flex flex-col gap-1.5", style: { flex: "1 1 260px" } },
+    h("div", { className: "flex gap-2 flex-wrap items-center" },
+      h("input", { type: "text", autoFocus: true, value: desc, onChange: (e) => setDesc(e.target.value),
+        onKeyDown: (e) => { if (e.key === "Enter" && canSave) save(); }, placeholder: "과제 입력 (예: p.32~40 풀어오기)",
+        className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } }),
+      !assignment && h("input", { type: "date", value: due, onChange: (e) => setDue(e.target.value),
+        className: "px-3 py-2 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } })
+    ),
+    !assignment && h("div", { className: "flex items-center gap-1.5" },
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "범위(선택, 완성률 자동계산)"),
+      h("input", { type: "number", value: rangeFrom, onChange: (e) => setRangeFrom(e.target.value), placeholder: "시작",
+        className: "text-center rounded-md text-xs outline-none", style: { width: 52, padding: "3px 2px", border: `1px solid ${LINE}` } }),
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~"),
+      h("input", { type: "number", value: rangeTo, onChange: (e) => setRangeTo(e.target.value), placeholder: "끝",
+        className: "text-center rounded-md text-xs outline-none", style: { width: 52, padding: "3px 2px", border: `1px solid ${LINE}` } })
+    ),
+    h("div", { className: "flex gap-2 flex-wrap items-center" },
+      h("button", { type: "button", onClick: save, disabled: saving || !canSave,
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: TEAL, color: "#fff", opacity: (saving || !canSave) ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+      h("button", { type: "button", onClick: () => setEditing(false),
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+    )
   );
 }
 
@@ -1638,7 +1690,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
 // 오른쪽 패널 쪽에서 별도로 그림). 과제는 하루에 여러 건 붙을 수 있어서(예: 과목별로 따로, 또는
 // 수업 중 추가로 더 내주는 경우) 배정된 과제를 목록으로 보여주고, 맨 아래에 "과제 추가" 아이콘을
 // 항상 하나 더 둬서 몇 건이든 계속 추가할 수 있게 했다.
-function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onUpdateAssignment, onDeleteAssignment, onToggleAssignmentStatus }) {
+function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onUpdateAssignment, onDeleteAssignment, onToggleAssignmentStatus, onUpdateAssignmentProgress }) {
   return h("div", { className: "flex flex-col gap-3" },
     h("div", { className: "flex items-center gap-1.5 flex-wrap" },
       h("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 700, width: 32, flexShrink: 0 } }, "수업"),
@@ -1659,11 +1711,12 @@ function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onU
             onUpdate: (desc) => onUpdateAssignment(a.id, desc),
             onDelete: () => onDeleteAssignment(a.id),
             onToggleStatus: (done) => onToggleAssignmentStatus(a.id, done),
+            onUpdateProgress: (id, progressTo) => onUpdateAssignmentProgress(id, progressTo, a.range_to),
           });
         }),
         h(AssignmentEditableField, {
           key: "new", assignment: null, locked: false,
-          onCreate: (desc, due) => onCreateAssignment(s, desc, due),
+          onCreate: (desc, due, rangeFrom, rangeTo) => onCreateAssignment(s, desc, due, rangeFrom, rangeTo),
         })
       )
     )
@@ -1732,6 +1785,7 @@ function ClassLogDashboard({ session }) {
   const [courses, setCourses] = useState([]);
   const [courseAttendance, setCourseAttendance] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState(null);
+  const [selectedCourseId, setSelectedCourseId] = useState(null); // 특강 탭 전용 - 학생이 아니라 (학생,강좌) 등록건 단위로 선택
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [workLogs, setWorkLogs] = useState([]);
@@ -1743,7 +1797,7 @@ function ClassLogDashboard({ session }) {
       supabaseClient.from("attn_students").select("id,name,school,grade,class,days,clinic,clinic_days,clinic_time,regular_time,enroll_date").neq("status", "퇴원").order("name"),
       supabaseClient.from("attn_extra_roster").select("student_id,scheduled_time,plan_note").eq("attn_date", selectedDate),
       supabaseClient.from("clm_class_logs").select("*").eq("class_date", selectedDate),
-      supabaseClient.from("clm_assignments").select("id,student_id,description,status,teacher_comment,student_note,due_date").eq("class_date", selectedDate),
+      supabaseClient.from("clm_assignments").select("id,student_id,description,status,teacher_comment,student_note,due_date,range_from,range_to,progress_to,course_id").eq("class_date", selectedDate),
       supabaseClient.from("attn_attendance").select("student_id,session,status").eq("attn_date", selectedDate),
       supabaseClient.from("attn_student_courses").select("id,student_id,course_name,days,start_date,end_date"),
       supabaseClient.from("attn_course_attendance").select("course_id,status").eq("attn_date", selectedDate),
@@ -1783,6 +1837,7 @@ function ClassLogDashboard({ session }) {
 
   const weekday = korWeekdayOfDate(selectedDate);
   const roster = useMemo(() => {
+    if (activeSession === "course") return []; // 특강 탭은 학생이 아니라 강좌 단위로 따로 묶어서 보여준다.
     if (activeSession === "extra") {
       return students.filter((s) => extraMap[s.id]);
     }
@@ -1822,16 +1877,45 @@ function ClassLogDashboard({ session }) {
       return { id: c.id, courseName: c.course_name, status, meta: status ? CLASS_LOG_ATTN_STATUS[status] : null };
     });
 
+  // 특강 탭 전용 목록 - 학생 단위가 아니라 "오늘 열리는 강좌"별로 묶는다. attn_student_courses는
+  // (학생,강좌) 등록 1건당 행 하나라서, 같은 강좌를 듣는 학생이 여러 명이면 course_name이 같은
+  // 여러 행으로 흩어져 있다 - 그 course_name 기준으로 다시 그룹지어준다.
+  const courseGroups = useMemo(() => {
+    if (activeSession !== "course") return [];
+    const map = new Map();
+    students.forEach((s) => {
+      coursesForStudentToday(s.id).forEach((c) => {
+        if (!map.has(c.courseName)) map.set(c.courseName, { label: c.courseName, items: [] });
+        map.get(c.courseName).items.push({ student: s, enrollmentId: c.id, courseName: c.courseName, status: c.status, meta: c.meta });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ko"));
+  }, [activeSession, students, courses, courseAttendance, weekday, selectedDate]);
+
+  const courseEntries = useMemo(() => courseGroups.flatMap((g) => g.items), [courseGroups]);
+
   // 왼쪽 목록에서 학생을 고르면 오른쪽에 상세가 뜨는 구조 - 목록이 바뀌면(날짜/세션 변경 등)
   // 선택된 학생이 더 이상 목록에 없을 때만 첫 번째 학생으로 다시 골라준다.
   useEffect(() => {
+    if (activeSession === "course") return;
     if (roster.length === 0) { setSelectedStudentId(null); return; }
     if (!roster.some((s) => s.id === selectedStudentId)) {
       setSelectedStudentId(roster[0].id);
     }
-  }, [roster, selectedStudentId]);
+  }, [roster, selectedStudentId, activeSession]);
+
+  // 특강 탭도 같은 패턴 - (학생,강좌) 등록건 목록이 바뀌면 선택이 더 이상 유효하지 않을 때만 첫 항목으로.
+  useEffect(() => {
+    if (activeSession !== "course") return;
+    if (courseEntries.length === 0) { setSelectedCourseId(null); return; }
+    if (!courseEntries.some((e) => e.enrollmentId === selectedCourseId)) {
+      setSelectedCourseId(courseEntries[0].enrollmentId);
+    }
+  }, [activeSession, courseEntries, selectedCourseId]);
 
   const selectedStudent = roster.find((s) => s.id === selectedStudentId) || null;
+  const selectedCourseEntry = courseEntries.find((e) => e.enrollmentId === selectedCourseId) || null;
+  const selectedCourseNoteSession = selectedCourseEntry ? "course_" + selectedCourseEntry.enrollmentId : null;
 
   // 학습현황 카드용 - 선택된 학생의 최근 과제 이력을 날짜와 무관하게 최신순으로 몇 건만 가져온다.
   useEffect(() => {
@@ -1865,27 +1949,32 @@ function ClassLogDashboard({ session }) {
     return () => { cancelled = true; };
   }, [selectedStudentId]);
 
-  const noteFor = (studentId) => {
-    const row = classLogs.find((l) => l.student_id === studentId && l.session === activeSession);
+  // sessionKey를 명시적으로 받는 버전 - 특강 탭은 강좌(등록건)마다 수업내용을 따로 적어야 해서
+  // activeSession("course") 그대로 쓰지 않고 "course_<등록건id>"처럼 등록건별로 다른 키를 쓴다.
+  const noteForSession = (studentId, sessionKey) => {
+    const row = classLogs.find((l) => l.student_id === studentId && l.session === sessionKey);
     return (row && row.lesson_note) || "";
   };
-
-  const saveNote = async (studentId, value) => {
+  const saveNoteForSession = async (studentId, sessionKey, value) => {
     const { error } = await supabaseClient.from("clm_class_logs").upsert({
-      student_id: studentId, class_date: selectedDate, session: activeSession,
+      student_id: studentId, class_date: selectedDate, session: sessionKey,
       lesson_note: value || null, created_by: session.user.email, updated_at: new Date().toISOString(),
     }, { onConflict: "student_id,class_date,session" });
     if (error) { setErrorMsg("수업내용 저장에 실패했어요: " + error.message); return; }
     await loadAll();
   };
+  const noteFor = (studentId) => noteForSession(studentId, activeSession);
+  const saveNote = (studentId, value) => saveNoteForSession(studentId, activeSession, value);
 
   // 과제는 학생 한 명에게 하루에 여러 건 있을 수 있어서(과목별로 따로, 또는 수업 중 추가로 더 내주는 경우)
-  // 단일 값이 아니라 배열로 돌려준다.
-  const assignmentsFor = (studentId) => assignments.filter((a) => a.student_id === studentId);
+  // 단일 값이 아니라 배열로 돌려준다. 특강(course_id가 있는 과제)은 정규/클리닉/보강 쪽 목록에는 안 섞이게 뺀다.
+  const assignmentsFor = (studentId) => assignments.filter((a) => a.student_id === studentId && !a.course_id);
+  const assignmentsForCourse = (studentId, courseId) => assignments.filter((a) => a.student_id === studentId && a.course_id === courseId);
 
-  const createAssignment = async (s, description, dueDate) => {
+  const createAssignment = async (s, description, dueDate, rangeFrom, rangeTo, courseId) => {
     const { error } = await supabaseClient.from("clm_assignments").insert({
       student_id: s.id, class_date: selectedDate, description, due_date: dueDate, created_by: session.user.email,
+      range_from: rangeFrom ?? null, range_to: rangeTo ?? null, course_id: courseId ?? null,
     });
     if (error) { setErrorMsg("과제 추가에 실패했어요: " + error.message); return; }
     await loadAll();
@@ -1904,11 +1993,22 @@ function ClassLogDashboard({ session }) {
   };
 
   // 수업 중 원장님/강사가 과제 완료 여부를 바로 체크할 수 있도록 상태를 토글한다.
-  // (학생이 조회 페이지에서 직접 제출 체크하는 것과 같은 status 값을 공유해서 쓴다.)
+  // (학생이 조회 페이지에서 직접 제출 체크하는 것과 같은 status 값을 공유해서 쓴다. status는 NOT NULL 컬럼이라
+  // 미완료일 때는 null이 아니라 기본값과 같은 "미제출"을 넣어야 한다.)
   const toggleAssignmentStatus = async (assignmentId, done) => {
     const { error } = await supabaseClient.from("clm_assignments")
-      .update({ status: done ? "제출완료" : null }).eq("id", assignmentId);
+      .update({ status: done ? "제출완료" : "미제출" }).eq("id", assignmentId);
     if (error) { setErrorMsg("과제 상태 변경에 실패했어요: " + error.message); return; }
+    await loadAll();
+  };
+
+  // 범위(range_from~range_to)가 있는 과제는 "어디까지 풀었는지"만 저장하면 완성률이 자동 계산된다.
+  // 범위 끝까지 도달하면 status도 같이 제출완료로 맞춰서, 과제 관리 탭의 제출완료 집계와 어긋나지 않게 한다.
+  const updateAssignmentProgress = async (assignmentId, progressTo, rangeTo) => {
+    const done = progressTo != null && rangeTo != null && progressTo >= rangeTo;
+    const { error } = await supabaseClient.from("clm_assignments")
+      .update({ progress_to: progressTo, status: done ? "제출완료" : "미제출" }).eq("id", assignmentId);
+    if (error) { setErrorMsg("진행률 저장에 실패했어요: " + error.message); return; }
     await loadAll();
   };
 
@@ -1947,6 +2047,13 @@ function ClassLogDashboard({ session }) {
   const selectedAttnMeta = selectedAttnStatus ? CLASS_LOG_ATTN_STATUS[selectedAttnStatus] : null;
   const selectedCourses = selectedStudent ? coursesForStudentToday(selectedStudent.id) : [];
 
+  const isCourseTab = activeSession === "course";
+  const courseStudent = selectedCourseEntry ? selectedCourseEntry.student : null;
+  const courseAssignments = selectedCourseEntry ? assignmentsForCourse(selectedCourseEntry.student.id, selectedCourseEntry.enrollmentId) : [];
+  const courseDoneCount = courseAssignments.filter((a) => a.status === "제출완료").length;
+  const courseAttnMeta = selectedCourseEntry && selectedCourseEntry.status ? CLASS_LOG_ATTN_STATUS[selectedCourseEntry.status] : null;
+  const courseNote = selectedCourseEntry ? noteForSession(selectedCourseEntry.student.id, selectedCourseNoteSession) : "";
+
   return h("div", null,
     errorMsg && h("div", { className: "rounded-xl px-4 py-2.5 mb-4", style: { background: RED_SOFT, color: RED, fontSize: 12.5, fontWeight: 600 } }, errorMsg),
 
@@ -1967,37 +2074,135 @@ function ClassLogDashboard({ session }) {
             CLASS_LOG_SESSIONS[key]))
         ),
 
-        h("div", { style: { fontSize: 11, fontWeight: 800, color: SUBINK } }, "그루핑"),
-        h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-          CLASS_LOG_GROUP_MODES.map((m) =>
-            h("button", { key: m.key, type: "button", onClick: () => setGroupMode(m.key),
-              className: "px-3 py-1.5 rounded-lg text-xs font-bold",
-              style: { background: groupMode === m.key ? NAVY : "#fff", color: groupMode === m.key ? "#fff" : SUBINK, border: `1px solid ${groupMode === m.key ? NAVY : LINE}` } },
-              m.label)
-          )
-        ),
+        activeSession === "course"
+          // 특강 탭은 요일·시간대가 강좌마다 달라서 학생 목록이 아니라 "오늘 열리는 강좌"별로 묶어서 보여준다.
+          ? (courseGroups.length === 0
+              ? h("div", { className: "rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 12.5 } },
+                  `${weekday}요일에 열리는 특강이 없어요.`)
+              : h("div", { style: { maxHeight: 600, overflowY: "auto" } },
+                  courseGroups.map((g) => h("div", { key: g.label, className: "rounded-2xl overflow-hidden mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    h("div", { className: "px-4 py-2.5", style: { background: PAPER, borderBottom: `1px solid ${LINE}` } },
+                      h("span", { style: { fontWeight: 800, fontSize: 13 } }, "🎓 ", g.label),
+                      h("span", { style: { fontSize: 11.5, color: SUBINK, fontWeight: 700, marginLeft: 8 } }, g.items.length, "명")
+                    ),
+                    g.items.map((item, idx) => h(ClassLogRosterRow, {
+                      key: item.enrollmentId, s: item.student, isLast: idx === g.items.length - 1,
+                      active: item.enrollmentId === selectedCourseId,
+                      onClick: () => { setSelectedCourseId(item.enrollmentId); setSelectedStudentId(item.student.id); },
+                      hasNote: !!noteForSession(item.student.id, "course_" + item.enrollmentId),
+                      hasAssignment: assignmentsForCourse(item.student.id, item.enrollmentId).length > 0,
+                      attnStatus: item.status, hasCourse: false,
+                    }))
+                  ))
+                )
+            )
+          : h(React.Fragment, null,
+              h("div", { style: { fontSize: 11, fontWeight: 800, color: SUBINK } }, "그루핑"),
+              h("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                CLASS_LOG_GROUP_MODES.map((m) =>
+                  h("button", { key: m.key, type: "button", onClick: () => setGroupMode(m.key),
+                    className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+                    style: { background: groupMode === m.key ? NAVY : "#fff", color: groupMode === m.key ? "#fff" : SUBINK, border: `1px solid ${groupMode === m.key ? NAVY : LINE}` } },
+                    m.label)
+                )
+              ),
 
-        roster.length === 0
-          ? h("div", { className: "rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 12.5 } },
-              activeSession === "extra" ? "오늘 등록된 보강 학생이 없어요. 출결체크 화면에서 먼저 등록해주세요." : `${weekday}요일 ${CLASS_LOG_SESSIONS[activeSession]}에 배정된 학생이 없어요.`)
-          : groupMode === "none"
-            ? h("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, maxHeight: 560, overflowY: "auto" } },
-                roster.map((s, idx) => renderRosterRow(s, idx === roster.length - 1))
-              )
-            : h("div", { style: { maxHeight: 600, overflowY: "auto" } },
-                (groups || []).map((g) => h(ClassLogGroupSection, {
-                  key: g.label, group: g, collapsed: !!collapsedGroups[g.label],
-                  onToggleCollapsed: () => toggleGroupCollapsed(g.label), renderRow: renderRosterRow,
-                  bulkFormOpen: !!bulkFormGroups[g.label], onToggleBulkForm: () => toggleBulkForm(g.label),
-                  onConfirmBulkAssign: (desc, due) => assignGroup(g.label, g.items, desc, due),
-                  groupBusy: !!busyGroups[g.label],
-                }))
-              )
+              roster.length === 0
+                ? h("div", { className: "rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 12.5 } },
+                    activeSession === "extra" ? "오늘 등록된 보강 학생이 없어요. 출결체크 화면에서 먼저 등록해주세요." : `${weekday}요일 ${CLASS_LOG_SESSIONS[activeSession]}에 배정된 학생이 없어요.`)
+                : groupMode === "none"
+                  ? h("div", { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}`, maxHeight: 560, overflowY: "auto" } },
+                      roster.map((s, idx) => renderRosterRow(s, idx === roster.length - 1))
+                    )
+                  : h("div", { style: { maxHeight: 600, overflowY: "auto" } },
+                      (groups || []).map((g) => h(ClassLogGroupSection, {
+                        key: g.label, group: g, collapsed: !!collapsedGroups[g.label],
+                        onToggleCollapsed: () => toggleGroupCollapsed(g.label), renderRow: renderRosterRow,
+                        bulkFormOpen: !!bulkFormGroups[g.label], onToggleBulkForm: () => toggleBulkForm(g.label),
+                        onConfirmBulkAssign: (desc, due) => assignGroup(g.label, g.items, desc, due),
+                        groupBusy: !!busyGroups[g.label],
+                      }))
+                    )
+            )
       ),
 
       // 오른쪽 패널: 선택된 학생의 출결·과제·특강현황 카드 + 수업내용/과제 입력 + 학습현황 + 근무일지.
       h("div", { className: "flex-1 min-w-0 w-full flex flex-col gap-3" },
-        !selectedStudent
+        isCourseTab
+          ? (!selectedCourseEntry
+              ? h("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } },
+                  "왼쪽에서 강좌를 선택해주세요.")
+              : h(React.Fragment, null,
+                  h("div", { key: "header", className: "rounded-2xl p-4 flex items-center gap-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    h("div", { style: { width: 40, height: 40, borderRadius: 12, background: NAVY_SOFT, color: NAVY, fontWeight: 800, fontSize: 15 }, className: "flex items-center justify-center flex-shrink-0" }, courseStudent.name.slice(0, 1)),
+                    h("div", null,
+                      h("div", { style: { fontWeight: 800, fontSize: 15, color: INK } }, courseStudent.name, " · 🎓 ", selectedCourseEntry.courseName),
+                      h("div", { style: { fontSize: 11.5, color: SUBINK } },
+                        [courseStudent.school, courseStudent.grade ? courseStudent.grade + "학년" : "", courseStudent.class].filter(Boolean).join(" · ") || "정보 미등록")
+                    )
+                  ),
+
+                  h("div", { key: "stats", className: "grid grid-cols-2 gap-3 mt-3" },
+                    h("div", { className: "rounded-2xl p-4", style: { background: courseAttnMeta ? courseAttnMeta.soft : "#fff", border: `1px solid ${courseAttnMeta ? courseAttnMeta.color : LINE}` } },
+                      h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK, marginBottom: 4 } }, "출결현황 · 특강 (읽기 전용)"),
+                      h("div", { style: { fontSize: 16, fontWeight: 800, color: courseAttnMeta ? courseAttnMeta.color : SUBINK } }, selectedCourseEntry.status || "미체크")
+                    ),
+                    h("div", { className: "rounded-2xl p-4", style: {
+                        background: courseAssignments.length === 0 ? "#fff" : (courseDoneCount === courseAssignments.length ? TEAL_SOFT : AMBER_SOFT),
+                        border: `1px solid ${courseAssignments.length === 0 ? LINE : (courseDoneCount === courseAssignments.length ? TEAL : AMBER)}`,
+                      } },
+                      h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK, marginBottom: 4 } }, "오늘 과제 (이 강좌)"),
+                      h("div", { style: { fontSize: 16, fontWeight: 800, color: courseAssignments.length === 0 ? SUBINK : (courseDoneCount === courseAssignments.length ? TEAL : AMBER) } },
+                        courseAssignments.length === 0 ? "배정 없음" : `${courseAssignments.length}건 · ${courseDoneCount}건 제출완료`)
+                    )
+                  ),
+
+                  h("div", { key: "editor", className: "rounded-2xl p-4 mt-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    h(ClassLogRow, {
+                      s: courseStudent, note: courseNote, onSaveNote: (v) => saveNoteForSession(courseStudent.id, selectedCourseNoteSession, v),
+                      assignments: courseAssignments,
+                      onCreateAssignment: (s, desc, due, rf, rt) => createAssignment(s, desc, due, rf, rt, selectedCourseEntry.enrollmentId),
+                      onUpdateAssignment: updateAssignmentDescription, onDeleteAssignment: deleteAssignmentRow,
+                      onToggleAssignmentStatus: toggleAssignmentStatus, onUpdateAssignmentProgress: updateAssignmentProgress,
+                    })
+                  ),
+
+                  h("div", { key: "history", className: "rounded-2xl p-4 mt-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } }, "학습현황 · 최근 과제 이력"),
+                    historyLoading
+                      ? h("div", { style: { fontSize: 12, color: SUBINK } }, "불러오는 중...")
+                      : history.length === 0
+                        ? h("div", { style: { fontSize: 12, color: SUBINK } }, "아직 과제 이력이 없어요.")
+                        : h("div", { className: "flex flex-col gap-2" },
+                            history.map((a) => h("div", { key: a.id, className: "flex items-center justify-between gap-2 flex-wrap", style: { fontSize: 12 } },
+                              h("div", { style: { color: INK, flex: "1 1 160px" } }, a.description),
+                              h("div", { className: "flex items-center gap-2 flex-shrink-0" },
+                                h("span", { style: { color: SUBINK } }, a.class_date),
+                                h("span", { style: { fontWeight: 700, color: a.status === "제출완료" ? TEAL : AMBER } }, a.status === "제출완료" ? "제출완료" : "미제출")
+                              )
+                            ))
+                          )
+                  ),
+
+                  h("div", { key: "worklog", className: "rounded-2xl p-4 mt-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } }, "📔 근무일지 · 최근 기록 (읽기 전용)"),
+                    workLogsLoading
+                      ? h("div", { style: { fontSize: 12, color: SUBINK } }, "불러오는 중...")
+                      : workLogs.length === 0
+                        ? h("div", { style: { fontSize: 12, color: SUBINK } }, "이 학생에 대해 작성된 근무일지가 아직 없어요.")
+                        : h("div", { className: "flex flex-col gap-2.5" },
+                            workLogs.map((w) => h("div", { key: w.id, style: { fontSize: 12 } },
+                              h("div", { className: "flex items-center gap-2 flex-wrap", style: { marginBottom: 2 } },
+                                h("span", { style: { fontWeight: 700, color: NAVY } }, w.log_date),
+                                h("span", { style: { color: SUBINK } }, w.author_name || w.author_email)
+                              ),
+                              h("div", { style: { color: INK } }, w.content)
+                            ))
+                          )
+                  )
+                )
+            )
+          : !selectedStudent
           ? h("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } },
               "왼쪽 목록에서 학생을 선택해주세요.")
           : h(React.Fragment, null,
@@ -2036,7 +2241,7 @@ function ClassLogDashboard({ session }) {
                   s: selectedStudent, note: noteFor(selectedStudent.id), onSaveNote: (v) => saveNote(selectedStudent.id, v),
                   assignments: selectedAssignments,
                   onCreateAssignment: createAssignment, onUpdateAssignment: updateAssignmentDescription, onDeleteAssignment: deleteAssignmentRow,
-                  onToggleAssignmentStatus: toggleAssignmentStatus,
+                  onToggleAssignmentStatus: toggleAssignmentStatus, onUpdateAssignmentProgress: updateAssignmentProgress,
                 })
               ),
 
