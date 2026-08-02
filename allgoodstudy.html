@@ -1481,10 +1481,27 @@ function groupRosterByClassName(list) {
     .sort((a, b) => (a === "반 미지정" ? 1 : b === "반 미지정" ? -1 : a.localeCompare(b, "ko")))
     .map((k) => ({ label: k, items: groups[k] }));
 }
+// 세션(정규/클리닉/보강)마다 시간 정보가 다른 필드에 있어서 activeSession을 보고 골라 씀.
+function timeKeyForStudent(s, activeSession, extraMap) {
+  if (activeSession === "clinic") return (s.clinic_time || "").trim();
+  if (activeSession === "extra") return ((extraMap[s.id] && extraMap[s.id].time) || "").trim();
+  return (s.regular_time || "").trim();
+}
+function groupRosterByTime(list, activeSession, extraMap) {
+  const groups = {};
+  list.forEach((s) => {
+    const key = timeKeyForStudent(s, activeSession, extraMap) || "시간 미지정";
+    (groups[key] = groups[key] || []).push(s);
+  });
+  return Object.keys(groups)
+    .sort((a, b) => (a === "시간 미지정" ? 1 : b === "시간 미지정" ? -1 : a.localeCompare(b, "ko")))
+    .map((k) => ({ label: k, items: groups[k] }));
+}
 const CLASS_LOG_GROUP_MODES = [
   { key: "none", label: "전체" },
   { key: "class", label: "반별" },
   { key: "grade", label: "학년별" },
+  { key: "time", label: "시간별" },
 ];
 
 // 그룹 헤더의 "일괄배정" 버튼을 누르면 그 자리에서 펼쳐지는 미니 입력폼 - 상단에 항상 떠있는 공용
@@ -1855,8 +1872,9 @@ function ClassLogDashboard({ session }) {
   const groups = useMemo(() => {
     if (groupMode === "class") return groupRosterByClassName(roster);
     if (groupMode === "grade") return buildStudentGroups("grade", roster, [], []);
+    if (groupMode === "time") return groupRosterByTime(roster, activeSession, extraMap);
     return null;
-  }, [groupMode, roster]);
+  }, [groupMode, roster, activeSession, extraMap]);
 
   const attendanceFor = (studentId) => {
     const row = attendance.find((a) => a.student_id === studentId && a.session === activeSession);
@@ -2097,7 +2115,6 @@ function ClassLogDashboard({ session }) {
                 )
             )
           : h(React.Fragment, null,
-              h("div", { style: { fontSize: 11, fontWeight: 800, color: SUBINK } }, "그루핑"),
               h("div", { className: "flex items-center gap-1.5 flex-wrap" },
                 CLASS_LOG_GROUP_MODES.map((m) =>
                   h("button", { key: m.key, type: "button", onClick: () => setGroupMode(m.key),
