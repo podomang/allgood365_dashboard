@@ -1649,7 +1649,18 @@ function MainApp({ session }) {
                 },
                 React.createElement("span", { style: { fontSize: 15 } }, t.icon),
                 t.label
-            ))
+            )),
+            React.createElement("div", { style: { borderTop: `1px solid ${LINE}`, margin: "8px 6px" } }),
+            React.createElement(
+                "a",
+                {
+                    href: "allgoodstudy.html",
+                    className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
+                    style: { color: SUBINK, textDecoration: "none" },
+                },
+                React.createElement("span", { style: { fontSize: 15 } }, "📝"),
+                "수업관리"
+            )
         ),
         React.createElement(
             "div",
