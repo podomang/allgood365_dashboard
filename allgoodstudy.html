@@ -730,6 +730,47 @@ function buildStudentGroups(mode, students, textbooks, progress) {
   return sortGroups(Array.from(map.values()));
 }
 
+// 학생별 보기의 교재 진도 한 줄 - 교재별 보기(StudentProgressRow)와 동일하게 −/＋ 버튼과 숫자 입력으로
+// 바로 진도를 수정할 수 있게 함(2026-08-03: 예전엔 숫자만 보여주고 수정 UI가 없어서 교재별 보기로
+// 옮겨가야만 진도를 고칠 수 있었음 — 원장님 피드백으로 추가).
+function StudentCardProgressRow({ row, isDirector, onUpdateUnit, onRemove }) {
+  const [unit, setUnit] = useState(row.current_unit);
+  useEffect(() => setUnit(row.current_unit), [row.current_unit]);
+  const tb = row.clm_textbooks || {};
+  const style = catStyle(tb.category);
+  const percent = progressPercent(row);
+  const total = row.total_units ?? tb.total_units ?? null;
+  const unitLabel = tb.unit_label || "";
+
+  const commit = () => {
+    const n = Number(unit);
+    if (!Number.isFinite(n) || n < 0) { setUnit(row.current_unit); return; }
+    if (n !== row.current_unit) onUpdateUnit(row.id, n);
+  };
+  const stepBtn = { width: 22, height: 22, borderRadius: 7, border: `1px solid ${LINE}`, background: "#fff", color: SUBINK, fontWeight: 700, fontSize: 12, flexShrink: 0 };
+
+  return h("div", { className: "flex items-center gap-3" },
+    h("span", { style: { width: 84, flexShrink: 0 } }, h(Badge, { color: style.color, soft: style.soft }, tb.category || "기타")),
+    h("span", { style: { width: 150, flexShrink: 0, fontSize: 12.5, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, tb.name || "(삭제된 교재)"),
+    h("div", { className: "flex-1" }, h(ProgressBar, { percent, color: style.color })),
+    h("div", { className: "flex items-center gap-1.5", style: { flexShrink: 0, fontSize: 11.5, color: SUBINK, fontWeight: 600 } },
+      isDirector
+        ? h(React.Fragment, null,
+            h("button", { type: "button", onClick: () => onUpdateUnit(row.id, Math.max(0, row.current_unit - 1)), style: stepBtn }, "－"),
+            h("input", {
+              type: "number", value: unit, onChange: (e) => setUnit(e.target.value), onBlur: commit,
+              className: "text-center rounded-lg text-xs outline-none", style: { width: 46, padding: "3px 2px", border: `1px solid ${LINE}` },
+            }),
+            h("button", { type: "button", onClick: () => onUpdateUnit(row.id, row.current_unit + 1), style: stepBtn }, "＋")
+          )
+        : h("span", { style: { fontWeight: 700, color: INK } }, row.current_unit),
+      h("span", null, "/ ", total ?? "?", unitLabel)
+    ),
+    isDirector && h("button", { type: "button", onClick: () => onRemove(row.id), title: "배정 해제",
+      style: { color: SUBINK, fontSize: 12, flexShrink: 0 } }, "✕")
+  );
+}
+
 // ============================================================
 // 학생별 보기
 // ============================================================
@@ -758,18 +799,9 @@ function StudentListView({ students, textbooks, progress, isDirector, actions })
       rows.length === 0
         ? h("p", { style: { fontSize: 12, color: SUBINK, padding: "6px 0" } }, "아직 배정된 교재가 없어요.")
         : h("div", { className: "flex flex-col gap-2" },
-            rows.map((r) => {
-              const tb = r.clm_textbooks || {};
-              const style = catStyle(tb.category);
-              const percent = progressPercent(r);
-              return h("div", { key: r.id, className: "flex items-center gap-3" },
-                h("span", { style: { width: 84, flexShrink: 0 } }, h(Badge, { color: style.color, soft: style.soft }, tb.category || "기타")),
-                h("span", { style: { width: 150, flexShrink: 0, fontSize: 12.5, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, tb.name || "(삭제된 교재)"),
-                h("div", { className: "flex-1" }, h(ProgressBar, { percent, color: style.color })),
-                h("span", { style: { width: 76, flexShrink: 0, textAlign: "right", fontSize: 11.5, color: SUBINK, fontWeight: 600 } }, r.current_unit, " / ", r.total_units ?? tb.total_units ?? "?", tb.unit_label || ""),
-                isDirector && h("button", { type: "button", onClick: () => actions.removeProgress(r.id), style: { color: SUBINK, fontSize: 12, flexShrink: 0 } }, "✕")
-              );
-            })
+            rows.map((r) => h(StudentCardProgressRow, {
+              key: r.id, row: r, isDirector, onUpdateUnit: actions.updateUnit, onRemove: actions.removeProgress,
+            }))
           ),
       isDirector && (
         assigningFor === s.id
@@ -1591,15 +1623,20 @@ function assignmentProgressPercent(a) {
   return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
 }
 
-function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDelete, onToggleStatus, onUpdateProgress }) {
+function AssignmentEditableField({ assignment, locked, textbookOptions, onCreate, onUpdate, onDelete, onToggleStatus, onUpdateProgress }) {
   const [editing, setEditing] = useState(false);
   const [desc, setDesc] = useState("");
   const [due, setDue] = useState("");
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  const [textbookId, setTextbookId] = useState("");
   const [saving, setSaving] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
   const [progressInput, setProgressInput] = useState("");
+  // 이 과제에 연결된 교재 이름(있으면) - 새 과제일 때 고른 교재는 그 학생에게 이미 배정된 교재
+  // 목록(textbookOptions) 중 하나라서, 여기서 이름을 찾아 배지로 보여줄 수 있다.
+  const linkedTextbookName = assignment && assignment.textbook_id && (textbookOptions || [])
+    .find((t) => t.textbookId === assignment.textbook_id);
 
   useEffect(() => {
     if (assignment) setProgressInput(assignment.progress_to != null ? String(assignment.progress_to) : "");
@@ -1621,7 +1658,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
 
   if (!editing) {
     if (!assignment) {
-      return h("button", { type: "button", onClick: () => { setDesc(""); setDue(""); setRangeFrom(""); setRangeTo(""); setEditing(true); },
+      return h("button", { type: "button", onClick: () => { setDesc(""); setDue(""); setRangeFrom(""); setRangeTo(""); setTextbookId(""); setEditing(true); },
         className: "p-1 rounded-md flex-shrink-0", style: { color: TEAL, opacity: 0.55 }, title: "과제 추가" }, "✏️");
     }
     const toggle = async () => {
@@ -1645,6 +1682,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
             opacity: togglingStatus ? 0.5 : 1,
           } }, isDone ? "✓" : ""),
         h("span", { style: descStyle }, assignment.description),
+        linkedTextbookName && h("span", { style: { fontSize: 10, color: NAVY, fontWeight: 700 } }, "📘 ", linkedTextbookName.name),
         hasRange && h("span", { style: { fontSize: 10, color: SUBINK } }, "(", assignment.range_from, "~", assignment.range_to, ")"),
         assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지"),
         h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
@@ -1669,7 +1707,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
     setSaving(true);
     try {
       if (assignment) await onUpdate(desc.trim());
-      else await onCreate(desc.trim(), due, rangeFrom ? Number(rangeFrom) : null, rangeTo ? Number(rangeTo) : null);
+      else await onCreate(desc.trim(), due, rangeFrom ? Number(rangeFrom) : null, rangeTo ? Number(rangeTo) : null, textbookId || null);
       setEditing(false);
     } finally { setSaving(false); }
   };
@@ -1681,6 +1719,16 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
         className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } }),
       !assignment && h("input", { type: "date", value: due, onChange: (e) => setDue(e.target.value),
         className: "px-3 py-2 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } })
+    ),
+    // 관련 교재(선택) - 그 학생에게 이미 배정된 교재만 고를 수 있음. 여기서 고른 교재는 "진행" 입력 시
+    // 교재별 진도(clm_textbook_progress.current_unit)에도 자동으로 반영된다(2026-08-03 신규).
+    !assignment && (textbookOptions || []).length > 0 && h("div", { className: "flex items-center gap-1.5" },
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "관련 교재(선택, 진도 자동연동)"),
+      h("select", { value: textbookId, onChange: (e) => setTextbookId(e.target.value),
+        className: "px-2 py-1 rounded-md text-xs outline-none", style: { border: `1px solid ${LINE}`, background: "#fff", color: INK } },
+        h("option", { value: "" }, "선택 안 함"),
+        textbookOptions.map((t) => h("option", { key: t.textbookId, value: t.textbookId }, t.name))
+      )
     ),
     !assignment && h("div", { className: "flex items-center gap-1.5" },
       h("span", { style: { fontSize: 10.5, color: SUBINK } }, "범위(선택, 완성률 자동계산)"),
@@ -1707,7 +1755,7 @@ function AssignmentEditableField({ assignment, locked, onCreate, onUpdate, onDel
 // 오른쪽 패널 쪽에서 별도로 그림). 과제는 하루에 여러 건 붙을 수 있어서(예: 과목별로 따로, 또는
 // 수업 중 추가로 더 내주는 경우) 배정된 과제를 목록으로 보여주고, 맨 아래에 "과제 추가" 아이콘을
 // 항상 하나 더 둬서 몇 건이든 계속 추가할 수 있게 했다.
-function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onUpdateAssignment, onDeleteAssignment, onToggleAssignmentStatus, onUpdateAssignmentProgress }) {
+function ClassLogRow({ s, note, onSaveNote, assignments, textbookOptions, onCreateAssignment, onUpdateAssignment, onDeleteAssignment, onToggleAssignmentStatus, onUpdateAssignmentProgress }) {
   return h("div", { className: "flex flex-col gap-3" },
     h("div", { className: "flex items-center gap-1.5 flex-wrap" },
       h("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 700, width: 32, flexShrink: 0 } }, "수업"),
@@ -1724,7 +1772,7 @@ function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onU
           // 언제든 켜고 끌 수 있어야 해서 status는 잠금 조건에서 뺐다.
           const locked = !!a.teacher_comment || !!a.student_note;
           return h(AssignmentEditableField, {
-            key: a.id, assignment: a, locked,
+            key: a.id, assignment: a, locked, textbookOptions,
             onUpdate: (desc) => onUpdateAssignment(a.id, desc),
             onDelete: () => onDeleteAssignment(a.id),
             onToggleStatus: (done) => onToggleAssignmentStatus(a.id, done),
@@ -1732,8 +1780,8 @@ function ClassLogRow({ s, note, onSaveNote, assignments, onCreateAssignment, onU
           });
         }),
         h(AssignmentEditableField, {
-          key: "new", assignment: null, locked: false,
-          onCreate: (desc, due, rangeFrom, rangeTo) => onCreateAssignment(s, desc, due, rangeFrom, rangeTo),
+          key: "new", assignment: null, locked: false, textbookOptions,
+          onCreate: (desc, due, rangeFrom, rangeTo, textbookId) => onCreateAssignment(s, desc, due, rangeFrom, rangeTo, textbookId),
         })
       )
     )
@@ -1807,19 +1855,24 @@ function ClassLogDashboard({ session }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [workLogs, setWorkLogs] = useState([]);
   const [workLogsLoading, setWorkLogsLoading] = useState(false);
+  // 2026-08-03: 수업일지에서 과제를 낼 때 "교재별 진도"와 연동하기 위해 학생별 교재 배정 현황을 같이 불러온다.
+  // 날짜와 무관한 데이터라 selectedDate가 바뀌어도 다시 불러올 필요는 없지만, 구조를 단순하게 유지하려고
+  // loadAll 안에서 같이 불러온다(교재별 진도 대시보드와 동일한 조회 방식).
+  const [textbookProgress, setTextbookProgress] = useState([]);
 
   const loadAll = useCallback(async () => {
     setErrorMsg("");
-    const [studentsRes, extraRes, logsRes, assignRes, attnRes, coursesRes, courseAttnRes] = await Promise.all([
+    const [studentsRes, extraRes, logsRes, assignRes, attnRes, coursesRes, courseAttnRes, tbProgressRes] = await Promise.all([
       supabaseClient.from("attn_students").select("id,name,school,grade,class,days,clinic,clinic_days,clinic_time,regular_time,enroll_date").neq("status", "퇴원").order("name"),
       supabaseClient.from("attn_extra_roster").select("student_id,scheduled_time,plan_note").eq("attn_date", selectedDate),
       supabaseClient.from("clm_class_logs").select("*").eq("class_date", selectedDate),
-      supabaseClient.from("clm_assignments").select("id,student_id,description,status,teacher_comment,student_note,due_date,range_from,range_to,progress_to,course_id").eq("class_date", selectedDate),
+      supabaseClient.from("clm_assignments").select("id,student_id,description,status,teacher_comment,student_note,due_date,range_from,range_to,progress_to,course_id,textbook_id").eq("class_date", selectedDate),
       supabaseClient.from("attn_attendance").select("student_id,session,status").eq("attn_date", selectedDate),
       supabaseClient.from("attn_student_courses").select("id,student_id,course_name,days,start_date,end_date"),
       supabaseClient.from("attn_course_attendance").select("course_id,status").eq("attn_date", selectedDate),
+      supabaseClient.from("clm_textbook_progress").select("id,textbook_id,student_id,current_unit,total_units,clm_textbooks(name,unit_label,total_units)").eq("scope", "student"),
     ]);
-    if (studentsRes.error || extraRes.error || logsRes.error || assignRes.error || attnRes.error || coursesRes.error || courseAttnRes.error) {
+    if (studentsRes.error || extraRes.error || logsRes.error || assignRes.error || attnRes.error || coursesRes.error || courseAttnRes.error || tbProgressRes.error) {
       setErrorMsg("데이터를 불러오는 중 문제가 생겼어요. 새로고침 해보세요.");
     }
     setStudents(studentsRes.data || []);
@@ -1829,6 +1882,7 @@ function ClassLogDashboard({ session }) {
     setAttendance(attnRes.data || []);
     setCourses(coursesRes.data || []);
     setCourseAttendance(courseAttnRes.data || []);
+    setTextbookProgress(tbProgressRes.data || []);
     setLoaded(true);
   }, [selectedDate]);
 
@@ -1842,9 +1896,16 @@ function ClassLogDashboard({ session }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "attn_extra_roster", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "attn_course_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "clm_textbook_progress" }, () => loadAll())
       .subscribe();
     return () => { supabaseClient.removeChannel(channel); };
   }, [selectedDate, loadAll]);
+
+  // 학생 한 명에게 이미 배정된 교재 목록(수업일지에서 과제를 낼 때 "관련 교재" 드롭다운에 씀).
+  const textbookOptionsFor = (studentId) =>
+    textbookProgress
+      .filter((p) => p.student_id === studentId)
+      .map((p) => ({ progressId: p.id, textbookId: p.textbook_id, name: (p.clm_textbooks && p.clm_textbooks.name) || "(삭제된 교재)" }));
 
   const extraMap = useMemo(() => {
     const m = {};
@@ -1989,10 +2050,10 @@ function ClassLogDashboard({ session }) {
   const assignmentsFor = (studentId) => assignments.filter((a) => a.student_id === studentId && !a.course_id);
   const assignmentsForCourse = (studentId, courseId) => assignments.filter((a) => a.student_id === studentId && a.course_id === courseId);
 
-  const createAssignment = async (s, description, dueDate, rangeFrom, rangeTo, courseId) => {
+  const createAssignment = async (s, description, dueDate, rangeFrom, rangeTo, textbookId, courseId) => {
     const { error } = await supabaseClient.from("clm_assignments").insert({
       student_id: s.id, class_date: selectedDate, description, due_date: dueDate, created_by: session.user.email,
-      range_from: rangeFrom ?? null, range_to: rangeTo ?? null, course_id: courseId ?? null,
+      range_from: rangeFrom ?? null, range_to: rangeTo ?? null, textbook_id: textbookId ?? null, course_id: courseId ?? null,
     });
     if (error) { setErrorMsg("과제 추가에 실패했어요: " + error.message); return; }
     await loadAll();
@@ -2022,11 +2083,28 @@ function ClassLogDashboard({ session }) {
 
   // 범위(range_from~range_to)가 있는 과제는 "어디까지 풀었는지"만 저장하면 완성률이 자동 계산된다.
   // 범위 끝까지 도달하면 status도 같이 제출완료로 맞춰서, 과제 관리 탭의 제출완료 집계와 어긋나지 않게 한다.
+  // 2026-08-03: 이 과제가 "관련 교재"와 연결되어 있으면(textbook_id), 같은 학생의 그 교재 진도
+  // (clm_textbook_progress.current_unit)도 여기서 같이 갱신한다 — 범위 입력값이 실제 페이지 번호(예: p.32~40)
+  // 그대로라서, 진행 페이지를 곧 교재의 현재 진도로 봐도 된다는 전제. 원장님이 "교재 진도까지 자동 연동"을
+  // 요청하셔서 추가함(수업일지 과제 관리 화면 확인 필요 없이 한 번의 입력으로 두 곳이 같이 업데이트됨).
   const updateAssignmentProgress = async (assignmentId, progressTo, rangeTo) => {
     const done = progressTo != null && rangeTo != null && progressTo >= rangeTo;
     const { error } = await supabaseClient.from("clm_assignments")
       .update({ progress_to: progressTo, status: done ? "제출완료" : "미제출" }).eq("id", assignmentId);
     if (error) { setErrorMsg("진행률 저장에 실패했어요: " + error.message); return; }
+
+    if (progressTo != null) {
+      const a = assignments.find((x) => x.id === assignmentId);
+      if (a && a.textbook_id) {
+        const progressRow = textbookProgress.find((p) => p.student_id === a.student_id && p.textbook_id === a.textbook_id);
+        if (progressRow) {
+          const { error: tbError } = await supabaseClient.from("clm_textbook_progress")
+            .update({ current_unit: progressTo, updated_at: new Date().toISOString(), updated_by: session.user.email })
+            .eq("id", progressRow.id);
+          if (tbError) { setErrorMsg("교재 진도 연동에는 실패했어요(과제 진행률은 저장됨): " + tbError.message); }
+        }
+      }
+    }
     await loadAll();
   };
 
@@ -2177,8 +2255,8 @@ function ClassLogDashboard({ session }) {
                   h("div", { key: "editor", className: "rounded-2xl p-4 mt-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
                     h(ClassLogRow, {
                       s: courseStudent, note: courseNote, onSaveNote: (v) => saveNoteForSession(courseStudent.id, selectedCourseNoteSession, v),
-                      assignments: courseAssignments,
-                      onCreateAssignment: (s, desc, due, rf, rt) => createAssignment(s, desc, due, rf, rt, selectedCourseEntry.enrollmentId),
+                      assignments: courseAssignments, textbookOptions: textbookOptionsFor(courseStudent.id),
+                      onCreateAssignment: (s, desc, due, rf, rt, tbId) => createAssignment(s, desc, due, rf, rt, tbId, selectedCourseEntry.enrollmentId),
                       onUpdateAssignment: updateAssignmentDescription, onDeleteAssignment: deleteAssignmentRow,
                       onToggleAssignmentStatus: toggleAssignmentStatus, onUpdateAssignmentProgress: updateAssignmentProgress,
                     })
@@ -2256,7 +2334,7 @@ function ClassLogDashboard({ session }) {
               h("div", { key: "editor", className: "rounded-2xl p-4 mt-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
                 h(ClassLogRow, {
                   s: selectedStudent, note: noteFor(selectedStudent.id), onSaveNote: (v) => saveNote(selectedStudent.id, v),
-                  assignments: selectedAssignments,
+                  assignments: selectedAssignments, textbookOptions: textbookOptionsFor(selectedStudent.id),
                   onCreateAssignment: createAssignment, onUpdateAssignment: updateAssignmentDescription, onDeleteAssignment: deleteAssignmentRow,
                   onToggleAssignmentStatus: toggleAssignmentStatus, onUpdateAssignmentProgress: updateAssignmentProgress,
                 })
