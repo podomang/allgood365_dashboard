@@ -2461,7 +2461,16 @@ function MainApp({ session }) {
   );
 
   const mobileNav = h("nav", { className: "md:hidden fixed bottom-0 inset-x-0 z-20 flex", style: { background: "#fff", borderTop: `1px solid ${LINE}` } },
-    visibleTabs.map((t) => navItem(t, true))
+    visibleTabs.map((t) => navItem(t, true)),
+    h("a", {
+      key: "attendance",
+      href: "attendance.html",
+      className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
+      style: { color: SUBINK, textDecoration: "none" },
+    },
+      h("span", { style: { fontSize: 17 } }, "✅"),
+      "출결관리"
+    )
   );
 
   const headerInfo = TAB_HEADERS[tab] || TAB_HEADERS.textbooks;
