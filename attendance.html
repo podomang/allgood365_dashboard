@@ -1686,7 +1686,13 @@ function MainApp({ session }) {
             { key: t.key, onClick: () => setTab(t.key), className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold", style: { color: tab === t.key ? NAVY : SUBINK } },
             React.createElement("span", { style: { fontSize: 17 } }, t.icon),
             t.label
-        ))
+        )),
+        React.createElement(
+            "a",
+            { key: "classlog", href: "allgoodstudy.html", className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold", style: { color: SUBINK, textDecoration: "none" } },
+            React.createElement("span", { style: { fontSize: 17 } }, "📝"),
+            "수업관리"
+        )
     );
     const mainContent = !studentsLoaded
         ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "\uBD88\uB7EC\uC624\uB294 \uC911...")
