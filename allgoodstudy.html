@@ -1674,19 +1674,25 @@ function AssignmentEditableField({ assignment, locked, textbookOptions, onCreate
       onUpdateProgress(assignment.id, n);
     };
     return h("div", { className: "flex flex-col gap-1" },
-      h("div", { className: "flex items-center gap-1.5 flex-wrap" },
+      h("div", { className: "flex items-center gap-1.5" },
         !hasRange && h("button", { type: "button", onClick: toggle, disabled: togglingStatus, title: isDone ? "완료 취소" : "완료로 표시",
           className: "flex items-center justify-center flex-shrink-0", style: {
             width: 17, height: 17, borderRadius: 5, fontSize: 11, lineHeight: "15px",
             border: `1.5px solid ${isDone ? TEAL : LINE}`, background: isDone ? TEAL : "#fff", color: "#fff",
             opacity: togglingStatus ? 0.5 : 1,
           } }, isDone ? "✓" : ""),
-        h("span", { style: descStyle }, assignment.description),
-        linkedTextbookName && h("span", { style: { fontSize: 10, color: NAVY, fontWeight: 700 } }, "📘 ", linkedTextbookName.name),
-        hasRange && h("span", { style: { fontSize: 10, color: SUBINK } }, "(", assignment.range_from, "~", assignment.range_to, ")"),
-        assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지"),
-        h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
-        h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
+        // 설명/교재/범위/기한 배지들은 이 안에서만 줄바꿈되고, 수정·삭제 버튼은 항상 붙어서
+        // 오른쪽 끝에 한 덩어리로 남는다(버튼만 따로 다음 줄로 떨어져 보이지 않도록).
+        h("div", { className: "flex-1 min-w-0 flex items-center gap-1.5 flex-wrap" },
+          h("span", { style: descStyle }, assignment.description),
+          linkedTextbookName && h("span", { style: { fontSize: 10, color: NAVY, fontWeight: 700 } }, "📘 ", linkedTextbookName.name),
+          hasRange && h("span", { style: { fontSize: 10, color: SUBINK } }, "(", assignment.range_from, "~", assignment.range_to, ")"),
+          assignment.due_date && h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~", assignment.due_date, " 까지")
+        ),
+        h("div", { className: "flex items-center gap-0.5 flex-shrink-0" },
+          h("button", { type: "button", onClick: () => { setDesc(assignment.description); setEditing(true); }, className: "p-1 rounded-md", style: { color: TEAL }, title: "수정" }, "✎"),
+          h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
+        )
       ),
       hasRange && h("div", { className: "flex items-center gap-1.5", style: { marginLeft: 2 } },
         h("span", { style: { fontSize: 10, color: SUBINK } }, "진행"),
