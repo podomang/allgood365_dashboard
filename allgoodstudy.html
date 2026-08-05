@@ -2386,7 +2386,77 @@ function ClassLogDashboard({ session }) {
 }
 
 // ============================================================
-// Main app (attendance.html과 동일한 사이드바/모바일 내비 구조)
+// 공용 페이지 셸 (사이드바 / 모바일 상단바+하단 내비게이션)
+// [2026-08-05 복원] 화면 폭을 넓히려고(원장님 요청, 2026-08-01) 왼쪽 세로 사이드바 대신 맨 위
+// 가로 탭바로 바꿨었는데, attendance.html/workboard.html/students.html과 내비게이션 위치가
+// 달라져서 페이지를 옮길 때마다 불편하다는 피드백(2026-08-05)으로 다른 3개 파일과 동일한
+// PageShell 패턴(hidden md:flex / md:hidden)을 그대로 옮겨와 다시 왼쪽 사이드바로 복원한다.
+// 이 페이지(수업관리)가 활성 탭으로 강조된다.
+// ============================================================
+const NAV_ITEMS = [
+  { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
+  { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅" },
+  { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓" },
+  { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
+];
+function PageShell({ session, children }) {
+  const handleLogout = () => { supabaseClient.auth.signOut(); };
+  const sidebar = h(
+    "aside",
+    { className: "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 z-20", style: { background: "#fff", borderRight: `1px solid ${LINE}` } },
+    h("a", { href: "index.html", className: "px-5 py-5 flex items-center", style: { borderBottom: `1px solid ${LINE}` } },
+      h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 26 } })
+    ),
+    h("nav", { className: "flex-1 px-3 py-4 flex flex-col gap-1" },
+      NAV_ITEMS.map((t) => h("a", {
+        key: t.key,
+        href: t.href,
+        className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
+        style: { background: t.key === "classlog" ? NAVY_SOFT : "transparent", color: t.key === "classlog" ? NAVY : SUBINK, textDecoration: "none" },
+      }, h("span", { style: { fontSize: 15 } }, t.icon), t.label))
+    ),
+    h(
+      "div",
+      { className: "px-4 py-4", style: { borderTop: `1px solid ${LINE}` } },
+      h("div", { style: { fontSize: 12, fontWeight: 700, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, session.user.email),
+      h("div", { className: "flex items-center gap-1.5 mt-1", style: { color: "#22c55e", fontSize: 11 } },
+        h("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#22c55e", display: "inline-block" } }),
+        h("span", { style: { color: SUBINK } }, "실시간 동기화")),
+      h("button", { onClick: handleLogout, className: "w-full mt-3 py-2 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "로그아웃")
+    )
+  );
+  const mobileHeader = h(
+    "header",
+    { className: "md:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
+    h("a", { href: "index.html" }, h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 24 } })),
+    h("button", { onClick: handleLogout, style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "6px 10px", borderRadius: 8 } }, "로그아웃")
+  );
+  const mobileNav = h(
+    "nav",
+    { className: "md:hidden fixed bottom-0 inset-x-0 z-20 flex", style: { background: "#fff", borderTop: `1px solid ${LINE}` } },
+    NAV_ITEMS.map((t) => h("a", {
+      key: t.key,
+      href: t.href,
+      className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
+      style: { color: t.key === "classlog" ? NAVY : SUBINK, textDecoration: "none" },
+    }, h("span", { style: { fontSize: 17 } }, t.icon), t.label))
+  );
+  return h(
+    "div",
+    { style: { background: PAPER, color: INK, minHeight: "100vh" } },
+    sidebar,
+    mobileHeader,
+    h("div", { className: "md:pl-60" },
+      h("div", { className: "max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-10" }, children)
+    ),
+    mobileNav
+  );
+}
+// ============================================================
+// 수업관리 내부 탭(교재별 진도/과제 관리/수업일지/질문) 전환용 알약 탭 - attendance.html의
+// AttendancePillTabs / workboard.html의 DashboardPillTabs와 똑같은 알약 탭 스타일(둥근 버튼,
+// 활성 시 네이비 배경/흰 글자, 비활성 시 페이퍼 배경/서브잉크 글자 + 라인 테두리)을 그대로
+// 재사용하되, 아이콘과 "준비중" 탭 비활성화 처리만 이 페이지에 맞게 유지했다.
 // ============================================================
 const TAB_DEFS = [
   { key: "textbooks", label: "교재별 진도", icon: "📘", ready: true },
@@ -2400,6 +2470,26 @@ const TAB_HEADERS = {
   classlog: { title: "수업일지", subtitle: "왼쪽에서 학생을 고르면 오른쪽에서 출결·과제·특강현황을 보며 수업내용/과제를 바로 기록할 수 있어요." },
 };
 const LAST_TAB_KEY = "clm_last_tab";
+
+function ClassLogPillTabs({ tab, setTab, visibleTabs }) {
+  return h(
+    "div",
+    { className: "flex items-center gap-2 mb-5 flex-wrap" },
+    visibleTabs.map((t) => h("button", {
+      key: t.key,
+      disabled: !t.ready,
+      onClick: () => t.ready && setTab(t.key),
+      className: "flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold transition-colors",
+      style: {
+        background: tab === t.key ? NAVY : PAPER,
+        color: tab === t.key ? "#fff" : SUBINK,
+        border: `1px solid ${tab === t.key ? NAVY : LINE}`,
+        opacity: t.ready ? 1 : 0.45,
+        cursor: t.ready ? "pointer" : "default",
+      },
+    }, h("span", { style: { fontSize: 14 } }, t.icon), t.label))
+  );
+}
 
 function MainApp({ session }) {
   const role = session.user.app_metadata && session.user.app_metadata.role === "director" ? "director" : "assistant";
@@ -2415,86 +2505,20 @@ function MainApp({ session }) {
   });
   useEffect(() => { try { sessionStorage.setItem(LAST_TAB_KEY, tab); } catch (e) {} }, [tab]);
 
-  const handleLogout = () => {
-    try { sessionStorage.removeItem(LAST_TAB_KEY); } catch (e) {}
-    supabaseClient.auth.signOut();
-  };
-
-  const navItem = (t, mobile) => h("button", {
-    key: t.key,
-    disabled: !t.ready,
-    onClick: () => t.ready && setTab(t.key),
-    className: mobile
-      ? "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold"
-      : "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-left transition-colors",
-    style: mobile
-      ? { color: tab === t.key ? NAVY : SUBINK, opacity: t.ready ? 1 : 0.45 }
-      : { background: tab === t.key ? NAVY_SOFT : "transparent", color: tab === t.key ? NAVY : SUBINK, opacity: t.ready ? 1 : 0.45, cursor: t.ready ? "pointer" : "default" },
-  },
-    h("span", { style: { fontSize: mobile ? 17 : 15 } }, t.icon),
-    t.label
-  );
-
-  // 왼쪽 세로 사이드바 대신 맨 위에 가로 탭으로 - 화면 폭을 더 넓게 쓸 수 있게(원장님 요청, 2026-08-01).
-  // 모바일은 기존처럼 mobileHeader + 하단 mobileNav 그대로 유지.
-  const desktopHeader = h("header", { className: "hidden md:flex sticky top-0 z-20 items-center gap-4 px-6 py-3 flex-wrap", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
-    h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학", style: { height: 24 }, className: "flex-shrink-0" }),
-    h("nav", { className: "flex items-center gap-1 flex-1 flex-wrap" },
-      visibleTabs.map((t) => navItem(t, false)),
-      h("div", { style: { width: 1, height: 20, background: LINE, margin: "0 4px" } }),
-      h("a", {
-        href: "attendance.html",
-        className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
-        style: { color: SUBINK, textDecoration: "none" },
-      },
-        h("span", { style: { fontSize: 15 } }, "✅"),
-        "출결관리"
-      )
-    ),
-    h("div", { className: "flex items-center gap-3 flex-shrink-0" },
-      h("div", { style: { fontSize: 12, fontWeight: 700, color: INK, maxWidth: 160, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, session.user.email),
-      h("div", { className: "flex items-center gap-1.5", style: { color: "#22c55e", fontSize: 11 } },
-        h("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#22c55e", display: "inline-block" } }),
-        h("span", { style: { color: SUBINK } }, "실시간 동기화")
-      ),
-      h("button", { onClick: handleLogout, className: "py-2 px-3 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "로그아웃")
-    )
-  );
-
-  const mobileHeader = h("header", { className: "md:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
-    h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학", style: { height: 24 } }),
-    h("button", { onClick: handleLogout, style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "6px 10px", borderRadius: 8 } }, "로그아웃")
-  );
-
-  const mobileNav = h("nav", { className: "md:hidden fixed bottom-0 inset-x-0 z-20 flex", style: { background: "#fff", borderTop: `1px solid ${LINE}` } },
-    visibleTabs.map((t) => navItem(t, true)),
-    h("a", {
-      key: "attendance",
-      href: "attendance.html",
-      className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
-      style: { color: SUBINK, textDecoration: "none" },
-    },
-      h("span", { style: { fontSize: 17 } }, "✅"),
-      "출결관리"
-    )
-  );
-
   const headerInfo = TAB_HEADERS[tab] || TAB_HEADERS.textbooks;
   const pageHeader = h("div", { className: "mb-5" },
     h("h1", { style: { fontSize: 20, fontWeight: 800, marginBottom: 2, color: INK } }, headerInfo.title),
     h("p", { style: { color: SUBINK, fontSize: 13 } }, headerInfo.subtitle)
   );
 
-  return h("div", { style: { background: PAPER, color: INK, minHeight: "100vh" } },
-    desktopHeader,
-    mobileHeader,
-    h("div", { className: "max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-10" },
-      pageHeader,
-      tab === "textbooks" && h(TextbookDashboard, { session, role }),
-      tab === "assignments" && h(AssignmentsDashboard, { session, role }),
-      tab === "classlog" && isDirector && h(ClassLogDashboard, { session })
-    ),
-    mobileNav
+  return h(
+    PageShell,
+    { session },
+    h(ClassLogPillTabs, { tab, setTab, visibleTabs }),
+    pageHeader,
+    tab === "textbooks" && h(TextbookDashboard, { session, role }),
+    tab === "assignments" && h(AssignmentsDashboard, { session, role }),
+    tab === "classlog" && isDirector && h(ClassLogDashboard, { session })
   );
 }
 
