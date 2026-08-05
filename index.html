@@ -1,1440 +1,253 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>통합 학생 관리 프로그램</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>올곧수학 더센텀 - 홈</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root{
-    --navy-900:#101c30;
-    --navy-800:#16263f;
-    --navy-700:#1d3355;
-    --ink:#1a2233;
-    --paper:#f3f5f9;
-    --card:#ffffff;
-    --line:#e3e7ee;
-    --muted:#7a869a;
-    --teal:#0f9d8c;
-    --teal-dark:#0b7a6d;
-    --teal-soft:#e3f6f3;
-    --amber:#f2a93b;
-    --amber-soft:#fef3e0;
-    --red:#e5484d;
-    --red-soft:#fde8e8;
-    --green:#12b76a;
-    --green-soft:#e6f9ef;
-    --blue:#3b6fd6;
-    --blue-soft:#eaf0fd;
-    --radius:14px;
-    --shadow:0 2px 10px rgba(16,28,48,0.06), 0 1px 2px rgba(16,28,48,0.04);
-    font-size:15px;
-  }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;}
-  body{
-    font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",-apple-system,BlinkMacSystemFont,sans-serif;
-    background:var(--paper);
-    color:var(--ink);
-    -webkit-font-smoothing:antialiased;
-  }
-  .app{
-    display:flex;
-    min-height:100vh;
-  }
-
-  /* ---------- 사이드바 ---------- */
-  .sidebar{
-    width:236px;
-    flex-shrink:0;
-    background:linear-gradient(180deg,var(--navy-900),var(--navy-800) 60%,var(--navy-700));
-    color:#dfe6f0;
-    display:flex;
-    flex-direction:column;
-    padding:26px 16px;
-    position:sticky;
-    top:0;
-    height:100vh;
-  }
-  .brand{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:0 8px 22px 8px;
-    margin-bottom:14px;
-    border-bottom:1px solid rgba(255,255,255,0.09);
-  }
-  .brand-mark{
-    width:34px;height:34px;border-radius:9px;
-    background:linear-gradient(135deg,var(--teal),#12c2a8);
-    display:flex;align-items:center;justify-content:center;
-    font-weight:800;color:#08221d;font-size:15px;
-    box-shadow:0 3px 8px rgba(15,157,140,0.4);
-  }
-  .brand-text{line-height:1.25;}
-  .brand-text b{display:block;font-size:15px;color:#fff;letter-spacing:-0.2px;}
-  .brand-text span{display:block;font-size:11.5px;color:#8ea1bd;}
-
-  .nav{
-    display:flex;flex-direction:column;gap:4px;
-    margin-top:6px;
-  }
-  .nav-item{
-    display:flex;align-items:center;gap:10px;
-    padding:11px 12px;
-    border-radius:10px;
-    color:#c4d0e2;
-    font-size:14px;font-weight:500;
-    cursor:pointer;
-    border:1px solid transparent;
-    transition:background .15s ease, color .15s ease;
-    user-select:none;
-  }
-  .nav-item .ic{
-    width:20px;height:20px;flex-shrink:0;
-    display:flex;align-items:center;justify-content:center;
-    font-size:15px;
-  }
-  .nav-item:hover{background:rgba(255,255,255,0.06);color:#fff;}
-  .nav-item.active{
-    background:rgba(15,157,140,0.18);
-    border-color:rgba(15,157,140,0.4);
-    color:#fff;
-  }
-  .nav-item.active .ic{color:var(--teal);}
-
-  .sidebar-foot{
-    margin-top:auto;
-    padding-top:16px;
-    border-top:1px solid rgba(255,255,255,0.09);
-    font-size:11.5px;
-    color:#7688a3;
-    line-height:1.6;
-  }
-
-  /* ---------- 메인 ---------- */
-  .main{
-    flex:1;
-    min-width:0;
-    display:flex;
-    flex-direction:column;
-  }
-  .topbar{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:22px 34px;
-    background:var(--card);
-    border-bottom:1px solid var(--line);
-    position:sticky;top:0;z-index:5;
-  }
-  .topbar h1{
-    font-size:20px;margin:0;letter-spacing:-0.3px;color:var(--navy-900);
-  }
-  .topbar .sub{font-size:12.5px;color:var(--muted);margin-top:3px;}
-  .topbar-right{
-    font-size:13px;color:var(--muted);
-    display:flex;align-items:center;gap:8px;
-  }
-  .today-badge{
-    background:var(--teal-soft);color:var(--teal-dark);
-    padding:6px 12px;border-radius:20px;font-weight:600;font-size:12.5px;
-  }
-
-  .content{padding:26px 34px 60px 34px;}
-  .tab-content{display:none;animation:fadeIn .25s ease;}
-  .tab-content.active{display:block;}
-  @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
-
-  /* ---------- 통계 카드 ---------- */
-  .stat-row{
-    display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px;
-  }
-  .stat-card{
-    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:16px 18px;box-shadow:var(--shadow);
-  }
-  .stat-card .label{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;}
-  .stat-card .value{font-size:24px;font-weight:800;color:var(--navy-900);letter-spacing:-0.5px;}
-  .stat-card .value small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px;}
-  .stat-card.accent-teal{border-left:4px solid var(--teal);}
-  .stat-card.accent-blue{border-left:4px solid var(--blue);}
-  .stat-card.accent-amber{border-left:4px solid var(--amber);}
-  .stat-card.accent-red{border-left:4px solid var(--red);}
-
-  /* ---------- 카드/패널 공통 ---------- */
-  .panel{
-    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    box-shadow:var(--shadow);margin-bottom:22px;overflow:hidden;
-  }
-  .panel-head{
-    padding:18px 20px 14px 20px;
-    border-bottom:1px solid var(--line);
-    display:flex;align-items:center;justify-content:space-between;
-  }
-  .panel-head h2{font-size:15.5px;margin:0;color:var(--navy-900);letter-spacing:-0.2px;}
-  .panel-head .desc{font-size:12px;color:var(--muted);margin-top:3px;}
-  .panel-body{padding:20px;}
-
-  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
-  @media (max-width:1050px){.grid-2{grid-template-columns:1fr;} .stat-row{grid-template-columns:repeat(2,1fr);}}
-
-  /* ---------- 폼 ---------- */
-  .form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
-  .field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:120px;}
-  .field label{font-size:12px;font-weight:600;color:var(--navy-700);}
-  .field input,.field select,.field textarea{
-    border:1px solid var(--line);
-    border-radius:8px;
-    padding:9px 11px;
-    font-size:13.5px;
-    font-family:inherit;
-    background:#fbfcfe;
-    color:var(--ink);
-    outline:none;
-    transition:border-color .15s ease, box-shadow .15s ease;
-  }
-  .field input:focus,.field select:focus,.field textarea:focus{
-    border-color:var(--teal);
-    box-shadow:0 0 0 3px rgba(15,157,140,0.15);
-    background:#fff;
-  }
-  .field textarea{resize:vertical;min-height:38px;}
-
-  .btn{
-    border:none;border-radius:9px;padding:10px 18px;
-    font-size:13.5px;font-weight:700;cursor:pointer;
-    display:inline-flex;align-items:center;gap:6px;
-    transition:transform .1s ease, box-shadow .15s ease, opacity .15s ease;
-    white-space:nowrap;
-  }
-  .btn:active{transform:scale(0.97);}
-  .btn-primary{background:var(--teal);color:#fff;box-shadow:0 2px 6px rgba(15,157,140,0.35);}
-  .btn-primary:hover{background:var(--teal-dark);}
-  .btn-ghost{background:#eef1f6;color:var(--navy-800);}
-  .btn-ghost:hover{background:#e3e8f0;}
-  .btn-danger-outline{background:#fff;color:var(--red);border:1px solid #f3c6c7;padding:6px 10px;font-size:12px;}
-  .btn-danger-outline:hover{background:var(--red-soft);}
-  .btn-sm{padding:6px 12px;font-size:12px;}
-
-  /* ---------- 테이블 ---------- */
-  table{width:100%;border-collapse:collapse;font-size:13.5px;}
-  thead th{
-    text-align:left;font-size:11.5px;color:var(--muted);
-    text-transform:uppercase;letter-spacing:.4px;
-    padding:10px 12px;border-bottom:1px solid var(--line);
-    background:#fafbfd;
-    position:sticky;top:0;
-  }
-  tbody td{padding:11px 12px;border-bottom:1px solid #eef1f6;color:var(--ink);}
-  tbody tr:last-child td{border-bottom:none;}
-  tbody tr:hover{background:#fafcff;}
-  .table-scroll{max-height:360px;overflow-y:auto;}
-  .empty-row td{text-align:center;color:var(--muted);padding:34px 12px;font-size:13px;}
-
-  /* ---------- 배지 ---------- */
-  .badge{
-    display:inline-flex;align-items:center;gap:5px;
-    padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:700;
-  }
-  .badge-present{background:var(--green-soft);color:#0d8f57;}
-  .badge-absent{background:var(--red-soft);color:#c0393e;}
-  .badge-late{background:var(--amber-soft);color:#b57516;}
-  .badge-grade{background:var(--blue-soft);color:#2c58ad;}
-  .badge-done{background:var(--green-soft);color:#0d8f57;}
-  .badge-partial{background:var(--amber-soft);color:#b57516;}
-  .badge-undone{background:var(--red-soft);color:#c0393e;}
-
-  .progress-bar-bg{
-    width:100%;height:8px;background:#eef1f6;border-radius:20px;overflow:hidden;
-  }
-  .progress-bar-fill{height:100%;background:linear-gradient(90deg,var(--teal),#12c2a8);border-radius:20px;}
-
-  /* ---------- 캘린더 ---------- */
-  .calendar-nav{display:flex;align-items:center;gap:6px;}
-  .cal-nav-btn{
-    width:28px;height:28px;border-radius:8px;border:none;background:#eef1f6;color:var(--navy-800);
-    font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  }
-  .cal-nav-btn:hover{background:#e3e8f0;}
-  .calendar-month-label{font-weight:800;font-size:14.5px;color:var(--navy-900);min-width:92px;text-align:center;}
-  .calendar-weekdays{
-    display:grid;grid-template-columns:repeat(7,1fr);
-    text-align:center;font-size:11px;font-weight:700;color:var(--muted);
-    margin-bottom:6px;letter-spacing:.2px;
-  }
-  .calendar-weekdays span:first-child{color:#d5545c;}
-  .calendar-weekdays span:last-child{color:#3b6fd6;}
-  .calendar-layout{display:grid;grid-template-columns:1.7fr 1fr;gap:24px;}
-  @media (max-width:1050px){.calendar-layout{grid-template-columns:1fr;}}
-  .calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
-  .calendar-cell{
-    position:relative;min-height:96px;border-radius:9px;
-    display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
-    gap:3px;padding:6px 5px 5px;
-    font-size:12.5px;color:var(--ink);cursor:pointer;
-    border:1.5px solid transparent;background:#fafbfd;
-    overflow:hidden;
-    transition:background .12s ease, border-color .12s ease;
-  }
-  .calendar-cell:hover{background:#eef3f8;}
-  .calendar-cell.other-month{color:#c7cedb;background:transparent;}
-  .calendar-cell.other-month .cal-event-chip{opacity:.55;}
-  .cal-day-num{font-size:11.5px;font-weight:700;color:var(--ink);align-self:flex-start;}
-  .calendar-cell.other-month .cal-day-num{color:#c7cedb;}
-  .calendar-cell.today .cal-day-num{color:var(--teal-dark);}
-  .calendar-cell.today{border-color:var(--teal);}
-  .calendar-cell.selected{background:var(--navy-900);border-color:var(--navy-900);}
-  .calendar-cell.selected .cal-day-num{color:#fff;}
-  .calendar-cell.selected.today{border-color:var(--teal);}
-  .cal-event-chip{
-    font-size:9.5px;line-height:1.5;padding:1.5px 5px;border-radius:4px;
-    background:var(--teal-soft);color:var(--teal-dark);font-weight:700;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;
-  }
-  .calendar-cell.selected .cal-event-chip{background:rgba(255,255,255,0.22);color:#fff;}
-  .cal-event-more{font-size:9px;color:var(--muted);font-weight:700;padding-left:2px;}
-  .calendar-cell.selected .cal-event-more{color:#c4d0e2;}
-  .event-item{
-    display:flex;align-items:center;justify-content:space-between;gap:10px;
-    padding:10px 12px;border:1px solid var(--line);border-radius:9px;
-    margin-bottom:8px;background:#fbfcfe;
-  }
-  .event-item .dot-mark{width:7px;height:7px;border-radius:50%;background:var(--teal);flex-shrink:0;}
-  .event-item .txt{flex:1;font-size:13.5px;color:var(--ink);}
-
-  .pill-tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
-  .pill-tab{
-    padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;
-    background:#eef1f6;color:var(--navy-700);cursor:pointer;border:1px solid transparent;
-  }
-  .pill-tab.active{background:var(--navy-900);color:#fff;}
-
-  .sub-tab-content{display:none;}
-  .sub-tab-content.active{display:block;}
-
-  .empty-state{
-    text-align:center;padding:50px 20px;color:var(--muted);
-  }
-  .empty-state .ic{font-size:32px;margin-bottom:10px;}
-  .empty-state p{font-size:13.5px;margin:0;}
-
-  .name-cell{font-weight:700;color:var(--navy-900);}
-  .muted{color:var(--muted);}
-
-  .toast{
-    position:fixed;bottom:26px;right:26px;
-    background:var(--navy-900);color:#fff;
-    padding:13px 20px;border-radius:10px;
-    font-size:13.5px;font-weight:600;
-    box-shadow:0 8px 24px rgba(0,0,0,0.25);
-    opacity:0;transform:translateY(10px);
-    transition:opacity .25s ease, transform .25s ease;
-    pointer-events:none;
-    z-index:999;
-    display:flex;align-items:center;gap:8px;
-  }
-  .toast.show{opacity:1;transform:translateY(0);}
-  .toast .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);}
-
-  select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%237a869a'/></svg>");background-repeat:no-repeat;background-position:right 10px center;padding-right:26px;}
+  body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f7f8fa; }
 </style>
 </head>
 <body>
-<div class="app">
-
-  <!-- ===================== 사이드바 ===================== -->
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark">學</div>
-      <div class="brand-text">
-        <b>학생 관리 시스템</b>
-        <span>출결 · 성적 · 과제 통합</span>
-      </div>
-    </div>
-    <nav class="nav">
-      <div class="nav-item active" data-tab="students"><span class="ic">👤</span>학생 명단 관리</div>
-      <div class="nav-item" data-tab="attendance"><span class="ic">🗓️</span>출결 관리</div>
-      <div class="nav-item" data-tab="tests"><span class="ic">📝</span>테스트 성적 관리</div>
-      <div class="nav-item" data-tab="assignments"><span class="ic">📚</span>과제 관리</div>
-      <div class="nav-item" data-tab="progress"><span class="ic">📈</span>수업진도 관리</div>
-    </nav>
-    <div class="sidebar-foot">
-      본 프로그램의 데이터는 브라우저를 새로고침하면 초기화됩니다.<br>
-      학원 내부 실습용 데모입니다.
-    </div>
-  </aside>
-
-  <!-- ===================== 메인 ===================== -->
-  <main class="main">
-    <header class="topbar">
-      <div>
-        <h1 id="pageTitle">학생 명단 관리</h1>
-        <div class="sub" id="pageDesc">학생의 기본 정보를 등록하고 관리합니다.</div>
-      </div>
-      <div class="topbar-right">
-        <span id="clock" class="today-badge">-</span>
-      </div>
-    </header>
-
-    <div class="content">
-
-      <!-- ================= 학생 명단 관리 ================= -->
-      <section class="tab-content active" id="tab-students">
-        <div class="stat-row" id="studentStatRow"></div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>일정 캘린더</h2>
-              <div class="desc">학원 일정을 달력에서 확인하고 새 일정을 추가하세요.</div>
-            </div>
-            <div class="calendar-nav">
-              <button class="cal-nav-btn" onclick="goToToday()" style="width:auto;padding:0 10px;font-size:12px;">오늘</button>
-              <button class="cal-nav-btn" onclick="changeCalendarMonth(-1)">‹</button>
-              <span class="calendar-month-label" id="calendarMonthLabel"></span>
-              <button class="cal-nav-btn" onclick="changeCalendarMonth(1)">›</button>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="calendar-layout">
-              <div>
-                <div class="calendar-weekdays">
-                  <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-                </div>
-                <div class="calendar-grid" id="calendarGrid"></div>
-              </div>
-              <div>
-                <div class="form-row" style="margin-bottom:16px;">
-                  <div class="field">
-                    <label>날짜</label>
-                    <input type="date" id="eventDate">
-                  </div>
-                  <div class="field" style="flex:2;">
-                    <label>일정 제목</label>
-                    <input type="text" id="eventTitle" placeholder="예: 학부모 상담 (김민준)">
-                  </div>
-                  <button class="btn btn-primary" onclick="addEvent()">＋ 일정 추가</button>
-                </div>
-                <div id="selectedDateLabel" style="font-size:13px;font-weight:700;color:var(--navy-900);margin-bottom:10px;"></div>
-                <div class="table-scroll" id="eventListForDate" style="max-height:230px;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>학생 등록</h2>
-              <div class="desc">이름, 학년, 학교를 입력하여 새 학생을 등록하세요.</div>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="field" style="flex:1.4;">
-                <label>이름</label>
-                <input type="text" id="stuName" placeholder="예: 김민준">
-              </div>
-              <div class="field">
-                <label>학년</label>
-                <select id="stuGrade">
-                  <option value="초1">초등 1학년</option>
-                  <option value="초2">초등 2학년</option>
-                  <option value="초3">초등 3학년</option>
-                  <option value="초4">초등 4학년</option>
-                  <option value="초5">초등 5학년</option>
-                  <option value="초6">초등 6학년</option>
-                  <option value="중1">중학 1학년</option>
-                  <option value="중2">중학 2학년</option>
-                  <option value="중3">중학 3학년</option>
-                  <option value="고1">고등 1학년</option>
-                  <option value="고2">고등 2학년</option>
-                  <option value="고3">고등 3학년</option>
-                </select>
-              </div>
-              <div class="field" style="flex:1.4;">
-                <label>학교</label>
-                <input type="text" id="stuSchool" placeholder="예: 서울중학교">
-              </div>
-              <button class="btn btn-primary" onclick="addStudent()">＋ 학생 등록</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>전체 학생 명단</h2>
-              <div class="desc">등록된 학생 목록입니다. 클릭 시 상세 현황을 확인할 수 있습니다.</div>
-            </div>
-          </div>
-          <div class="panel-body" style="padding-top:0;">
-            <div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width:34px;">#</th>
-                    <th>이름</th>
-                    <th>학년</th>
-                    <th>학교</th>
-                    <th>출석률</th>
-                    <th>평균 점수</th>
-                    <th>과제 수행률</th>
-                    <th style="width:70px;">관리</th>
-                  </tr>
-                </thead>
-                <tbody id="studentTableBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ================= 출결 관리 ================= -->
-      <section class="tab-content" id="tab-attendance">
-        <div class="stat-row" id="attendanceStatRow"></div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>출결 기록 입력</h2>
-              <div class="desc">학생과 날짜, 출결 상태를 선택하여 기록하세요.</div>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="field" style="flex:1.4;">
-                <label>학생 선택</label>
-                <select id="attStudent" class="student-select"></select>
-              </div>
-              <div class="field">
-                <label>날짜</label>
-                <input type="date" id="attDate">
-              </div>
-              <div class="field">
-                <label>출결 상태</label>
-                <select id="attStatus">
-                  <option value="출석">출석</option>
-                  <option value="지각">지각</option>
-                  <option value="결석">결석</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" onclick="addAttendance()">＋ 출결 기록</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>출결 기록 목록</h2>
-                <div class="desc">최근 기록순으로 표시됩니다.</div>
-              </div>
-            </div>
-            <div class="panel-body" style="padding-top:0;">
-              <div class="table-scroll">
-                <table>
-                  <thead><tr><th>날짜</th><th>학생</th><th>상태</th><th style="width:50px;"></th></tr></thead>
-                  <tbody id="attendanceTableBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>학생별 출석률</h2>
-                <div class="desc">전체 기록 대비 출석 비율입니다.</div>
-              </div>
-            </div>
-            <div class="panel-body" style="padding-top:0;">
-              <div class="table-scroll" id="attendanceRateList"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ================= 테스트 성적 관리 ================= -->
-      <section class="tab-content" id="tab-tests">
-        <div class="stat-row" id="testStatRow"></div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>테스트 결과 입력</h2>
-              <div class="desc">학생별 시험명, 점수, 만점, 날짜를 입력하세요.</div>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="field" style="flex:1.2;">
-                <label>학생 선택</label>
-                <select id="testStudent" class="student-select"></select>
-              </div>
-              <div class="field" style="flex:1.4;">
-                <label>시험명</label>
-                <input type="text" id="testName" placeholder="예: 3월 단원평가">
-              </div>
-              <div class="field">
-                <label>점수</label>
-                <input type="number" id="testScore" placeholder="85" min="0">
-              </div>
-              <div class="field">
-                <label>만점</label>
-                <input type="number" id="testMax" placeholder="100" min="1" value="100">
-              </div>
-              <div class="field">
-                <label>날짜</label>
-                <input type="date" id="testDate">
-              </div>
-              <button class="btn btn-primary" onclick="addTest()">＋ 성적 등록</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>성적 목록</h2>
-              <div class="desc">등록된 모든 테스트 결과입니다.</div>
-            </div>
-          </div>
-          <div class="panel-body" style="padding-top:0;">
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>날짜</th><th>학생</th><th>시험명</th><th>점수</th><th>백분율</th><th style="width:50px;"></th></tr></thead>
-                <tbody id="testTableBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ================= 과제 관리 ================= -->
-      <section class="tab-content" id="tab-assignments">
-        <div class="stat-row" id="assignStatRow"></div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>과제 기록 입력</h2>
-              <div class="desc">한 학생에게 부여된 과제는 하나가 아니므로, 항목을 나누어 여러 개를 한 번에 등록할 수 있습니다.</div>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="field" style="flex:1.2;">
-                <label>학생 선택</label>
-                <select id="assignStudent" class="student-select"></select>
-              </div>
-              <div class="field" style="max-width:200px;">
-                <label>검사 날짜</label>
-                <input type="date" id="assignDate">
-              </div>
-            </div>
-
-            <div id="assignRowsWrap" style="margin-top:16px;display:flex;flex-direction:column;gap:10px;"></div>
-
-            <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
-              <button class="btn btn-ghost" onclick="addAssignmentRow()">＋ 과제 항목 추가</button>
-              <button class="btn btn-primary" onclick="submitAssignmentBatch()">입력한 과제 일괄 등록</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>과제 기록 목록</h2>
-                <div class="desc">최근 검사 기록순입니다.</div>
-              </div>
-            </div>
-            <div class="panel-body" style="padding-top:0;">
-              <div class="table-scroll">
-                <table>
-                  <thead><tr><th>날짜</th><th>학생</th><th>과제명</th><th>상태</th><th style="width:50px;"></th></tr></thead>
-                  <tbody id="assignTableBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>학생별 과제 수행률</h2>
-                <div class="desc">완료 + (부분완료×0.5) 기준 산정</div>
-              </div>
-            </div>
-            <div class="panel-body" style="padding-top:0;">
-              <div class="table-scroll" id="assignRateList"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ================= 수업진도 관리 ================= -->
-      <section class="tab-content" id="tab-progress">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>수업 진도 입력</h2>
-              <div class="desc">과목별 진행한 수업 내용을 기록하세요.</div>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="field">
-                <label>과목</label>
-                <input type="text" id="progSubject" placeholder="예: 중등수학">
-              </div>
-              <div class="field" style="flex:2;">
-                <label>진도 내용</label>
-                <input type="text" id="progContent" placeholder="예: 2단원 일차방정식 3~4차시 완료">
-              </div>
-              <div class="field">
-                <label>날짜</label>
-                <input type="date" id="progDate">
-              </div>
-              <button class="btn btn-primary" onclick="addProgress()">＋ 진도 기록</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>수업 진도 기록</h2>
-              <div class="desc">과목별 최근 진도 현황입니다.</div>
-            </div>
-          </div>
-          <div class="panel-body" style="padding-top:0;">
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>날짜</th><th>과목</th><th>진도 내용</th><th style="width:50px;"></th></tr></thead>
-                <tbody id="progressTableBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-    </div>
-  </main>
-</div>
-
-<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">저장되었습니다.</span></div>
+<div id="root"></div>
 
 <script>
-/* =========================================================
-   데이터 저장소 (메모리 내 - 새로고침 시 초기화)
-========================================================= */
-let students = [];
-let attendanceRecords = [];
-let testRecords = [];
-let assignmentRecords = [];
-let progressRecords = [];
-let scheduleEvents = [];
-let calendarViewDate = new Date();
-let selectedDate = '';
-let idCounter = 1;
-function nextId(){ return idCounter++; }
+"use strict";
+const { useState, useEffect } = React;
+const h = React.createElement;
 
-/* =========================================================
-   초기화
-========================================================= */
-function todayStr(){
-  const d = new Date();
-  const pad = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+// ============================================================
+// Supabase 연결 (attendance.html / allgoodstudy.html과 동일한 프로젝트)
+// ============================================================
+const SUPABASE_URL = "https://rooajvvwnvscfgvfhwkz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvb2FqdnZ3bnZzY2ZndmZod2t6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDcxMjksImV4cCI6MjA5OTUyMzEyOX0.JEeltcsp-MIyTdhFeQfT5htQ2fFhR9q7oNMiyIrS8TM";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
+// 디자인 토큰 (attendance.html / allgoodstudy.html과 동일)
+// ============================================================
+const NAVY = "#1a2b6b";
+const NAVY_SOFT = "#eaecf9";
+const RED = "#dc2626";
+const RED_SOFT = "#fdecec";
+const AMBER = "#b45309";
+const AMBER_SOFT = "#fdf3e2";
+const TEAL = "#0f7a6c";
+const TEAL_SOFT = "#e2f3f0";
+const SKY = "#0369a1";
+const SKY_SOFT = "#e3f0f9";
+const PAPER = "#f7f8fa";
+const INK = "#111827";
+const SUBINK = "#6b7280";
+const LINE = "#e5e7eb";
+
+const LOGO_HORIZONTAL = "data:image/jpeg;base64,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ezam4lsUgOX1rDqS7JtGxtXxrL/fAkx15tzQC6upgDuzkC0kvVtjy16+mbn0yt61FkGimvDS6Wpt5l1sx+iIA8mS4pdD9XNHIZrlBJI73IdGS1p6cs1q6lTskysNn533PkSy6825r2tNdT6ztw1xtXPDX0sxAiqI3k7Bk4LAbZo9npooBJcSeL5mg5fRtXvnDELaZrNV8jwfdGV2YH1qSMpPiilWoWsHiFTP4MgdWQN1taVo1dhJ5lpJWQMZrulaG9Oax72KUgqePML3vAyANRJkPHlmuzFh+B8YbPHIBnuE7931rbLIHTo43Sfh/k9Vtwp3NDg/2p3HI5FbhX0pBPHNyG9dQWGi1QP+0bNg/Tv61sZZqePWaIXFp6ZnHNN5pil1s7jblRuALahmR3bVq24UrzkydjjnlsOe1dPtTTvYBJTZgHMDjCcltbaqemlL6ehYTv1g/IlN5nTS635HomsgAcTIAGnI+JboKmGdutDI148RXBFSxljmmAtDt+bs1q2mdGco8g3ybQskbUTnM8YbrFw1elaumja3Wc8BvSTkus+KoDTqTAnLZmwZo2Bxh1Zxxue05rI0rjk5BW0xbrCePV6dYLeypheAWysdnuycF50tmo5m5S0oe3fqudzrWC00MGq6KiDC3YAOZa7zfTTxubz+P7nqa7d2tt8q11hlnmut2PEXhwjyIHQhgjft4s/gskeEcrqiIEgyNBG/atRKwnIPGZ8a67aSJubWMDWnoWgo2DIlusRsHiCbxiPWdsvA3lNdueWe07l0JqQyjIGSPbscDtWjrdH7X29SSNv60plmVGPSz0NYZ7/oWusF5zYf0h2TjZl7pGUgDy4SVAz/AOYSCmRpXWd9sjXe5cD5CtQ9p3EZeVdB9FEDrO40bc8w8j8Fzt4qJuTQ4joAJTJhpdB2c9mfMtV1WTmRvtGOABy2jIrliIyLA4kjfmsmGsHKtM1tAIyGewdK43SsDhnrbDzAoY4nOtMxmtjHh25cb5IxKAXe3OzYgwc+YWu9bHMa/eM1uDQBkNyAaoTVC1RAMgmQREBpqjoTILVEBpkE1QtUQBERAEREAREQBERAEREAREQBERAEREAW0tBK3IgNnFtWghjAIDGgO37N65EQHGIYwzUDG6n8uWxaOgjcAHMaQNwLc8lyohnLOPiWa2sGt1hz5bU4lm32rdu/ZvXIiGMnGImAZBrQPIt2oFuRBk01U1VqiA0yTJaomAaZJl41qiA0yTVWqIDTLxpl41qiA01U1VqiA01U1VqiAJkiIBkiIgGSZBEQDJMkRAMkyREAyTJEQDJMkRAMkyREAyREQDJMkRAMkyREAyREQBMkRAEREAyTJEQDJERAEREAyREQBERAEyREAyWmS1RAaEZoAtUQGmSau1aogGS0IWqIDQBNUZrVEAAyREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAf/Z";
+
+// ============================================================
+// 날짜 유틸 (attendance.html과 동일 로직)
+// ============================================================
+function fmt(d) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function todayStr() { return fmt(new Date()); }
+const JS_DAY_TO_KOR = ["일", "월", "화", "수", "목", "금", "토"];
+function korWeekdayOf(dateStr) {
+  return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
 
-function dateToStr(d){
-  const pad = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+// ============================================================
+// 로그인 화면 (attendance.html의 LoginScreen과 동일 UI)
+// ============================================================
+function EyeIcon({ off }) {
+  const common = { width: 19, height: 19, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
+  return off
+    ? h("svg", common,
+        h("path", { d: "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" }),
+        h("path", { d: "M14.12 14.12a3 3 0 1 1-4.24-4.24" }),
+        h("line", { x1: "1", y1: "1", x2: "23", y2: "23" })
+      )
+    : h("svg", common,
+        h("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }),
+        h("circle", { cx: "12", cy: "12", r: "3" })
+      );
 }
 
-function addDaysStr(baseStr, days){
-  const [y,m,d] = baseStr.split('-').map(Number);
-  const dt = new Date(y, m-1, d + days);
-  return dateToStr(dt);
-}
-
-function init(){
-  document.getElementById('attDate').value = todayStr();
-  document.getElementById('testDate').value = todayStr();
-  document.getElementById('assignDate').value = todayStr();
-  document.getElementById('progDate').value = todayStr();
-  document.getElementById('eventDate').value = todayStr();
-  selectedDate = todayStr();
-  updateClock();
-  setInterval(updateClock, 1000*30);
-
-  // 샘플 데이터 (실습 편의를 위한 초기값)
-  seedSampleData();
-
-  bindNav();
-  addAssignmentRow();
-  renderAll();
-  renderCalendar();
-  renderEventListForDate();
-}
-
-function updateClock(){
-  const d = new Date();
-  const days = ['일','월','화','수','목','금','토'];
-  const pad = n => String(n).padStart(2,'0');
-  const str = `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} (${days[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  document.getElementById('clock').textContent = str;
-}
-
-function seedSampleData(){
-  const s1 = {id:nextId(), name:'김민준', grade:'중2', school:'서울중학교', regDate:todayStr()};
-  const s2 = {id:nextId(), name:'이서연', grade:'고1', school:'한빛고등학교', regDate:todayStr()};
-  const s3 = {id:nextId(), name:'박지호', grade:'초6', school:'대현초등학교', regDate:todayStr()};
-  students.push(s1, s2, s3);
-
-  attendanceRecords.push(
-    {id:nextId(), studentId:s1.id, date:todayStr(), status:'출석'},
-    {id:nextId(), studentId:s2.id, date:todayStr(), status:'지각'},
-    {id:nextId(), studentId:s3.id, date:todayStr(), status:'결석'}
-  );
-
-  testRecords.push(
-    {id:nextId(), studentId:s1.id, testName:'3월 단원평가', score:88, max:100, date:todayStr()},
-    {id:nextId(), studentId:s2.id, testName:'모의고사 1회', score:76, max:100, date:todayStr()}
-  );
-
-  assignmentRecords.push(
-    {id:nextId(), studentId:s1.id, title:'수학 익힘책 12~15p', status:'완료', date:todayStr()},
-    {id:nextId(), studentId:s3.id, title:'국어 독해 워크북 3장', status:'부분완료', date:todayStr()}
-  );
-
-  progressRecords.push(
-    {id:nextId(), subject:'중등수학', content:'2단원 일차방정식 3~4차시 완료', date:todayStr()}
-  );
-
-  scheduleEvents.push(
-    {id:nextId(), date:todayStr(), title:'김민준 학부모 상담'},
-    {id:nextId(), date:todayStr(), title:'중2 수학 정기 테스트 채점'},
-    {id:nextId(), date:addDaysStr(todayStr(), 2), title:'전체 학생 출결 점검'},
-    {id:nextId(), date:addDaysStr(todayStr(), 5), title:'월말 모의고사'}
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+  };
+  return h("div", { style: { background: PAPER, minHeight: "100vh" }, className: "flex items-center justify-center px-4" },
+    h("div", { className: "w-full max-w-sm rounded-2xl p-6", style: { background: "#fff", border: `1px solid ${LINE}` } },
+      h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 34, margin: "0 auto 20px", display: "block" } }),
+      h("div", { style: { fontWeight: 800, fontSize: 15, textAlign: "center", marginBottom: 18, color: INK } }, "홈 로그인"),
+      h("form", { onSubmit: submit, className: "flex flex-col gap-3" },
+        h("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), placeholder: "이메일", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+        h("div", { style: { position: "relative" } },
+          h("input", { type: showPassword ? "text" : "password", required: true, value: password, onChange: (e) => setPassword(e.target.value), placeholder: "비밀번호", className: "w-full px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, paddingRight: 42 } }),
+          h("button", { type: "button", onClick: () => setShowPassword((v) => !v), "aria-label": showPassword ? "비밀번호 숨기기" : "비밀번호 보이기", style: { position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, background: "transparent" } }, h(EyeIcon, { off: showPassword }))
+        ),
+        error && h("div", { style: { color: RED, fontSize: 12.5, fontWeight: 600 } }, error),
+        h("button", { type: "submit", disabled: loading, className: "py-3 rounded-lg text-sm font-bold mt-1", style: { background: NAVY, color: "#fff", opacity: loading ? 0.6 : 1 } }, loading ? "로그인 중..." : "로그인")
+      ),
+      h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 14, textAlign: "center" } }, "계정이 없다면 원장님께 문의하세요.")
+    )
   );
 }
 
-/* =========================================================
-   네비게이션
-========================================================= */
-const tabTitles = {
-  students:  {title:'학생 명단 관리', desc:'학생의 기본 정보를 등록하고 관리합니다.'},
-  attendance:{title:'출결 관리', desc:'학생별 출석·지각·결석 현황을 기록하고 확인합니다.'},
-  tests:     {title:'테스트 성적 관리', desc:'학생별 시험 점수를 입력하고 성적을 확인합니다.'},
-  assignments:{title:'과제 관리', desc:'학생별 과제 항목을 나누어 등록하고 수행률을 확인합니다.'},
-  progress:  {title:'수업진도 관리', desc:'과목별 수업 진도를 기록하고 확인합니다.'}
-};
+// ============================================================
+// 허브(홈) 화면
+// ============================================================
+const CARD_DEFS = [
+  { key: "dashboard", href: "dashboard.html", label: "대시보드", sub: "캘린더 · 스태프룸", icon: "🏠", color: SKY, colorSoft: SKY_SOFT, directorOnly: false },
+  { key: "attendance", href: "attendance.html", label: "출결관리", sub: "출석체크 · 월별출석부", icon: "✅", color: RED, colorSoft: RED_SOFT, directorOnly: false },
+  { key: "classlog", href: "allgoodstudy.html", label: "수업관리", sub: "교재진도 · 과제 · 수업일지", icon: "📓", color: AMBER, colorSoft: AMBER_SOFT, directorOnly: false },
+  { key: "students", href: "students.html", label: "학생관리", sub: "학생 등록 · 정보관리", icon: "👥", color: NAVY, colorSoft: NAVY_SOFT, directorOnly: true },
+];
 
-function bindNav(){
-  document.querySelectorAll('.nav-item').forEach(item=>{
-    item.addEventListener('click', ()=>{
-      document.querySelectorAll('.nav-item').forEach(i=>i.classList.remove('active'));
-      item.classList.add('active');
-      const tab = item.dataset.tab;
-      document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
-      document.getElementById('tab-'+tab).classList.add('active');
-      document.getElementById('pageTitle').textContent = tabTitles[tab].title;
-      document.getElementById('pageDesc').textContent = tabTitles[tab].desc;
+// 카드별 요약 통계 - 각 화면의 정확한 계산 로직(예: 출결관리의 "미체크"는 요일별 예정 학생 명단까지
+// 대조해야 함)을 그대로 옮기기보다는, 안전하고 가벼운 집계 쿼리로 "오늘 상황을 대략 가늠"하는 용도로 설계함.
+// 더 정확한 수치가 필요하면 각 화면에 들어가서 확인.
+async function loadHubStats() {
+  const today = todayStr();
+  const results = await Promise.allSettled([
+    supabaseClient.from("attn_events").select("*", { count: "exact", head: true }).eq("event_date", today),
+    supabaseClient.from("attn_attendance").select("*", { count: "exact", head: true }).eq("attn_date", today),
+    supabaseClient.from("clm_assignments").select("*", { count: "exact", head: true }).eq("class_date", today).eq("status", "미제출"),
+    supabaseClient.from("attn_students").select("*", { count: "exact", head: true }).neq("status", "퇴원"),
+  ]);
+  const countOf = (r) => (r.status === "fulfilled" && !r.value.error) ? (r.value.count ?? 0) : null;
+  return {
+    eventsToday: countOf(results[0]),
+    attendanceCheckedToday: countOf(results[1]),
+    assignmentsUnsubmittedToday: countOf(results[2]),
+    activeStudents: countOf(results[3]),
+  };
+}
+
+function HubCard({ def, statNode }) {
+  return h("a", { href: def.href, className: "block rounded-2xl p-5 no-underline transition-colors", style: { background: "#fff", border: `1px solid ${LINE}` },
+      onMouseEnter: (e) => { e.currentTarget.style.borderColor = "#c9cee0"; },
+      onMouseLeave: (e) => { e.currentTarget.style.borderColor = LINE; } },
+    h("div", { className: "flex items-center gap-3 mb-3" },
+      h("div", { className: "flex items-center justify-center flex-shrink-0", style: { width: 38, height: 38, borderRadius: 10, background: def.colorSoft, color: def.color, fontSize: 18 } }, def.icon),
+      h("div", null,
+        h("p", { style: { fontSize: 14.5, fontWeight: 800, color: INK, margin: "0 0 1px" } }, def.label),
+        h("p", { style: { fontSize: 11.5, color: SUBINK, margin: 0 } }, def.sub)
+      )
+    ),
+    h("div", { className: "inline-flex items-center gap-1.5 mb-2", style: { padding: "5px 10px", borderRadius: 8, background: def.colorSoft, color: def.color, fontSize: 11.5, fontWeight: 700 } }, statNode),
+    h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK } }, "자세히 보기 →")
+  );
+}
+
+function HubApp({ session, isDirector }) {
+  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    loadHubStats().then((s) => { if (alive) setStats(s); });
+    return () => { alive = false; };
+  }, []);
+
+  const handleLogout = () => { supabaseClient.auth.signOut(); };
+
+  const fmtStat = (v, suffix) => (v === null || v === undefined) ? "확인 필요" : `${v}${suffix}`;
+  const statNodes = {
+    dashboard: stats ? fmtStat(stats.eventsToday, "건") : "불러오는 중...",
+    attendance: stats ? `오늘 체크 ${fmtStat(stats.attendanceCheckedToday, "건")}` : "불러오는 중...",
+    classlog: stats ? `미제출 ${fmtStat(stats.assignmentsUnsubmittedToday, "건")}` : "불러오는 중...",
+    students: stats ? `재원생 ${fmtStat(stats.activeStudents, "명")}` : "불러오는 중...",
+  };
+
+  const visibleCards = CARD_DEFS.filter((c) => !c.directorOnly || isDirector);
+  const today = todayStr();
+
+  return h("div", { style: { minHeight: "100vh", background: PAPER } },
+    h("header", { className: "flex items-center justify-between px-6 py-3", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
+      h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 24 } }),
+      h("div", { className: "flex items-center gap-3" },
+        h("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, session.user.email),
+        h("button", { onClick: handleLogout, style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "7px 12px", borderRadius: 8, border: "none", cursor: "pointer" } }, "로그아웃")
+      )
+    ),
+    h("main", { className: "px-6 py-7 max-w-4xl mx-auto" },
+      h("div", { className: "mb-5" },
+        h("h1", { style: { fontSize: 18, fontWeight: 800, color: INK, margin: "0 0 4px" } }, `안녕하세요, ${isDirector ? "원장님" : "조교"}`),
+        h("p", { style: { fontSize: 12.5, color: SUBINK, margin: 0 } }, `${today} (${korWeekdayOf(today)}) · 원하시는 메뉴를 선택해 주세요`)
+      ),
+      h("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3.5" },
+        visibleCards.map((def) => h(HubCard, { key: def.key, def, statNode: statNodes[def.key] }))
+      ),
+      h("p", { style: { fontSize: 11, color: "#9aa3b5", textAlign: "center", marginTop: 22, lineHeight: 1.7 } },
+        "카드를 클릭하면 각 화면으로 이동합니다 · 상단 로고를 누르면 언제든 이 홈으로 돌아옵니다"
+      )
+    )
+  );
+}
+
+// ============================================================
+// 로그인 12시간 후 자동 로그아웃 (attendance.html / allgoodstudy.html과 동일 정책,
+// 같은 도메인이라 로그인 세션이 공유되므로 여기서도 같은 규칙을 맞춰둠)
+// ============================================================
+const LOGIN_AT_KEY = "attn_login_at";
+const AUTO_LOGOUT_MS = 12 * 60 * 60 * 1000;
+
+function Root() {
+  const [session, setSession] = useState(null);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    const checkAutoLogout = () => {
+      const loginAt = Number(localStorage.getItem(LOGIN_AT_KEY) || 0);
+      if (loginAt && Date.now() - loginAt > AUTO_LOGOUT_MS) {
+        supabaseClient.auth.signOut();
+      }
+    };
+    supabaseClient.auth.getSession().then(({ data }) => {
+      if (data.session && !localStorage.getItem(LOGIN_AT_KEY)) {
+        localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+      }
+      checkAutoLogout();
+      setSession(data.session);
+      setChecked(true);
     });
-  });
-}
+    const { data: sub } = supabaseClient.auth.onAuthStateChange((event, s) => {
+      if (event === "SIGNED_IN") {
+        localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+      } else if (event === "SIGNED_OUT") {
+        localStorage.removeItem(LOGIN_AT_KEY);
+      }
+      setSession(s);
+    });
+    const timer = setInterval(checkAutoLogout, 5 * 60 * 1000);
+    return () => { sub.subscription.unsubscribe(); clearInterval(timer); };
+  }, []);
 
-/* =========================================================
-   유틸
-========================================================= */
-function showToast(msg){
-  const toast = document.getElementById('toast');
-  document.getElementById('toastMsg').textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(()=> toast.classList.remove('show'), 1800);
-}
-
-function getStudent(id){ return students.find(s => s.id === Number(id)); }
-
-function formatDate(d){
-  if(!d) return '-';
-  return d.replaceAll('-', '.');
-}
-
-/* 학생 선택 드롭다운들 갱신 */
-function refreshStudentSelects(){
-  const selects = document.querySelectorAll('.student-select');
-  selects.forEach(sel=>{
-    const prev = sel.value;
-    if(students.length === 0){
-      sel.innerHTML = '<option value="">등록된 학생 없음</option>';
-      return;
-    }
-    sel.innerHTML = students.map(s=>`<option value="${s.id}">${s.name} (${s.grade})</option>`).join('');
-    if(prev && getStudent(prev)) sel.value = prev;
-  });
-}
-
-/* =========================================================
-   학생 관리
-========================================================= */
-function addStudent(){
-  const name = document.getElementById('stuName').value.trim();
-  const grade = document.getElementById('stuGrade').value;
-  const school = document.getElementById('stuSchool').value.trim();
-
-  if(!name){ showToast('학생 이름을 입력해주세요.'); return; }
-  if(!school){ showToast('학교명을 입력해주세요.'); return; }
-
-  students.push({id:nextId(), name, grade, school, regDate: todayStr()});
-  document.getElementById('stuName').value = '';
-  document.getElementById('stuSchool').value = '';
-
-  showToast(`${name} 학생이 등록되었습니다.`);
-  renderAll();
-}
-
-function deleteStudent(id){
-  if(!confirm('해당 학생과 관련된 모든 기록(출결/성적/과제)이 함께 삭제됩니다. 계속하시겠습니까?')) return;
-  students = students.filter(s => s.id !== id);
-  attendanceRecords = attendanceRecords.filter(r => r.studentId !== id);
-  testRecords = testRecords.filter(r => r.studentId !== id);
-  assignmentRecords = assignmentRecords.filter(r => r.studentId !== id);
-  showToast('학생 정보가 삭제되었습니다.');
-  renderAll();
-}
-
-function calcAttendanceRate(studentId){
-  const recs = attendanceRecords.filter(r => r.studentId === studentId);
-  if(recs.length === 0) return null;
-  const presentLike = recs.filter(r => r.status === '출석').length + recs.filter(r=>r.status==='지각').length*0.5;
-  return Math.round((presentLike / recs.length) * 1000) / 10;
-}
-
-function calcAverageScore(studentId){
-  const recs = testRecords.filter(r => r.studentId === studentId);
-  if(recs.length === 0) return null;
-  const total = recs.reduce((sum,r)=> sum + (r.score / r.max * 100), 0);
-  return Math.round((total / recs.length) * 10) / 10;
-}
-
-function calcAssignmentRate(studentId){
-  const recs = assignmentRecords.filter(r => r.studentId === studentId);
-  if(recs.length === 0) return null;
-  const done = recs.filter(r=>r.status==='완료').length + recs.filter(r=>r.status==='부분완료').length*0.5;
-  return Math.round((done / recs.length) * 1000) / 10;
-}
-
-function renderStudentTable(){
-  const body = document.getElementById('studentTableBody');
-  if(students.length === 0){
-    body.innerHTML = `<tr class="empty-row"><td colspan="8">등록된 학생이 없습니다. 상단 폼에서 학생을 등록해주세요.</td></tr>`;
-    return;
+  if (!checked) {
+    return h("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 } }, "불러오는 중...");
   }
-  body.innerHTML = students.map((s, idx) => {
-    const att = calcAttendanceRate(s.id);
-    const avg = calcAverageScore(s.id);
-    const asg = calcAssignmentRate(s.id);
-    return `
-    <tr>
-      <td class="muted">${idx+1}</td>
-      <td class="name-cell">${s.name}</td>
-      <td><span class="badge badge-grade">${s.grade}</span></td>
-      <td>${s.school}</td>
-      <td>${att === null ? '<span class="muted">기록 없음</span>' : att + '%'}</td>
-      <td>${avg === null ? '<span class="muted">기록 없음</span>' : avg + '점'}</td>
-      <td>${asg === null ? '<span class="muted">기록 없음</span>' : asg + '%'}</td>
-      <td><button class="btn-danger-outline" onclick="deleteStudent(${s.id})">삭제</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderStudentStats(){
-  const total = students.length;
-  const allAttRates = students.map(s=>calcAttendanceRate(s.id)).filter(v=>v!==null);
-  const avgAtt = allAttRates.length ? Math.round(allAttRates.reduce((a,b)=>a+b,0)/allAttRates.length*10)/10 : 0;
-  const allScores = students.map(s=>calcAverageScore(s.id)).filter(v=>v!==null);
-  const avgScore = allScores.length ? Math.round(allScores.reduce((a,b)=>a+b,0)/allScores.length*10)/10 : 0;
-  const allAsg = students.map(s=>calcAssignmentRate(s.id)).filter(v=>v!==null);
-  const avgAsg = allAsg.length ? Math.round(allAsg.reduce((a,b)=>a+b,0)/allAsg.length*10)/10 : 0;
-
-  document.getElementById('studentStatRow').innerHTML = `
-    <div class="stat-card accent-teal"><div class="label">전체 등록 학생</div><div class="value">${total}<small>명</small></div></div>
-    <div class="stat-card accent-blue"><div class="label">평균 출석률</div><div class="value">${avgAtt}<small>%</small></div></div>
-    <div class="stat-card accent-amber"><div class="label">평균 시험 점수</div><div class="value">${avgScore}<small>점</small></div></div>
-    <div class="stat-card accent-red"><div class="label">평균 과제 수행률</div><div class="value">${avgAsg}<small>%</small></div></div>
-  `;
-}
-
-/* =========================================================
-   일정 캘린더
-========================================================= */
-function changeCalendarMonth(delta){
-  calendarViewDate = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth() + delta, 1);
-  renderCalendar();
-}
-
-function goToToday(){
-  selectCalendarDate(todayStr());
-}
-
-/* 날짜 셀 클릭 시 해당 날짜를 선택하고, 필요하면 달력 월도 함께 이동 */
-function selectCalendarDate(dateStr){
-  selectedDate = dateStr;
-  const [y, m, d] = dateStr.split('-').map(Number);
-  calendarViewDate = new Date(y, m - 1, 1);
-  document.getElementById('eventDate').value = dateStr;
-  renderCalendar();
-  renderEventListForDate();
-}
-
-function renderCalendar(){
-  const grid = document.getElementById('calendarGrid');
-  const label = document.getElementById('calendarMonthLabel');
-  if(!grid || !label) return;
-
-  const year = calendarViewDate.getFullYear();
-  const month = calendarViewDate.getMonth();
-  label.textContent = `${year}년 ${month + 1}월`;
-
-  const firstDay = new Date(year, month, 1);
-  const startWeekday = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells = [];
-  for(let i = startWeekday - 1; i >= 0; i--){
-    cells.push(new Date(year, month - 1, daysInPrevMonth - i));
+  if (!session) {
+    return h(LoginScreen, null);
   }
-  for(let d = 1; d <= daysInMonth; d++){
-    cells.push(new Date(year, month, d));
-  }
-  let nextDay = 1;
-  while(cells.length < 42){
-    cells.push(new Date(year, month + 1, nextDay++));
-  }
-
-  const todayS = todayStr();
-  grid.innerHTML = cells.map(dateObj=>{
-    const ds = dateToStr(dateObj);
-    const isOtherMonth = dateObj.getMonth() !== month;
-    const dayEvents = scheduleEvents.filter(e => e.date === ds);
-
-    let cls = 'calendar-cell';
-    if(isOtherMonth) cls += ' other-month';
-    if(ds === todayS) cls += ' today';
-    if(ds === selectedDate) cls += ' selected';
-
-    const maxShow = 3;
-    const shownEvents = dayEvents.slice(0, maxShow);
-    const chipsHtml = shownEvents.map(e => `<div class="cal-event-chip">${escapeHtml(e.title)}</div>`).join('');
-    const moreHtml = dayEvents.length > maxShow ? `<div class="cal-event-more">+${dayEvents.length - maxShow}건 더보기</div>` : '';
-
-    return `<div class="${cls}" onclick="selectCalendarDate('${ds}')">
-      <span class="cal-day-num">${dateObj.getDate()}</span>
-      ${chipsHtml}
-      ${moreHtml}
-    </div>`;
-  }).join('');
+  const isDirector = session.user.app_metadata && session.user.app_metadata.role === "director";
+  return h(HubApp, { session, isDirector });
 }
 
-function escapeHtml(str){
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function addEvent(){
-  const date = document.getElementById('eventDate').value;
-  const title = document.getElementById('eventTitle').value.trim();
-
-  if(!date){ showToast('날짜를 선택해주세요.'); return; }
-  if(!title){ showToast('일정 제목을 입력해주세요.'); return; }
-
-  scheduleEvents.push({id:nextId(), date, title});
-  document.getElementById('eventTitle').value = '';
-
-  selectedDate = date;
-  const [y, m, d] = date.split('-').map(Number);
-  calendarViewDate = new Date(y, m - 1, 1);
-
-  showToast('일정이 등록되었습니다.');
-  renderCalendar();
-  renderEventListForDate();
-}
-
-function deleteEvent(id){
-  scheduleEvents = scheduleEvents.filter(e => e.id !== id);
-  renderCalendar();
-  renderEventListForDate();
-}
-
-function renderEventListForDate(){
-  const label = document.getElementById('selectedDateLabel');
-  const wrap = document.getElementById('eventListForDate');
-  if(!label || !wrap) return;
-
-  const [y, m, d] = selectedDate.split('-').map(Number);
-  const dateObj = new Date(y, m - 1, d);
-  const days = ['일','월','화','수','목','금','토'];
-  label.textContent = `${y}년 ${m}월 ${d}일 (${days[dateObj.getDay()]}) 일정`;
-
-  const events = scheduleEvents.filter(e => e.date === selectedDate).sort((a,b)=> a.id - b.id);
-  if(events.length === 0){
-    wrap.innerHTML = `<div class="empty-state" style="padding:26px 10px;"><div class="ic">🗓️</div><p>등록된 일정이 없습니다.</p></div>`;
-    return;
-  }
-  wrap.innerHTML = events.map(e => `
-    <div class="event-item">
-      <span class="dot-mark"></span>
-      <span class="txt">${escapeHtml(e.title)}</span>
-      <button class="btn-danger-outline" onclick="deleteEvent(${e.id})">삭제</button>
-    </div>`).join('');
-}
-
-/* =========================================================
-   출결 관리
-========================================================= */
-function addAttendance(){
-  const studentId = Number(document.getElementById('attStudent').value);
-  const date = document.getElementById('attDate').value;
-  const status = document.getElementById('attStatus').value;
-
-  if(!studentId){ showToast('학생을 먼저 등록/선택해주세요.'); return; }
-  if(!date){ showToast('날짜를 선택해주세요.'); return; }
-
-  attendanceRecords.unshift({id:nextId(), studentId, date, status});
-  showToast('출결이 기록되었습니다.');
-  renderAll();
-}
-
-function deleteAttendance(id){
-  attendanceRecords = attendanceRecords.filter(r=>r.id !== id);
-  renderAll();
-}
-
-function badgeForAttendance(status){
-  if(status === '출석') return `<span class="badge badge-present">● 출석</span>`;
-  if(status === '지각') return `<span class="badge badge-late">● 지각</span>`;
-  return `<span class="badge badge-absent">● 결석</span>`;
-}
-
-function renderAttendanceTable(){
-  const body = document.getElementById('attendanceTableBody');
-  if(attendanceRecords.length === 0){
-    body.innerHTML = `<tr class="empty-row"><td colspan="4">기록된 출결 정보가 없습니다.</td></tr>`;
-    return;
-  }
-  const sorted = [...attendanceRecords].sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
-  body.innerHTML = sorted.map(r=>{
-    const s = getStudent(r.studentId);
-    return `<tr>
-      <td>${formatDate(r.date)}</td>
-      <td class="name-cell">${s ? s.name : '(삭제된 학생)'}</td>
-      <td>${badgeForAttendance(r.status)}</td>
-      <td><button class="btn-danger-outline" onclick="deleteAttendance(${r.id})">삭제</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderAttendanceRateList(){
-  const wrap = document.getElementById('attendanceRateList');
-  if(students.length === 0){
-    wrap.innerHTML = `<div class="empty-state"><div class="ic">🗓️</div><p>등록된 학생이 없습니다.</p></div>`;
-    return;
-  }
-  wrap.innerHTML = students.map(s=>{
-    const rate = calcAttendanceRate(s.id);
-    const pct = rate === null ? 0 : rate;
-    return `
-    <div style="margin-bottom:16px;">
-      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;">
-        <span class="name-cell">${s.name}</span>
-        <span class="muted">${rate === null ? '기록 없음' : pct + '%'}</span>
-      </div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;"></div></div>
-    </div>`;
-  }).join('');
-}
-
-function renderAttendanceStats(){
-  const total = attendanceRecords.length;
-  const present = attendanceRecords.filter(r=>r.status==='출석').length;
-  const late = attendanceRecords.filter(r=>r.status==='지각').length;
-  const absent = attendanceRecords.filter(r=>r.status==='결석').length;
-  document.getElementById('attendanceStatRow').innerHTML = `
-    <div class="stat-card accent-teal"><div class="label">전체 기록 수</div><div class="value">${total}<small>건</small></div></div>
-    <div class="stat-card accent-blue"><div class="label">출석</div><div class="value">${present}<small>건</small></div></div>
-    <div class="stat-card accent-amber"><div class="label">지각</div><div class="value">${late}<small>건</small></div></div>
-    <div class="stat-card accent-red"><div class="label">결석</div><div class="value">${absent}<small>건</small></div></div>
-  `;
-}
-
-/* =========================================================
-   테스트 성적 관리
-========================================================= */
-function addTest(){
-  const studentId = Number(document.getElementById('testStudent').value);
-  const testName = document.getElementById('testName').value.trim();
-  const score = Number(document.getElementById('testScore').value);
-  const max = Number(document.getElementById('testMax').value) || 100;
-  const date = document.getElementById('testDate').value;
-
-  if(!studentId){ showToast('학생을 먼저 등록/선택해주세요.'); return; }
-  if(!testName){ showToast('시험명을 입력해주세요.'); return; }
-  if(document.getElementById('testScore').value === '' || isNaN(score)){ showToast('점수를 입력해주세요.'); return; }
-  if(score > max){ showToast('점수는 만점보다 클 수 없습니다.'); return; }
-  if(!date){ showToast('날짜를 선택해주세요.'); return; }
-
-  testRecords.unshift({id:nextId(), studentId, testName, score, max, date});
-  document.getElementById('testName').value = '';
-  document.getElementById('testScore').value = '';
-  showToast('테스트 결과가 등록되었습니다.');
-  renderAll();
-}
-
-function deleteTest(id){
-  testRecords = testRecords.filter(r=>r.id !== id);
-  renderAll();
-}
-
-function scoreBadgeColor(pct){
-  if(pct >= 90) return 'badge-present';
-  if(pct >= 70) return 'badge-grade';
-  if(pct >= 50) return 'badge-late';
-  return 'badge-absent';
-}
-
-function renderTestTable(){
-  const body = document.getElementById('testTableBody');
-  if(testRecords.length === 0){
-    body.innerHTML = `<tr class="empty-row"><td colspan="6">등록된 테스트 결과가 없습니다.</td></tr>`;
-    return;
-  }
-  const sorted = [...testRecords].sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
-  body.innerHTML = sorted.map(r=>{
-    const s = getStudent(r.studentId);
-    const pct = Math.round((r.score / r.max) * 1000) / 10;
-    return `<tr>
-      <td>${formatDate(r.date)}</td>
-      <td class="name-cell">${s ? s.name : '(삭제된 학생)'}</td>
-      <td>${r.testName}</td>
-      <td>${r.score} / ${r.max}</td>
-      <td><span class="badge ${scoreBadgeColor(pct)}">${pct}%</span></td>
-      <td><button class="btn-danger-outline" onclick="deleteTest(${r.id})">삭제</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderTestStats(){
-  const total = testRecords.length;
-  const avg = total ? Math.round(testRecords.reduce((sum,r)=> sum + r.score/r.max*100, 0)/total * 10)/10 : 0;
-  const top = total ? Math.max(...testRecords.map(r=>Math.round(r.score/r.max*1000)/10)) : 0;
-  const low = total ? Math.min(...testRecords.map(r=>Math.round(r.score/r.max*1000)/10)) : 0;
-  document.getElementById('testStatRow').innerHTML = `
-    <div class="stat-card accent-teal"><div class="label">전체 응시 건수</div><div class="value">${total}<small>건</small></div></div>
-    <div class="stat-card accent-blue"><div class="label">전체 평균</div><div class="value">${avg}<small>%</small></div></div>
-    <div class="stat-card accent-amber"><div class="label">최고 점수</div><div class="value">${top}<small>%</small></div></div>
-    <div class="stat-card accent-red"><div class="label">최저 점수</div><div class="value">${low}<small>%</small></div></div>
-  `;
-}
-
-/* =========================================================
-   과제 관리
-========================================================= */
-let assignRowCounter = 0;
-
-/* 과제 항목 입력 행 추가 (학생 1명당 여러 과제를 나누어 입력) */
-function addAssignmentRow(){
-  const id = assignRowCounter++;
-  const wrap = document.getElementById('assignRowsWrap');
-  const row = document.createElement('div');
-  row.className = 'assign-row form-row';
-  row.dataset.rowId = id;
-  row.innerHTML = `
-    <div class="field" style="flex:2;">
-      <label>과제명</label>
-      <input type="text" class="assign-row-title" placeholder="예: 수학 익힘책 12~15p">
-    </div>
-    <div class="field" style="max-width:170px;">
-      <label>수행 상태</label>
-      <select class="assign-row-status">
-        <option value="완료">완료</option>
-        <option value="부분완료">부분완료</option>
-        <option value="미완료">미완료</option>
-      </select>
-    </div>
-    <button class="btn-danger-outline" onclick="removeAssignmentRow(${id})" style="margin-bottom:1px;">삭제</button>
-  `;
-  wrap.appendChild(row);
-}
-
-/* 과제 항목 입력 행 삭제 (최소 1개 행은 유지) */
-function removeAssignmentRow(id){
-  const wrap = document.getElementById('assignRowsWrap');
-  const row = wrap.querySelector(`[data-row-id="${id}"]`);
-  if(row) row.remove();
-  if(wrap.children.length === 0) addAssignmentRow();
-}
-
-/* 입력된 과제 항목들을 한 번에 저장 */
-function submitAssignmentBatch(){
-  const studentId = Number(document.getElementById('assignStudent').value);
-  const date = document.getElementById('assignDate').value;
-
-  if(!studentId){ showToast('학생을 먼저 등록/선택해주세요.'); return; }
-  if(!date){ showToast('날짜를 선택해주세요.'); return; }
-
-  const rows = document.querySelectorAll('#assignRowsWrap .assign-row');
-  let count = 0;
-  rows.forEach(row=>{
-    const title = row.querySelector('.assign-row-title').value.trim();
-    const status = row.querySelector('.assign-row-status').value;
-    if(title){
-      assignmentRecords.unshift({id:nextId(), studentId, title, status, date});
-      count++;
-    }
-  });
-
-  if(count === 0){ showToast('입력된 과제 항목이 없습니다. 과제명을 입력해주세요.'); return; }
-
-  document.getElementById('assignRowsWrap').innerHTML = '';
-  addAssignmentRow();
-
-  showToast(`과제 ${count}건이 등록되었습니다.`);
-  renderAll();
-}
-
-function deleteAssignment(id){
-  assignmentRecords = assignmentRecords.filter(r=>r.id !== id);
-  renderAll();
-}
-
-function badgeForAssignment(status){
-  if(status === '완료') return `<span class="badge badge-done">● 완료</span>`;
-  if(status === '부분완료') return `<span class="badge badge-partial">● 부분완료</span>`;
-  return `<span class="badge badge-undone">● 미완료</span>`;
-}
-
-function renderAssignmentTable(){
-  const body = document.getElementById('assignTableBody');
-  if(assignmentRecords.length === 0){
-    body.innerHTML = `<tr class="empty-row"><td colspan="5">등록된 과제 기록이 없습니다.</td></tr>`;
-    return;
-  }
-  const sorted = [...assignmentRecords].sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
-  body.innerHTML = sorted.map(r=>{
-    const s = getStudent(r.studentId);
-    return `<tr>
-      <td>${formatDate(r.date)}</td>
-      <td class="name-cell">${s ? s.name : '(삭제된 학생)'}</td>
-      <td>${r.title}</td>
-      <td>${badgeForAssignment(r.status)}</td>
-      <td><button class="btn-danger-outline" onclick="deleteAssignment(${r.id})">삭제</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderAssignmentRateList(){
-  const wrap = document.getElementById('assignRateList');
-  if(students.length === 0){
-    wrap.innerHTML = `<div class="empty-state"><div class="ic">📚</div><p>등록된 학생이 없습니다.</p></div>`;
-    return;
-  }
-  wrap.innerHTML = students.map(s=>{
-    const rate = calcAssignmentRate(s.id);
-    const pct = rate === null ? 0 : rate;
-    return `
-    <div style="margin-bottom:16px;">
-      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;">
-        <span class="name-cell">${s.name}</span>
-        <span class="muted">${rate === null ? '기록 없음' : pct + '%'}</span>
-      </div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;"></div></div>
-    </div>`;
-  }).join('');
-}
-
-function renderAssignmentStats(){
-  const total = assignmentRecords.length;
-  const done = assignmentRecords.filter(r=>r.status==='완료').length;
-  const partial = assignmentRecords.filter(r=>r.status==='부분완료').length;
-  const undone = assignmentRecords.filter(r=>r.status==='미완료').length;
-  document.getElementById('assignStatRow').innerHTML = `
-    <div class="stat-card accent-teal"><div class="label">전체 과제 건수</div><div class="value">${total}<small>건</small></div></div>
-    <div class="stat-card accent-blue"><div class="label">완료</div><div class="value">${done}<small>건</small></div></div>
-    <div class="stat-card accent-amber"><div class="label">부분완료</div><div class="value">${partial}<small>건</small></div></div>
-    <div class="stat-card accent-red"><div class="label">미완료</div><div class="value">${undone}<small>건</small></div></div>
-  `;
-}
-
-/* =========================================================
-   수업 진도 관리
-========================================================= */
-function addProgress(){
-  const subject = document.getElementById('progSubject').value.trim();
-  const content = document.getElementById('progContent').value.trim();
-  const date = document.getElementById('progDate').value;
-
-  if(!subject){ showToast('과목명을 입력해주세요.'); return; }
-  if(!content){ showToast('진도 내용을 입력해주세요.'); return; }
-  if(!date){ showToast('날짜를 선택해주세요.'); return; }
-
-  progressRecords.unshift({id:nextId(), subject, content, date});
-  document.getElementById('progContent').value = '';
-  showToast('수업 진도가 기록되었습니다.');
-  renderAll();
-}
-
-function deleteProgress(id){
-  progressRecords = progressRecords.filter(r=>r.id !== id);
-  renderAll();
-}
-
-function renderProgressTable(){
-  const body = document.getElementById('progressTableBody');
-  if(progressRecords.length === 0){
-    body.innerHTML = `<tr class="empty-row"><td colspan="4">기록된 수업 진도가 없습니다.</td></tr>`;
-    return;
-  }
-  const sorted = [...progressRecords].sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
-  body.innerHTML = sorted.map(r=>`
-    <tr>
-      <td>${formatDate(r.date)}</td>
-      <td><span class="badge badge-grade">${r.subject}</span></td>
-      <td>${r.content}</td>
-      <td><button class="btn-danger-outline" onclick="deleteProgress(${r.id})">삭제</button></td>
-    </tr>`).join('');
-}
-
-/* =========================================================
-   전체 렌더링
-========================================================= */
-function renderAll(){
-  refreshStudentSelects();
-  renderStudentStats();
-  renderStudentTable();
-  renderAttendanceStats();
-  renderAttendanceTable();
-  renderAttendanceRateList();
-  renderTestStats();
-  renderTestTable();
-  renderAssignmentStats();
-  renderAssignmentTable();
-  renderAssignmentRateList();
-  renderProgressTable();
-}
-
-document.addEventListener('DOMContentLoaded', init);
+ReactDOM.createRoot(document.getElementById("root")).render(h(Root, null));
 </script>
 </body>
 </html>
