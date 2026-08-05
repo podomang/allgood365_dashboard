@@ -2504,7 +2504,7 @@ function DiagnosticRow({ t, isLast, isDirector, saveField, setStatus, remove, re
 // 앱 전체 내비게이션이 페이지마다 다르게 보이지 않도록 맞춘다. 이 페이지(출결관리)가 활성 탭으로 강조된다.
 // ============================================================
 const NAV_ITEMS = [
-    { key: "dashboard", href: "dashboard.html", label: "대시보드", icon: "🏠" },
+    { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
     { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅" },
     { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓" },
     { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
@@ -2587,13 +2587,13 @@ function AttendancePillTabs({ pageTab, setPageTab, isDirector }) {
 // ============================================================
 // Main app
 // [분리 작업] 원래 MainApp은 대시보드/출석체크/스태프룸/학생관리/월별출석부 5개 탭을 사이드바로 전환하는
-// 구조였다. 이 파일에는 출석체크·월별출석부만 남기고(나머지는 dashboard.html/students.html로 이동),
+// 구조였다. 이 파일에는 출석체크·월별출석부만 남기고(나머지는 workboard.html/students.html로 이동),
 // students·studentCourses·assistants(myAssistant 계산용)를 불러오고 실시간 구독을 유지하는 부분은
 // 원래 MainApp 로직을 그대로 옮겼다 - Attendance/MonthlyAttendanceReport가 그대로 필요로 하기 때문.
 // goRegisterStudentFromDiagnostic(학생관리로 이동)/goToWorkLog(스태프룸 근무일지로 이동)/goToClockIn(스태프룸
 // 출퇴근으로 이동)은 원래 같은 페이지 안에서 setTab()으로 건너뛰던 다리 역할이었는데, 이제 다른(분리된)
 // 페이지로 실제 이동해야 해서 sessionStorage 키 "attn_cross_page_handoff"에 이동할 곳/필요한 값을 담아두고
-// 그 페이지로 location 이동하는 방식으로 바꿨다(2026-08 후속 수정). dashboard.html은 이미 이 키를 읽어서
+// 그 페이지로 location 이동하는 방식으로 바꿨다(2026-08 후속 수정). workboard.html은 이미 이 키를 읽어서
 // workLog/clockIn 페이로드를 소비하도록 만들어져 있었고, students.html에도 studentPrefill 페이로드를
 // 소비하는 로직을 같은 방식으로 추가했다.
 // ============================================================
@@ -2668,15 +2668,15 @@ function MainApp({ session }) {
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
     const myAssistant = useMemo(() => assistants.find((a) => a.email === session.user.email) || null, [assistants, session.user.email]);
-    // 다른 페이지(dashboard.html/students.html)로 넘어가면서 그 화면이 특정 항목에 바로 포커스하도록
+    // 다른 페이지(workboard.html/students.html)로 넘어가면서 그 화면이 특정 항목에 바로 포커스하도록
     // sessionStorage에 페이로드를 남겨두는 다리 함수들 - 페이지 이동은 location.href로 실제 이동한다.
     const goToWorkLog = (studentId, date, mode) => {
         sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "workLog", studentId, date, mode: mode || "write", token: Date.now() }));
-        window.location.href = "dashboard.html";
+        window.location.href = "workboard.html";
     };
     const goToClockIn = () => {
         sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "clockIn", token: Date.now() }));
-        window.location.href = "dashboard.html";
+        window.location.href = "workboard.html";
     };
     const goRegisterStudentFromDiagnostic = (prefillData) => {
         sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "studentPrefill", ...prefillData, token: Date.now() }));
