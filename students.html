@@ -1161,12 +1161,29 @@ function DirectorOnlyMessage() {
 // 원래 attendance.html의 MainApp이 studentCourses(추가강좌 전체 목록)를 한 번 불러와서
 // StudentManager에 props로 내려주던 구조를 그대로 유지한다(StudentManager 자체는 students는
 // 직접 fetchStudents()로 관리하지만, studentCourses는 상위에서 받아 쓰는 구조라 그 부분만 옮김).
-// goToWorkLog(근무일지 이동)와 prefill(진단평가 → 학생등록 다리)은 attendance.html의 다른 탭(스태프룸/
-// 보강)에 의존하는 기능이라 이 독립 페이지에는 해당 탭이 없다 - goToWorkLog는 넘기지 않아 그 버튼이
-// 자동으로 숨겨지고(StudentManager 코드가 `goToWorkLog &&`로 이미 방어), prefill은 항상 null로 둔다.
+// goToWorkLog(근무일지 이동)는 attendance.html의 다른 탭(스태프룸)에 의존하는 기능이라 이 독립
+// 페이지에는 해당 화면이 없다 - goToWorkLog는 넘기지 않아 그 버튼이 자동으로 숨겨진다(StudentManager
+// 코드가 `goToWorkLog &&`로 이미 방어).
+// prefill(진단평가 → 학생등록 다리)은 attendance.html에서 sessionStorage 키 "attn_cross_page_handoff"에
+// { to: "studentPrefill", diagnosticTestId, name, phone, school, grade, token } 페이로드를 남겨두고
+// location 이동해오는 방식으로 바뀌었다(2026-08 후속 수정, dashboard.html의 workLog/clockIn 소비 로직과
+// 동일한 계약). 마운트 시 한 번만 읽고 즉시 지워서(consume-once) 새로고침해도 다시 발동하지 않는다.
 // ============================================================
 function StudentsPage({ session }) {
     const [studentCourses, setStudentCourses] = useState([]);
+    const [prefill, setPrefill] = useState(null);
+    useEffect(() => {
+        try {
+            const raw = sessionStorage.getItem("attn_cross_page_handoff");
+            if (!raw) return;
+            sessionStorage.removeItem("attn_cross_page_handoff");
+            const payload = JSON.parse(raw);
+            if (payload && payload.to === "studentPrefill") {
+                const { to, token, ...rest } = payload;
+                setPrefill(rest);
+            }
+        } catch (e) { console.error(e); }
+    }, []);
     const reloadStudentCourses = async () => {
         try {
             setStudentCourses(await fetchAllStudentCourses());
@@ -1188,8 +1205,8 @@ function StudentsPage({ session }) {
     return h(PageShell, { session },
         h(StudentManager, {
             onChanged: undefined,
-            prefill: null,
-            onPrefillConsumed: () => {},
+            prefill,
+            onPrefillConsumed: () => setPrefill(null),
             studentCourses,
             reloadStudentCourses,
             goToWorkLog: undefined,
