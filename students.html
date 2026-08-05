@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>올곧수학 더센텀 - 학생관리</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f7f8fa; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+"use strict";
+const { useState, useEffect } = React;
+const h = React.createElement;
+
+// ============================================================
+// Supabase 연결 (attendance.html / index.html / allgoodstudy.html과 동일한 프로젝트)
+// ============================================================
+const SUPABASE_URL = "https://rooajvvwnvscfgvfhwkz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvb2FqdnZ3bnZzY2ZndmZod2t6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDcxMjksImV4cCI6MjA5OTUyMzEyOX0.JEeltcsp-MIyTdhFeQfT5htQ2fFhR9q7oNMiyIrS8TM";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
+// 디자인 토큰 (attendance.html / index.html / allgoodstudy.html과 동일. PURPLE(_SOFT)는
+// 학생관리의 "클리닉 대상" 관련 UI에서 사용되어 attendance.html에서 그대로 가져옴)
+// ============================================================
+const NAVY = "#1a2b6b";
+const NAVY_SOFT = "#eaecf9";
+const RED = "#dc2626";
+const RED_SOFT = "#fdecec";
+const AMBER = "#b45309";
+const AMBER_SOFT = "#fdf3e2";
+const PURPLE = "#6d4fa8";
+const PURPLE_SOFT = "#f0ecf9";
+const TEAL = "#0f7a6c";
+const TEAL_SOFT = "#e2f3f0";
+const SKY = "#0369a1";
+const SKY_SOFT = "#e3f0f9";
+const PAPER = "#f7f8fa";
+const INK = "#111827";
+const SUBINK = "#6b7280";
+const LINE = "#e5e7eb";
+
+const LOGO_HORIZONTAL = "data:image/jpeg;base64,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ezam4lsUgOX1rDqS7JtGxtXxrL/fAkx15tzQC6upgDuzkC0kvVtjy16+mbn0yt61FkGimvDS6Wpt5l1sx+iIA8mS4pdD9XNHIZrlBJI73IdGS1p6cs1q6lTskysNn533PkSy6825r2tNdT6ztw1xtXPDX0sxAiqI3k7Bk4LAbZo9npooBJcSeL5mg5fRtXvnDELaZrNV8jwfdGV2YH1qSMpPiilWoWsHiFTP4MgdWQN1taVo1dhJ5lpJWQMZrulaG9Oax72KUgqePML3vAyANRJkPHlmuzFh+B8YbPHIBnuE7931rbLIHTo43Sfh/k9Vtwp3NDg/2p3HI5FbhX0pBPHNyG9dQWGi1QP+0bNg/Tv61sZZqePWaIXFp6ZnHNN5pil1s7jblRuALahmR3bVq24UrzkydjjnlsOe1dPtTTvYBJTZgHMDjCcltbaqemlL6ehYTv1g/IlN5nTS635HomsgAcTIAGnI+JboKmGdutDI148RXBFSxljmmAtDt+bs1q2mdGco8g3ybQskbUTnM8YbrFw1elaumja3Wc8BvSTkus+KoDTqTAnLZmwZo2Bxh1Zxxue05rI0rjk5BW0xbrCePV6dYLeypheAWysdnuycF50tmo5m5S0oe3fqudzrWC00MGq6KiDC3YAOZa7zfTTxubz+P7nqa7d2tt8q11hlnmut2PEXhwjyIHQhgjft4s/gskeEcrqiIEgyNBG/atRKwnIPGZ8a67aSJubWMDWnoWgo2DIlusRsHiCbxiPWdsvA3lNdueWe07l0JqQyjIGSPbscDtWjrdH7X29SSNv60plmVGPSz0NYZ7/oWusF5zYf0h2TjZl7pGUgDy4SVAz/AOYSCmRpXWd9sjXe5cD5CtQ9p3EZeVdB9FEDrO40bc8w8j8Fzt4qJuTQ4joAJTJhpdB2c9mfMtV1WTmRvtGOABy2jIrliIyLA4kjfmsmGsHKtM1tAIyGewdK43SsDhnrbDzAoY4nOtMxmtjHh25cb5IxKAXe3OzYgwc+YWu9bHMa/eM1uDQBkNyAaoTVC1RAMgmQREBpqjoTILVEBpkE1QtUQBERAEREAREQBERAEREAREQBERAEREAW0tBK3IgNnFtWghjAIDGgO37N65EQHGIYwzUDG6n8uWxaOgjcAHMaQNwLc8lyohnLOPiWa2sGt1hz5bU4lm32rdu/ZvXIiGMnGImAZBrQPIt2oFuRBk01U1VqiA0yTJaomAaZJl41qiA0yTVWqIDTLxpl41qiA01U1VqiA01U1VqiAJkiIBkiIgGSZBEQDJMkRAMkyREAyTJEQDJMkRAMkyREAyREQDJMkRAMkyREAyREQBMkRAEREAyTJEQDJERAEREAyREQBERAEyREAyWmS1RAaEZoAtUQGmSau1aogGS0IWqIDQBNUZrVEAAyREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAf/Z";
+
+// ============================================================
+// 날짜 유틸 (attendance.html / index.html과 동일 로직)
+// ============================================================
+const WEEKDAYS_MON_FIRST = ["월", "화", "수", "목", "금", "토", "일"];
+const JS_DAY_TO_KOR = ["일", "월", "화", "수", "목", "금", "토"];
+function fmt(d) {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+function todayStr() { return fmt(new Date()); }
+function addDays(dateStr, delta) {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    return fmt(d);
+}
+function korWeekdayOf(dateStr) {
+    return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
+}
+
+// ============================================================
+// 로그인 화면 (index.html / attendance.html의 LoginScreen과 동일 UI)
+// ============================================================
+function EyeIcon({ off }) {
+  const common = { width: 19, height: 19, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
+  return off
+    ? h("svg", common,
+        h("path", { d: "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" }),
+        h("path", { d: "M14.12 14.12a3 3 0 1 1-4.24-4.24" }),
+        h("line", { x1: "1", y1: "1", x2: "23", y2: "23" })
+      )
+    : h("svg", common,
+        h("path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }),
+        h("circle", { cx: "12", cy: "12", r: "3" })
+      );
+}
+
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+  };
+  return h("div", { style: { background: PAPER, minHeight: "100vh" }, className: "flex items-center justify-center px-4" },
+    h("div", { className: "w-full max-w-sm rounded-2xl p-6", style: { background: "#fff", border: `1px solid ${LINE}` } },
+      h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 34, margin: "0 auto 20px", display: "block" } }),
+      h("div", { style: { fontWeight: 800, fontSize: 15, textAlign: "center", marginBottom: 18, color: INK } }, "홈 로그인"),
+      h("form", { onSubmit: submit, className: "flex flex-col gap-3" },
+        h("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), placeholder: "이메일", className: "px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+        h("div", { style: { position: "relative" } },
+          h("input", { type: showPassword ? "text" : "password", required: true, value: password, onChange: (e) => setPassword(e.target.value), placeholder: "비밀번호", className: "w-full px-3 py-3 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, paddingRight: 42 } }),
+          h("button", { type: "button", onClick: () => setShowPassword((v) => !v), "aria-label": showPassword ? "비밀번호 숨기기" : "비밀번호 보이기", style: { position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, background: "transparent" } }, h(EyeIcon, { off: showPassword }))
+        ),
+        error && h("div", { style: { color: RED, fontSize: 12.5, fontWeight: 600 } }, error),
+        h("button", { type: "submit", disabled: loading, className: "py-3 rounded-lg text-sm font-bold mt-1", style: { background: NAVY, color: "#fff", opacity: loading ? 0.6 : 1 } }, loading ? "로그인 중..." : "로그인")
+      ),
+      h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 14, textAlign: "center" } }, "계정이 없다면 원장님께 문의하세요.")
+    )
+  );
+}
+
+// ============================================================
+// 학생관리(StudentManager) 및 의존 함수 - /tmp/attendance.html에서 그대로 옮겨온 부분.
+// 아래 supabase 데이터 헬퍼/그룹핑 헬퍼/StudentManager 본체는 attendance.html의 로직을
+// 그대로 재사용하며, 새로 리팩터링하지 않는다(실데이터를 다루는 화면이라 정확성이 최우선).
+// ============================================================
+
+// ---------- 시간 문자열(HH:MM~HH:MM) 변환 헬퍼 ----------
+function parseTimeRange(str) {
+    const s = (str || "").trim();
+    if (!s)
+        return { start: "", end: "" };
+    const parts = s.split("~");
+    return { start: (parts[0] || "").trim(), end: (parts[1] || "").trim() };
+}
+function composeTimeRange(start, end) {
+    if (start && end)
+        return `${start}~${end}`;
+    if (start)
+        return start;
+    return "";
+}
+function addMinutesToTime(timeStr, minutes) {
+    if (!timeStr)
+        return "";
+    const [hh0, mm0] = timeStr.split(":").map(Number);
+    if (Number.isNaN(hh0) || Number.isNaN(mm0))
+        return "";
+    const total = ((hh0 * 60 + mm0 + minutes) % (24 * 60) + 24 * 60) % (24 * 60);
+    const hh = String(Math.floor(total / 60)).padStart(2, "0");
+    const mm = String(total % 60).padStart(2, "0");
+    return `${hh}:${mm}`;
+}
+
+// ---------- 그룹핑 헬퍼 ----------
+// class 필드 원문(예: "중학과정 중3-2 시작", "고등과정 미적분1")에서 앞쪽 "OO과정" 표기를
+// 떼어내고, 남은 텍스트의 첫 단어를 반명으로 간주해서 추출한다. 같은 반이어도 뒤에 붙는
+// 메모(시작/복습, 과목명 등)가 서로 달라 문자열 전체가 다를 수 있어, 첫 단어만 기준으로 삼는다.
+function extractClassName(classStr) {
+    const raw = (classStr || "").trim();
+    if (!raw)
+        return "";
+    const withoutLevel = raw.replace(/^(초등|중등|중학|고등)(?:학교)?과정\s*/, "");
+    return withoutLevel.split(/[\s,]+/)[0] || "";
+}
+function groupByClass(list) {
+    const groups = {};
+    list.forEach((s) => {
+        const key = extractClassName(s.class) || "반 미지정";
+        (groups[key] = groups[key] || []).push(s);
+    });
+    const keys = Object.keys(groups).sort((a, b) => {
+        if (a === "반 미지정")
+            return 1;
+        if (b === "반 미지정")
+            return -1;
+        return a.localeCompare(b, "ko");
+    });
+    return keys.map((k) => ({ className: k, list: groups[k] }));
+}
+function schoolLevelOf(s) {
+    // 실제 다니는 학교명이 학년 단계의 진짜 기준이라 항상 먼저 확인한다. "수강과정"(중등과정/고등과정)은
+    // 선행학습 반 이름일 뿐이라 실제 학교와 다를 수 있다 (예: 초등학교 6학년이 "중등과정 예비중" 반을
+    // 듣는 경우 - courseLevel을 먼저 보면 "중6학년"이라는 있을 수 없는 조합이 나와버린다).
+    const school = s.school || "";
+    if (school.includes("초등") || /초$/.test(school))
+        return "초";
+    if (school.includes("중학") || /중$/.test(school))
+        return "중";
+    if (school.includes("고등") || /고$/.test(school))
+        return "고";
+    // 학교명이 비어있거나 위 패턴과 안 맞을 때만 수강과정으로 대체 추정한다.
+    const level = parseClassString(s.class).courseLevel;
+    if (level === "중등과정")
+        return "중";
+    if (level === "고등과정")
+        return "고";
+    return "";
+}
+function groupByGrade(list) {
+    const buckets = {};
+    list.forEach((s) => {
+        const gradeNum = s.grade && String(s.grade).trim();
+        const lvl = schoolLevelOf(s);
+        const key = gradeNum ? `${lvl}${gradeNum}학년` : "학년 미지정";
+        if (!buckets[key])
+            buckets[key] = { level: lvl, grade: gradeNum ? parseInt(gradeNum, 10) || 0 : 0, list: [] };
+        buckets[key].list.push(s);
+    });
+    const levelOrder = { "초": 0, "중": 1, "고": 2, "": 3 };
+    const keys = Object.keys(buckets).sort((a, b) => {
+        if (a === "학년 미지정")
+            return 1;
+        if (b === "학년 미지정")
+            return -1;
+        const A = buckets[a], B = buckets[b];
+        const lo = (levelOrder[A.level] ?? 3) - (levelOrder[B.level] ?? 3);
+        if (lo !== 0)
+            return lo;
+        return A.grade - B.grade;
+    });
+    return keys.map((k) => ({ className: k, list: buckets[k].list }));
+}
+function groupBySchool(list) {
+    const groups = {};
+    list.forEach((s) => {
+        const key = s.school && s.school.trim() ? s.school.trim() : "학교 미지정";
+        (groups[key] = groups[key] || []).push(s);
+    });
+    const keys = Object.keys(groups).sort((a, b) => {
+        if (a === "학교 미지정")
+            return 1;
+        if (b === "학교 미지정")
+            return -1;
+        return a.localeCompare(b, "ko");
+    });
+    return keys.map((k) => ({ className: k, list: groups[k] }));
+}
+// 등원요일별 그룹핑 - 학생 한 명이 여러 요일에 다닐 수 있어서(예: 월수금), 다니는 요일 전부에
+// 중복으로 나타난다("월요일에 누가 오는지" 보기에 맞춘 방식). 아무도 없는 요일은 그룹 자체를 만들지 않는다.
+function groupByDay(list) {
+    const groups = WEEKDAYS_MON_FIRST
+        .map((d) => ({ className: `${d}요일`, list: list.filter((s) => (s.days || []).includes(d)) }))
+        .filter((g) => g.list.length > 0);
+    const unassigned = list.filter((s) => !s.days || s.days.length === 0);
+    if (unassigned.length > 0)
+        groups.push({ className: "요일 미지정", list: unassigned });
+    return groups;
+}
+// 학생관리 탭 전용 "추가강좌별" 그룹핑 - 오늘 날짜 기준으로 "진행중"인 추가강좌(시작일~종료일 범위 안,
+// 요일 조건은 보지 않음 - 특강 탭의 activeCourses와 달리 날짜별 출석체크가 아니라 학생 명단 보기이므로)만
+// 대상으로 하고, 강좌명이 같으면 한 그룹으로 묶는다. 정규수업만 듣고 추가강좌가 없는 학생은 이 보기에서
+// 제외된다(그룹핑 확인 시 원장님 확정사항). 한 학생이 같은 강좌를 요일별로 나눠 등록한 경우(예: 박성욱처럼
+// 요일마다 시간이 달라 행이 2개인 경우)에도 같은 그룹 안에 학생 카드는 한 번만 나타나도록 studentId로 중복 제거한다.
+function groupByExtraCourse(students, studentCourses) {
+    const today = todayStr();
+    const activeCourses = (studentCourses || []).filter((c) => {
+        if (c.startDate && today < c.startDate) return false;
+        if (c.endDate && today > c.endDate) return false;
+        return true;
+    });
+    const studentById = {};
+    students.forEach((s) => { studentById[s.id] = s; });
+    const groups = {}; // courseName -> { seen: Set<studentId>, list: Student[] }
+    activeCourses.forEach((c) => {
+        const st = studentById[c.studentId];
+        if (!st) return; // 퇴원 등으로 대상 학생 목록에 없으면 제외
+        const key = c.courseName || "강좌명 미지정";
+        if (!groups[key]) groups[key] = { seen: new Set(), list: [] };
+        if (!groups[key].seen.has(st.id)) {
+            groups[key].seen.add(st.id);
+            groups[key].list.push(st);
+        }
+    });
+    return Object.keys(groups).sort((a, b) => a.localeCompare(b, "ko")).map((k) => ({ className: k, list: groups[k].list }));
+}
+
+// ---------- supabase data helpers: 학생(attn_students) ----------
+function mapStudent(row) {
+    return {
+        id: row.id, name: row.name, class: row.class || "", school: row.school || "", grade: row.grade || "",
+        days: row.days || [], studentPhone: row.student_phone || "", parentPhone: row.parent_phone || "", memo: row.memo || "",
+        clinic: row.clinic !== false, clinicDays: row.clinic_days || [], clinicTime: row.clinic_time || "",
+        regularTime: row.regular_time || "", saturdayTime: row.saturday_time || "",
+        enrollDate: row.enroll_date || "",
+        status: row.status || "재원", withdrawDate: row.withdraw_date || "",
+    };
+}
+async function fetchStudents() {
+    const { data, error } = await supabaseClient.from("attn_students").select("*").order("name");
+    if (error)
+        throw error;
+    return data.map(mapStudent);
+}
+async function upsertStudent(form) {
+    const payload = {
+        name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
+        student_phone: form.studentPhone || null, parent_phone: form.parentPhone || null, memo: form.memo, clinic: form.clinic, clinic_days: form.clinicDays,
+        clinic_time: form.clinicTime, regular_time: form.regularTime || null,
+        saturday_time: form.days.includes("토") ? (form.saturdayTime || null) : null,
+        enroll_date: form.enrollDate || null,
+        status: form.status || "재원", withdraw_date: form.status === "퇴원" ? (form.withdrawDate || null) : null,
+    };
+    if (form.id) {
+        const { error } = await supabaseClient.from("attn_students").update(payload).eq("id", form.id);
+        if (error)
+            throw error;
+        return form.id;
+    }
+    else {
+        const { data, error } = await supabaseClient.from("attn_students").insert(payload).select("id").single();
+        if (error)
+            throw error;
+        return data.id;
+    }
+}
+async function deleteStudentRow(id) {
+    const { error } = await supabaseClient.from("attn_students").delete().eq("id", id);
+    if (error)
+        throw error;
+}
+
+// ---------- 학생 정보 변경 이력(타임라인, attn_student_history) ----------
+function mapStudentHistory(row) {
+    return {
+        id: row.id, studentId: row.student_id, effectiveFrom: row.effective_from, effectiveTo: row.effective_to,
+        school: row.school || "", grade: row.grade || "", class: row.class || "",
+        regularTime: row.regular_time || "", saturdayTime: row.saturday_time || "", clinic: row.clinic !== false,
+        clinicTime: row.clinic_time || "", clinicDays: row.clinic_days || [], days: row.days || [],
+    };
+}
+// 학생관리의 "이력보기"에서 한 학생의 타임라인만 불러올 때 사용.
+async function fetchStudentHistoryRows(studentId) {
+    const { data, error } = await supabaseClient.from("attn_student_history").select("*").eq("student_id", studentId).order("effective_from").order("created_at");
+    if (error)
+        throw error;
+    return data.map(mapStudentHistory);
+}
+// 학생 정보를 수정할 때 호출. effectiveFrom(적용 시작일) 기준으로 이력 타임라인을 다시 계산해서 저장한다.
+// 같은 날짜에 이미 이력이 있으면 그 값을 새 값으로 덮어쓰고, 나머지 구간들의 종료일도 순서에 맞게 재정렬한다.
+// (오늘부터 적용은 물론, 미래 날짜 예약이나 과거 날짜 정정도 모두 이 로직 하나로 처리된다.)
+async function saveHistorySnapshot(studentId, effectiveFrom, snapshot) {
+    const existing = await fetchStudentHistoryRows(studentId);
+    const sameDateRows = existing.filter((r) => r.effectiveFrom === effectiveFrom);
+    const others = existing.filter((r) => r.effectiveFrom !== effectiveFrom);
+    const reuseRow = sameDateRows[0] || null; // 가장 먼저 생성된 행을 재사용 대상으로 삼는다
+    const duplicateIds = sameDateRows.slice(1).map((r) => r.id); // 이미 쌓여있던 중복 행(있다면) 삭제 대상
+    if (duplicateIds.length > 0) {
+        const { error: dupError } = await supabaseClient.from("attn_student_history").delete().in("id", duplicateIds);
+        if (dupError)
+            throw dupError;
+    }
+    const newRow = reuseRow
+        ? { ...reuseRow, ...snapshot, effectiveFrom, effectiveTo: null, isNew: false }
+        : { effectiveFrom, effectiveTo: null, ...snapshot, isNew: true };
+    const merged = [...others.map((r) => ({ ...r, isNew: false })), newRow]
+        .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
+    for (let i = 0; i < merged.length; i++) {
+        merged[i].effectiveTo = i === merged.length - 1 ? null : addDays(merged[i + 1].effectiveFrom, -1);
+    }
+    for (const row of merged) {
+        const payload = {
+            effective_to: row.effectiveTo, school: row.school, grade: row.grade, class: row.class,
+            regular_time: row.regularTime, saturday_time: row.saturdayTime || null, clinic: row.clinic, clinic_time: row.clinicTime,
+            clinic_days: row.clinicDays, days: row.days,
+        };
+        if (row.isNew) {
+            const { error } = await supabaseClient.from("attn_student_history").insert({ student_id: studentId, effective_from: row.effectiveFrom, ...payload });
+            if (error)
+                throw error;
+        }
+        else {
+            const { error } = await supabaseClient.from("attn_student_history").update(payload).eq("id", row.id);
+            if (error)
+                throw error;
+        }
+    }
+}
+
+// ---------- 추가강좌 (attn_student_courses) ----------
+function mapStudentCourse(r) {
+    return {
+        id: r.id, studentId: r.student_id, courseName: r.course_name, className: r.class_name || "",
+        days: r.days || [], courseTime: r.course_time || "", startDate: r.start_date, endDate: r.end_date,
+        memo: r.memo || "", memoDone: !!r.memo_done, memoDoneBy: r.memo_done_by || "", memoDoneAt: r.memo_done_at || "",
+    };
+}
+async function fetchAllStudentCourses() {
+    const { data, error } = await supabaseClient.from("attn_student_courses").select("*").order("course_name");
+    if (error) throw error;
+    return data.map(mapStudentCourse);
+}
+async function addStudentCourse(studentId, payload) {
+    const { error } = await supabaseClient.from("attn_student_courses").insert({
+        student_id: studentId, course_name: payload.courseName, class_name: payload.className || null,
+        days: payload.days || [], course_time: payload.courseTime || null,
+        start_date: payload.startDate || todayStr(), end_date: payload.endDate || null,
+    });
+    if (error) throw error;
+}
+async function updateStudentCourse(id, payload) {
+    const { error } = await supabaseClient.from("attn_student_courses").update({
+        course_name: payload.courseName, class_name: payload.className || null,
+        days: payload.days || [], course_time: payload.courseTime || null,
+        start_date: payload.startDate, end_date: payload.endDate || null, updated_at: new Date().toISOString(),
+    }).eq("id", id);
+    if (error) throw error;
+}
+// 특강 카드 메모(참고용 자유메모) 저장 - 내용이 바뀌면 이전 체크(완료) 표시는 초기화됨(다시 확인이 필요해지므로).
+async function saveCourseMemo(id, memo) {
+    const { error } = await supabaseClient.from("attn_student_courses").update({
+        memo: memo || null, memo_done: false, memo_done_by: null, memo_done_at: null, updated_at: new Date().toISOString(),
+    }).eq("id", id);
+    if (error) throw error;
+}
+// 메모 앞 ○/● 토글 - 누르면 메모 글자에 취소선이 그어짐(원장 전용, 학생관리 화면 자체가 원장 전용이라 별도 권한 분기 불필요).
+async function toggleCourseMemoDone(id, done) {
+    const { error } = await supabaseClient.from("attn_student_courses").update({
+        memo_done: done, memo_done_by: done ? "원장" : null, memo_done_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString(),
+    }).eq("id", id);
+    if (error) throw error;
+}
+// "종강" 버튼 - 종료일을 오늘 날짜로 바로 채워 넣는 단축 동작(직접 날짜를 입력하지 않아도 됨).
+async function endStudentCourseToday(id) {
+    const { error } = await supabaseClient.from("attn_student_courses").update({ end_date: todayStr(), updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+}
+async function deleteStudentCourse(id) {
+    const { error } = await supabaseClient.from("attn_student_courses").delete().eq("id", id);
+    if (error) throw error;
+}
+
+// ---------- 진단평가 "학생으로 등록" 연결(prefill 경로에서만 호출됨) ----------
+async function linkDiagnosticTestToStudent(id, studentId) {
+    const { error } = await supabaseClient.from("attn_diagnostic_tests").update({ linked_student_id: studentId, status: "응시완료" }).eq("id", id);
+    if (error) throw error;
+}
+
+// ---------- Student manager (attendance.html 4022~4661줄을 그대로 옮김) ----------
+function emptyForm() {
+    return { id: null, name: "", courseLevel: "", courseName: "", school: "", grade: "", days: [], regularTime: "", saturdayTime: "", studentPhone: "", parentPhone: "", memo: "", clinic: true, clinicDays: [], clinicTime: "", enrollDate: todayStr(), effectiveDate: todayStr(), status: "재원", withdrawDate: "" };
+}
+// 이력 비교에 쓰이는 항목(학교/학년/반/시간/클리닉 관련)만 뽑아낸다. 연락처·메모는 이력 대상이 아니다.
+function historyRelevantFields(f) {
+    return {
+        school: f.school || "", grade: f.grade || "",
+        class: [f.courseLevel, (f.courseName || "").trim()].filter(Boolean).join(" "),
+        regularTime: f.regularTime || "", saturdayTime: (f.days || []).includes("토") ? (f.saturdayTime || "") : "",
+        clinic: f.clinic !== false,
+        clinicTime: f.clinicTime || "", clinicDays: (f.clinicDays || []).slice().sort(), days: (f.days || []).slice().sort(),
+    };
+}
+function historyFieldsEqual(a, b) {
+    return a.school === b.school && a.grade === b.grade && a.class === b.class && a.regularTime === b.regularTime
+        && a.saturdayTime === b.saturdayTime
+        && a.clinic === b.clinic && a.clinicTime === b.clinicTime
+        && JSON.stringify(a.clinicDays) === JSON.stringify(b.clinicDays) && JSON.stringify(a.days) === JSON.stringify(b.days);
+}
+function parseClassString(classStr) {
+    const str = (classStr || "").trim();
+    if (str.startsWith("중등과정")) return { courseLevel: "중등과정", courseName: str.slice(4).trim() };
+    if (str.startsWith("고등과정")) return { courseLevel: "고등과정", courseName: str.slice(4).trim() };
+    return { courseLevel: "", courseName: str };
+}
+// 출석/클리닉/토요일 시간 입력을 근무일정 등 다른 탭과 같은 "시작~종료" 시간 선택기로 통일한 컴포넌트.
+// durationMinutes를 넘기면(정규수업 150분·클리닉 90분 등), 시작시간을 고를 때 종료시간이 비어있는 경우에 한해
+// 자동으로 "시작시간 + durationMinutes"를 채워준다. 이미 종료시간이 채워져 있으면(직접 수정한 값 포함) 건드리지 않음 —
+// 예외적으로 수업시간이 다른 학생도 종료시간을 직접 고쳐서 그대로 입력할 수 있다.
+function TimeRangeInput({ value, onChange, borderColor, background, durationMinutes }) {
+    const { start, end } = parseTimeRange(value);
+    const inputStyle = { border: `1px solid ${borderColor || LINE}`, background: background || "#fff" };
+    const handleStartChange = (newStart) => {
+        const autoEnd = (!end && newStart && durationMinutes) ? addMinutesToTime(newStart, durationMinutes) : end;
+        onChange(composeTimeRange(newStart, autoEnd));
+    };
+    return React.createElement(
+        "div",
+        { className: "flex items-center gap-1.5 mt-1" },
+        React.createElement("input", { type: "time", value: start, onChange: (e) => handleStartChange(e.target.value), className: "px-2 py-2 rounded-lg text-sm outline-none", style: inputStyle }),
+        React.createElement("span", { style: { color: SUBINK, fontSize: 12 } }, "~"),
+        React.createElement("input", { type: "time", value: end, onChange: (e) => onChange(composeTimeRange(start, e.target.value)), className: "px-2 py-2 rounded-lg text-sm outline-none", style: inputStyle })
+    );
+}
+function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses, reloadStudentCourses, goToWorkLog }) {
+    const [students, setStudents] = useState([]);
+    const [loaded, setLoaded] = useState(false);
+    const [form, setForm] = useState(emptyForm());
+    const [baseline, setBaseline] = useState(null); // 편집 시작 시점의 이력 비교용 원본 값(school/grade/class/시간 등)
+    const [editTarget, setEditTarget] = useState(null); // null | "new" | studentId
+    const [saving, setSaving] = useState(false);
+    // 진단평가 "학생으로 등록" 버튼으로 넘어온 경우, 저장 성공 시 그 진단평가 기록에 새 학생 id를 연결해준다.
+    const [prefillSourceId, setPrefillSourceId] = useState(null);
+    useEffect(() => {
+        if (!prefill) return;
+        setForm({ ...emptyForm(), name: prefill.name || "", parentPhone: prefill.phone || "", school: prefill.school || "", grade: prefill.grade || "" });
+        setBaseline(null);
+        setEditTarget("new");
+        setPrefillSourceId(prefill.diagnosticTestId || null);
+        if (onPrefillConsumed) onPrefillConsumed();
+    }, [prefill]);
+    const [historyTarget, setHistoryTarget] = useState(null); // 🔍 눌러서 이력을 보고 있는 학생 id
+    const [historyRows, setHistoryRows] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    // 추가강좌(한 학생이 2강좌 이상 수강할 때 - "메인강좌+추가강좌" 방식) 관리 패널 상태
+    const [courseTarget, setCourseTarget] = useState(null); // 📚 눌러서 추가강좌 패널을 보고 있는 학생 id
+    const [courseForm, setCourseForm] = useState(null); // null | {id, studentId, courseName, className, days, courseTime, startDate, endDate}
+    const toggleCourses = (studentId) => { setCourseTarget((prev) => (prev === studentId ? null : studentId)); setCourseForm(null); };
+    const openNewCourseForm = (studentId) => setCourseForm({ id: null, studentId, courseName: "", className: "", days: [], courseTime: "", startDate: todayStr(), endDate: "" });
+    const openEditCourseForm = (c) => setCourseForm({ id: c.id, studentId: c.studentId, courseName: c.courseName, className: c.className, days: c.days.slice(), courseTime: c.courseTime, startDate: c.startDate, endDate: c.endDate || "" });
+    const closeCourseForm = () => setCourseForm(null);
+    const toggleCourseFormDay = (d) => setCourseForm((prev) => ({ ...prev, days: prev.days.includes(d) ? prev.days.filter((x) => x !== d) : [...prev.days, d] }));
+    const [savingCourse, setSavingCourse] = useState(false);
+    const saveCourse = async () => {
+        if (!courseForm.courseName.trim()) { alert("강좌명을 입력해주세요."); return; }
+        setSavingCourse(true);
+        try {
+            if (courseForm.id) await updateStudentCourse(courseForm.id, courseForm);
+            else await addStudentCourse(courseForm.studentId, courseForm);
+            setCourseForm(null);
+            if (reloadStudentCourses) await reloadStudentCourses();
+        } catch (e) {
+            alert("저장 중 오류: " + e.message);
+        }
+        setSavingCourse(false);
+    };
+    const deleteCourse = async (c) => {
+        if (!confirm(`"${c.courseName}" 강좌를 삭제할까요? (그동안의 특강 출석기록도 함께 삭제됩니다)`)) return;
+        try {
+            await deleteStudentCourse(c.id);
+            if (reloadStudentCourses) await reloadStudentCourses();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const endCourseNow = async (c) => {
+        if (!confirm(`"${c.courseName}" 강좌를 오늘(${todayStr()}) 날짜로 종강 처리할까요?`)) return;
+        try {
+            await endStudentCourseToday(c.id);
+            if (reloadStudentCourses) await reloadStudentCourses();
+        } catch (e) {
+            alert("처리 중 오류: " + e.message);
+        }
+    };
+    // 특강 카드 메모: 수정 중인 강좌 id + 입력 중인 텍스트만 로컬에서 관리, 저장/체크는 서버에 바로 반영.
+    const [memoEditTarget, setMemoEditTarget] = useState(null);
+    const [memoDraft, setMemoDraft] = useState("");
+    const openMemoEditor = (c) => { setMemoEditTarget(c.id); setMemoDraft(c.memo || ""); };
+    const closeMemoEditor = () => setMemoEditTarget(null);
+    const saveMemo = async (id) => {
+        try {
+            await saveCourseMemo(id, memoDraft);
+            setMemoEditTarget(null);
+            if (reloadStudentCourses) await reloadStudentCourses();
+        } catch (e) {
+            alert("메모 저장 중 오류: " + e.message);
+        }
+    };
+    const toggleMemoDone = async (c) => {
+        try {
+            await toggleCourseMemoDone(c.id, !c.memoDone);
+            if (reloadStudentCourses) await reloadStudentCourses();
+        } catch (e) {
+            alert("체크 처리 중 오류: " + e.message);
+        }
+    };
+    const [groupMode, setGroupMode] = useState("none"); // none | grade | school | class | day
+    const [searchQuery, setSearchQuery] = useState("");
+    const [collapsedGroups, setCollapsedGroups] = useState({});
+    // 퇴원생은 모든 보기 모드 하단에 별도 그룹으로 표시하고, 기본은 접어둔다(재원 학생 목록이 우선 보이도록).
+    const [withdrawnCollapsed, setWithdrawnCollapsed] = useState(true);
+    const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+    const reload = async () => {
+        try {
+            setStudents(await fetchStudents());
+        } catch (e) {
+            console.error(e);
+        }
+        if (onChanged) onChanged();
+    };
+    useEffect(() => { reload().then(() => setLoaded(true)); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_students_manager_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_students" }, () => reload())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    // 보기 모드를 바꿀 때마다(예: 학년별 → 학교별) 그룹은 항상 전체 접힘 상태로 새로 시작한다 —
+    // 펼쳐진 채로 시작하면 전체보기와 다를 게 없어서, 접힌 "요약 인덱스"로 쓰이도록 함.
+    // (아래 "!loaded 이면 return"보다 반드시 앞에 있어야 함 — 그 뒤에 두면 로딩 전/후로 훅 호출 순서가 달라져
+    // "Rendered more hooks than during the previous render" 오류로 화면이 통째로 하얗게 빈다.)
+    useEffect(() => {
+        if (!loaded) return;
+        if (groupMode === "none") { setCollapsedGroups({}); return; }
+        const active = students.filter((s) => s.status !== "퇴원");
+        const newGroups = groupMode === "grade" ? groupByGrade(active) : groupMode === "school" ? groupBySchool(active) : groupMode === "day" ? groupByDay(active) : groupMode === "course" ? groupByExtraCourse(active, studentCourses) : groupByClass(active);
+        setCollapsedGroups(Object.fromEntries(newGroups.map((g) => [g.className, true])));
+    }, [groupMode, loaded, studentCourses]);
+    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
+    const openEdit = (s) => {
+        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "" });
+        setBaseline({
+            school: s.school || "", grade: s.grade || "", class: s.class || "",
+            regularTime: s.regularTime || "", saturdayTime: (s.days || []).includes("토") ? (s.saturdayTime || "") : "",
+            clinic: s.clinic !== false, clinicTime: s.clinicTime || "",
+            clinicDays: (s.clinicDays || []).slice().sort(), days: (s.days || []).slice().sort(),
+        });
+        setEditTarget(s.id);
+        setPrefillSourceId(null);
+    };
+    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); setPrefillSourceId(null); };
+    const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
+    const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
+    const save = async () => {
+        if (!form.name.trim()) return;
+        setSaving(true);
+        try {
+            const composedClass = [form.courseLevel, form.courseName.trim()].filter(Boolean).join(" ");
+            const isNewStudent = !form.id;
+            const newFields = historyRelevantFields(form);
+            const studentId = await upsertStudent({ ...form, class: composedClass });
+            if (isNewStudent) {
+                // 새 학생은 등록일부터 이 정보였다고 첫 이력을 만들어둔다.
+                await saveHistorySnapshot(studentId, form.enrollDate || todayStr(), newFields);
+            } else if (baseline && !historyFieldsEqual(baseline, newFields)) {
+                // 반/학교/학년/시간/클리닉 관련 정보가 실제로 바뀐 경우에만 이력을 새로 남긴다.
+                await saveHistorySnapshot(studentId, form.effectiveDate || todayStr(), newFields);
+            }
+            // 진단평가 "학생으로 등록"에서 넘어온 경우, 그 진단평가 기록에 새 학생 id를 연결해서
+            // "다가오는/지난 진단평가" 목록에서 자동으로 빠지게 한다.
+            if (isNewStudent && prefillSourceId) {
+                try { await linkDiagnosticTestToStudent(prefillSourceId, studentId); } catch (e) { console.error(e); }
+            }
+            await reload();
+            closeForm();
+        } catch (e) {
+            alert("저장 중 오류가 발생했습니다: " + e.message);
+        }
+        setSaving(false);
+    };
+    const remove = async (id) => {
+        if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다.")) return;
+        try {
+            await deleteStudentRow(id);
+            await reload();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const toggleHistory = async (id) => {
+        if (historyTarget === id) { setHistoryTarget(null); return; }
+        setHistoryTarget(id);
+        setHistoryLoading(true);
+        try {
+            setHistoryRows(await fetchStudentHistoryRows(id));
+        } catch (e) {
+            console.error(e);
+            setHistoryRows([]);
+        }
+        setHistoryLoading(false);
+    };
+    if (!loaded) {
+        return React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "불러오는 중...");
+    }
+    const activeCount = students.filter((s) => s.status !== "퇴원").length;
+    const header = React.createElement(
+        "div",
+        { className: "flex items-center justify-between flex-wrap gap-3 mb-1" },
+        React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "학생관리"),
+        React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ 학생 추가")
+    );
+    // 전체 재원생 수를 제목 아래 한눈에 보이도록 표시(퇴원생 수는 아래 "퇴원생" 섹션에서 별도 확인).
+    const statLine = React.createElement("p", { style: { color: NAVY, fontSize: 13, fontWeight: 700, marginTop: 4, marginBottom: 2 } }, `재원생 ${activeCount}명`);
+    const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "학생별 반과 등원 요일을 등록하면 출석체크 화면에 자동으로 반영됩니다.");
+    const studentFormEl = React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-4", style: { background: "#fff", border: `1.5px solid ${NAVY}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 14 } }, form.id ? "학생 정보 수정" : "새 학생 등록"),
+        React.createElement(
+            "div",
+            { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "이름"),
+                React.createElement("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "예: 김올곳" })
+            ),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "반"),
+                React.createElement(
+                    "div",
+                    { className: "flex gap-2 mt-1" },
+                    React.createElement(
+                        "select",
+                        { value: form.courseLevel, onChange: (e) => setForm({ ...form, courseLevel: e.target.value }), className: "px-2 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, flex: "0 0 110px" } },
+                        React.createElement("option", { value: "" }, "선택"),
+                        React.createElement("option", { value: "중등과정" }, "중등과정"),
+                        React.createElement("option", { value: "고등과정" }, "고등과정")
+                    ),
+                    React.createElement("input", { value: form.courseName, onChange: (e) => setForm({ ...form, courseName: e.target.value }), className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "수강과정 (예: 심화반, 4시)" })
+                )
+            ),
+            [["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"], ["학생 연락처", "studentPhone", "학생 본인 연락처"], ["학부모님 연락처", "parentPhone", "학부모님 연락처"], ["메모", "memo", "특이사항 (선택)"]].map(([label, key, ph]) => React.createElement(
+                "div",
+                { key: key },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
+                React.createElement("input", { value: form[key], onChange: (e) => setForm({ ...form, [key]: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: ph })
+            )),
+            React.createElement(
+                "div",
+                null,
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "등록일"),
+                React.createElement("input", { type: "date", value: form.enrollDate, onChange: (e) => setForm({ ...form, enrollDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "이 날짜 이전 출석부에는 표시되지 않아요.")
+            ),
+            form.id && React.createElement(
+                "div",
+                { style: { background: SKY_SOFT, borderRadius: 10, padding: "8px 10px" } },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SKY } }, "반/학교/학년/시간 변경 적용 시작일"),
+                React.createElement("input", { type: "date", value: form.effectiveDate, onChange: (e) => setForm({ ...form, effectiveDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" } }),
+                React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "반/학교/학년/시간/클리닉여부가 바뀔 경우에만 사용되어요. 오늘부터면 오늘 날짜 그대로, 미리 예약하려면 미래 날짜를, 지난 기록을 정정하려면 과거 날짜를 선택하세요. 지난 출석기록은 그대로 남고, 이 날짜부터의 명단에만 적용됩니다.")
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "mt-3" },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "등원 요일"),
+            React.createElement("div", { className: "flex gap-2 mt-1.5 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", { key: d, onClick: () => toggleDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.days.includes(d) ? NAVY : "#fff", color: form.days.includes(d) ? "#fff" : INK, border: `1px solid ${form.days.includes(d) ? NAVY : LINE}` } }, d))),
+            React.createElement(
+                "div",
+                { className: "mt-2 flex gap-3 flex-wrap" },
+                React.createElement(
+                    "div",
+                    null,
+                    React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK } }, "출석 시간 (선택)"),
+                    React.createElement(TimeRangeInput, { value: form.regularTime, onChange: (v) => setForm({ ...form, regularTime: v }), borderColor: LINE, durationMinutes: 150 })
+                ),
+                // 토요일 정규수업은 평일과 시작시간이 달라서, 등원요일에 토요일을 선택한 학생만 별도 시간 입력칸을 보여준다.
+                form.days.includes("토") && React.createElement(
+                    "div",
+                    null,
+                    React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: AMBER } }, "토요일 출석 시간 (선택)"),
+                    React.createElement(TimeRangeInput, { value: form.saturdayTime, onChange: (v) => setForm({ ...form, saturdayTime: v }), borderColor: AMBER, background: AMBER_SOFT, durationMinutes: 150 }),
+                    React.createElement("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 3 } }, "비워두면 평일 출석 시간이 토요일에도 그대로 적용됩니다.")
+                )
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "mt-3 flex items-center justify-between rounded-lg px-3 py-2.5", style: { background: PURPLE_SOFT } },
+            React.createElement(
+                "div",
+                null,
+                React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: PURPLE } }, "클리닉 대상"),
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "꺼두면 클리닉 출석부에서 이 학생은 제외됩니다.")
+            ),
+            React.createElement(
+                "button",
+                { onClick: () => setForm({ ...form, clinic: !form.clinic }), style: { width: 44, height: 26, borderRadius: 999, background: form.clinic ? PURPLE : "#d8d5e2", position: "relative", flexShrink: 0 } },
+                React.createElement("span", { style: { position: "absolute", top: 3, left: form.clinic ? 22 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 150ms ease" } })
+            )
+        ),
+        form.clinic && React.createElement(
+            "div",
+            { className: "mt-3 rounded-lg p-3", style: { background: PURPLE_SOFT } },
+            React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "클리닉 요일"),
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginBottom: 8 } }, "비워두면 등원 요일과 동일하게 처리됩니다."),
+            React.createElement("div", { className: "flex gap-2 flex-wrap" }, WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", { key: d, onClick: () => toggleClinicDay(d), className: "w-10 h-10 rounded-lg text-sm font-bold", style: { background: form.clinicDays.includes(d) ? PURPLE : "#fff", color: form.clinicDays.includes(d) ? "#fff" : INK, border: `1px solid ${form.clinicDays.includes(d) ? PURPLE : LINE}` } }, d))),
+            React.createElement(
+                "div",
+                { className: "mt-3" },
+                React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: PURPLE } }, "클리닉 시간 (선택)"),
+                React.createElement(TimeRangeInput, { value: form.clinicTime, onChange: (v) => setForm({ ...form, clinicTime: v }), borderColor: LINE, background: "#fff", durationMinutes: 90 })
+            )
+        ),
+        form.id && React.createElement(
+            "div",
+            { className: "mt-3 rounded-lg p-3", style: { background: form.status === "퇴원" ? RED_SOFT : "#f5f5f3" } },
+            React.createElement(
+                "div", { className: "flex items-center justify-between flex-wrap gap-2" },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: form.status === "퇴원" ? RED : SUBINK } }, "재원 상태"),
+                    React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "퇴원 처리하면 출석체크 명단에서 바로 빠지고, 학생관리에서는 \"퇴원생\" 그룹으로 남습니다.")
+                ),
+                React.createElement(
+                    "select",
+                    { value: form.status, onChange: (e) => setForm({ ...form, status: e.target.value, withdrawDate: e.target.value === "퇴원" ? (form.withdrawDate || todayStr()) : "" }), className: "px-3 py-2 rounded-lg text-sm font-bold outline-none", style: { border: `1px solid ${form.status === "퇴원" ? RED : LINE}`, color: form.status === "퇴원" ? RED : INK, background: "#fff" } },
+                    React.createElement("option", { value: "재원" }, "재원"),
+                    React.createElement("option", { value: "퇴원" }, "퇴원")
+                )
+            ),
+            form.status === "퇴원" && React.createElement(
+                "div", { className: "mt-2" },
+                React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: RED } }, "퇴원일 (비워둘 수 있음, 나중에 수정 가능)"),
+                React.createElement("input", { type: "date", value: form.withdrawDate, onChange: (e) => setForm({ ...form, withdrawDate: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${RED}`, background: "#fff" } })
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            React.createElement("button", { onClick: save, disabled: saving, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: closeForm, className: "px-5 py-2 rounded-lg text-sm font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+        )
+    );
+    const renderStudentRow = (s) => React.createElement(
+        "div",
+        { key: s.id + "-row", className: "flex items-center justify-between gap-3 px-5 py-3.5 flex-wrap", style: s.status === "퇴원" ? { opacity: 0.6 } : undefined },
+        React.createElement(
+            "div",
+            { className: "min-w-0" },
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, s.name),
+                s.status === "퇴원" && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: RED_SOFT, color: RED, borderRadius: 5, padding: "1.5px 6px" } }, "퇴원", s.withdrawDate ? ` · ${s.withdrawDate}` : ""),
+                React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, s.class || "반 미지정"),
+                (s.school || s.grade) && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, s.school, s.school && s.grade ? " · " : "", s.grade ? `${s.grade}학년` : "")
+            ),
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-3 mt-1 flex-wrap" },
+                React.createElement(
+                    "div",
+                    { className: "flex gap-1" },
+                    WEEKDAYS_MON_FIRST.filter((d) => s.days.includes(d)).map((d) => React.createElement("span", { key: d, style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, d)),
+                    s.days.length === 0 && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "요일 미지정"),
+                    s.regularTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: NAVY_SOFT, color: NAVY, borderRadius: 5, padding: "1.5px 6px" } }, s.regularTime),
+                    s.days.includes("토") && s.saturdayTime && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: AMBER_SOFT, color: AMBER, borderRadius: 5, padding: "1.5px 6px" } }, "토 ", s.saturdayTime)
+                ),
+                !s.clinic && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#f0f0ee", color: SUBINK, borderRadius: 5, padding: "1.5px 6px" } }, "클리닉 제외"),
+                s.clinic && s.clinicDays.length > 0 && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: PURPLE_SOFT, color: PURPLE, borderRadius: 5, padding: "1.5px 6px" } }, "클리닉 ", s.clinicDays.join("·"), s.clinicTime ? ` ${s.clinicTime}` : ""),
+                s.studentPhone && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "📞(학생) ", s.studentPhone),
+                s.parentPhone && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, "📞(학부모) ", s.parentPhone),
+                s.enrollDate && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "등록일 ", s.enrollDate)
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-1 flex-shrink-0" },
+            React.createElement("button", { onClick: () => toggleHistory(s.id), className: "p-2 rounded-lg", style: { background: historyTarget === s.id ? SKY_SOFT : PAPER, color: SKY }, title: "변경 이력 보기" }, "🔍"),
+            React.createElement("button", { onClick: () => toggleCourses(s.id), className: "p-2 rounded-lg", style: { background: courseTarget === s.id ? TEAL_SOFT : PAPER, color: TEAL }, title: "추가강좌 관리" }, "📚"),
+            goToWorkLog && React.createElement("button", { onClick: () => goToWorkLog(s.id, null, "view"), className: "p-2 rounded-lg", style: { background: PAPER, color: PURPLE }, title: "근무일지(지도 이력) 보기" }, "📔"),
+            React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "✎"),
+            React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+        )
+    );
+    const renderHistoryPanel = () => React.createElement(
+        "div",
+        { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${SKY}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: SKY, marginBottom: 10 } }, "변경 이력"),
+        historyLoading
+            ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "불러오는 중...")
+            : historyRows.length === 0
+                ? React.createElement("div", { style: { fontSize: 12.5, color: SUBINK } }, "아직 기록된 이력이 없습니다.")
+                : React.createElement(
+                    "div",
+                    { className: "flex flex-col gap-2" },
+                    historyRows.slice().reverse().map((hRow) => React.createElement(
+                        "div",
+                        { key: hRow.id, className: "rounded-lg px-3 py-2", style: { background: SKY_SOFT } },
+                        React.createElement("div", { style: { fontSize: 11.5, fontWeight: 800, color: SKY } }, hRow.effectiveFrom, " ~ ", hRow.effectiveTo || "현재"),
+                        React.createElement("div", { style: { fontSize: 12, color: INK, marginTop: 2 } }, [hRow.school, hRow.grade ? `${hRow.grade}학년` : "", hRow.class, hRow.regularTime, hRow.days.includes("토") && hRow.saturdayTime ? `토 ${hRow.saturdayTime}` : "", hRow.clinic ? (hRow.clinicDays.length ? `클리닉 ${hRow.clinicDays.join("·")}${hRow.clinicTime ? " " + hRow.clinicTime : ""}` : "클리닉") : "클리닉 제외"].filter(Boolean).join(" · "))
+                    ))
+                )
+    );
+    // 추가강좌("메인강좌+추가강좌") 목록 + 추가/수정 폼 렌더링. 📚 버튼으로 학생별로 펼침.
+    const renderCourseForm = () => React.createElement(
+        "div",
+        { className: "rounded-xl p-3 mt-2", style: { background: TEAL_SOFT } },
+        React.createElement(
+            "div", { className: "flex flex-col gap-2" },
+            React.createElement("input", {
+                value: courseForm.courseName, onChange: (e) => setCourseForm({ ...courseForm, courseName: e.target.value }),
+                placeholder: "강좌명 (예: 영어 특강)", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` }
+            }),
+            React.createElement("input", {
+                value: courseForm.className, onChange: (e) => setCourseForm({ ...courseForm, className: e.target.value }),
+                placeholder: "반 이름(선택, 예: 중2-3)", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` }
+            }),
+            React.createElement(
+                "div", { className: "flex gap-1.5 flex-wrap" },
+                WEEKDAYS_MON_FIRST.map((d) => React.createElement("button", {
+                    key: d, onClick: () => toggleCourseFormDay(d), className: "w-8 h-8 rounded-lg text-xs font-bold",
+                    style: { background: courseForm.days.includes(d) ? TEAL : "#fff", color: courseForm.days.includes(d) ? "#fff" : INK, border: `1px solid ${courseForm.days.includes(d) ? TEAL : LINE}` }
+                }, d))
+            ),
+            React.createElement(TimeRangeInput, { value: courseForm.courseTime, onChange: (v) => setCourseForm({ ...courseForm, courseTime: v }), borderColor: LINE, background: "#fff" }),
+            React.createElement(
+                "div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("label", { style: { fontSize: 11, color: SUBINK } }, "시작일"),
+                React.createElement("input", { type: "date", value: courseForm.startDate, onChange: (e) => setCourseForm({ ...courseForm, startDate: e.target.value }), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("label", { style: { fontSize: 11, color: SUBINK } }, "종료일"),
+                React.createElement("input", { type: "date", value: courseForm.endDate, onChange: (e) => setCourseForm({ ...courseForm, endDate: e.target.value }), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, "(비워두면 상시강좌)")
+            )
+        ),
+        React.createElement(
+            "div", { className: "flex gap-2 mt-3" },
+            React.createElement("button", { onClick: saveCourse, disabled: savingCourse, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL, color: "#fff", opacity: savingCourse ? 0.6 : 1 } }, savingCourse ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: closeCourseForm, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+        )
+    );
+    const renderCoursesPanel = (s) => {
+        const list = (studentCourses || []).filter((c) => c.studentId === s.id).slice().sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+        const today = todayStr();
+        return React.createElement(
+            "div",
+            { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${TEAL}` } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: TEAL, marginBottom: 10 } }, "추가강좌 (", list.length, "개)"),
+            list.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, marginBottom: 10 } }, "등록된 추가강좌가 없습니다."),
+            list.length > 0 && React.createElement(
+                "div", { className: "flex flex-col gap-2 mb-3" },
+                list.map((c) => {
+                    const ended = c.endDate && c.endDate < today;
+                    const isEditingMemo = memoEditTarget === c.id;
+                    const memoRow = isEditingMemo
+                        ? React.createElement(
+                            "div", { className: "flex items-center gap-1.5 mt-1.5" },
+                            React.createElement("input", {
+                                value: memoDraft, onChange: (e) => setMemoDraft(e.target.value), autoFocus: true,
+                                placeholder: "메모 입력 (예: 1회 보강추가)",
+                                className: "flex-1 min-w-0 px-2 py-1 rounded-md text-xs outline-none", style: { border: `1px solid ${LINE}` }
+                            }),
+                            React.createElement("button", { onClick: () => saveMemo(c.id), className: "px-2 py-1 rounded-md text-xs font-bold flex-shrink-0", style: { background: TEAL, color: "#fff" } }, "저장"),
+                            React.createElement("button", { onClick: closeMemoEditor, className: "px-2 py-1 rounded-md text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+                        )
+                        : (c.memo
+                            ? React.createElement(
+                                "div", { className: "flex items-center gap-1.5 mt-1.5" },
+                                React.createElement("button", { onClick: () => toggleMemoDone(c), className: "flex-shrink-0", style: { fontSize: 13, color: c.memoDone ? SUBINK : TEAL, lineHeight: 1 }, title: c.memoDone ? "완료 취소" : "확인 완료 처리" }, c.memoDone ? "●" : "○"),
+                                React.createElement("span", { className: "min-w-0", style: { fontSize: 11.5, color: c.memoDone ? SUBINK : INK, textDecoration: c.memoDone ? "line-through" : "none", wordBreak: "break-word" } }, c.memo),
+                                React.createElement("button", { onClick: () => openMemoEditor(c), className: "flex-shrink-0", style: { color: SUBINK, marginLeft: "auto", fontSize: 11 } }, "✎")
+                            )
+                            : React.createElement("button", { onClick: () => openMemoEditor(c), className: "mt-1.5", style: { fontSize: 11, color: SUBINK } }, "+ 메모")
+                        );
+                    return React.createElement(
+                        "div",
+                        { key: c.id, className: "rounded-lg px-3 py-2", style: { background: ended ? "#f5f5f3" : TEAL_SOFT, opacity: ended ? 0.6 : 1 } },
+                        React.createElement(
+                            "div", { className: "flex items-center justify-between gap-2 flex-wrap" },
+                            React.createElement(
+                                "div", { className: "min-w-0" },
+                                React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: ended ? SUBINK : TEAL } }, c.courseName, c.className ? ` · ${c.className}` : "", ended ? " (종강)" : ""),
+                                React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 2 } }, (c.days && c.days.length ? c.days.join("·") : "요일 미지정"), c.courseTime ? ` · ${c.courseTime}` : "", " · ", c.startDate, " ~ ", c.endDate || "상시")
+                            ),
+                            React.createElement(
+                                "div", { className: "flex items-center gap-1 flex-shrink-0" },
+                                !ended && React.createElement("button", { onClick: () => endCourseNow(c), className: "px-2 py-1 rounded-md text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` }, title: "오늘 날짜로 종강 처리" }, "종강"),
+                                React.createElement("button", { onClick: () => openEditCourseForm(c), className: "p-1.5 rounded-md", style: { background: "#fff", color: NAVY, border: `1px solid ${LINE}` }, title: "수정" }, "✎"),
+                                React.createElement("button", { onClick: () => deleteCourse(c), className: "p-1.5 rounded-md", style: { background: "#fff", color: RED, border: `1px solid ${LINE}` }, title: "삭제" }, "🗑")
+                            )
+                        ),
+                        memoRow
+                    );
+                })
+            ),
+            courseForm && courseForm.studentId === s.id
+                ? renderCourseForm()
+                : React.createElement("button", { onClick: () => openNewCourseForm(s.id), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL_SOFT, color: TEAL } }, "+ 강좌 추가")
+        );
+    };
+    // 학생 한 명 분(행 + 이력 패널 + 수정 폼)을 렌더링. 전체보기/검색/그룹보기 어디서든 재사용.
+    const renderStudentBlock = (s) => React.createElement(
+        React.Fragment,
+        { key: s.id },
+        React.createElement(
+            "div",
+            { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            renderStudentRow(s)
+        ),
+        historyTarget === s.id && renderHistoryPanel(),
+        courseTarget === s.id && renderCoursesPanel(s),
+        editTarget === s.id && studentFormEl
+    );
+    const GROUP_MODE_LABELS = { none: "전체보기", grade: "학년별", school: "학교별", class: "반별", day: "요일별", course: "추가강좌별" };
+    const searchTrimmed = searchQuery.trim();
+    // 퇴원생은 학년별/학교별/반별/요일별 그룹핑 대상에서 빼고, 화면 맨 아래에 별도 "퇴원생" 그룹으로 모아 보여준다.
+    const activeStudents = students.filter((s) => s.status !== "퇴원");
+    const withdrawnStudents = students.filter((s) => s.status === "퇴원");
+    const groups = groupMode === "none" ? [] : groupMode === "grade" ? groupByGrade(activeStudents) : groupMode === "school" ? groupBySchool(activeStudents) : groupMode === "day" ? groupByDay(activeStudents) : groupMode === "course" ? groupByExtraCourse(activeStudents, studentCourses) : groupByClass(activeStudents);
+    const expandAllGroups = () => setCollapsedGroups({});
+    const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
+    const groupToggle = React.createElement(
+        "div",
+        { className: "flex items-center justify-between gap-3 mb-4 flex-wrap" },
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-3 flex-wrap" },
+            React.createElement(
+                "input",
+                {
+                    value: searchQuery, onChange: (e) => setSearchQuery(e.target.value),
+                    placeholder: "학생 이름 검색", className: "px-3 py-2 rounded-lg text-sm outline-none",
+                    style: { border: `1px solid ${LINE}`, flex: "1 1 180px", maxWidth: 260 },
+                }
+            ),
+            React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "보기"),
+                ["none", "grade", "school", "class", "day", "course"].map((m) => React.createElement(
+                    "button",
+                    { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
+                    GROUP_MODE_LABELS[m]
+                ))
+            )
+        ),
+        groupMode !== "none" && searchTrimmed === "" && React.createElement(
+            "div",
+            { className: "flex items-center gap-1" },
+            React.createElement("button", { onClick: expandAllGroups, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "전체 펼치기"),
+            React.createElement("button", { onClick: collapseAllGroups, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "전체 접기")
+        )
+    );
+    let listBody;
+    if (students.length === 0) {
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "등록된 학생이 없습니다.");
+    } else if (searchTrimmed !== "") {
+        // 검색 중에는 그룹 구조를 무시하고 이름이 일치하는 학생만 평평하게 보여준다.
+        const matches = students.filter((s) => s.name.includes(searchTrimmed));
+        listBody = matches.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "일치하는 학생이 없습니다.")
+            : React.createElement("div", { className: "flex flex-col gap-2.5" }, matches.map(renderStudentBlock));
+    } else if (groupMode === "none") {
+        listBody = React.createElement("div", { className: "flex flex-col gap-2.5" }, activeStudents.map(renderStudentBlock));
+    } else if (groupMode === "course" && groups.length === 0) {
+        listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "진행중인 추가강좌를 듣는 학생이 없습니다.");
+    } else {
+        listBody = React.createElement(
+            "div",
+            { className: "flex flex-col gap-4" },
+            groups.map((g) => {
+                const collapsed = !!collapsedGroups[g.className];
+                return React.createElement(
+                    "div",
+                    { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+                    React.createElement(
+                        "button",
+                        { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: PAPER, borderBottom: collapsed ? "none" : `1px solid ${LINE}` } },
+                        React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5 } }, g.className),
+                        React.createElement("span", { className: "flex items-center gap-2" },
+                            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, g.list.length, "명"),
+                            React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
+                        )
+                    ),
+                    !collapsed && React.createElement("div", { className: "flex flex-col gap-2.5 p-3" }, g.list.map(renderStudentBlock))
+                );
+            })
+        );
+    }
+    // 퇴원생 그룹은 검색 중이 아닐 때만, 보기 모드와 무관하게 항상 맨 아래에 붙인다(기본 접힘).
+    const withdrawnBlock = withdrawnStudents.length > 0 && searchTrimmed === "" && React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden mt-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "button",
+            { onClick: () => setWithdrawnCollapsed((v) => !v), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: PAPER, borderBottom: withdrawnCollapsed ? "none" : `1px solid ${LINE}` } },
+            React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5, color: SUBINK } }, "퇴원생"),
+            React.createElement("span", { className: "flex items-center gap-2" },
+                React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, withdrawnStudents.length, "명"),
+                React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, withdrawnCollapsed ? "▼ 펼치기" : "▲ 접기")
+            )
+        ),
+        !withdrawnCollapsed && React.createElement("div", { className: "flex flex-col gap-2.5 p-3" }, withdrawnStudents.map(renderStudentBlock))
+    );
+    return React.createElement(
+        "div",
+        null,
+        header,
+        statLine,
+        subText,
+        groupToggle,
+        editTarget === "new" && studentFormEl,
+        listBody,
+        withdrawnBlock
+    );
+}
+
+// ============================================================
+// 공용 페이지 셸 (사이드바 / 모바일 상단바+하단 내비게이션)
+// preview_hub_v3.html의 디자인(.app-sidebar/.sidebar-nav/.sidebar-item/.sidebar-foot/.top-header/.bottom-nav)을
+// attendance.html의 실제 구현 패턴(hidden md:flex / md:hidden)으로 옮긴 것. 학생관리는 원장 전용 페이지라
+// 별도 탭 전환 없이 4개 메뉴 모두 <a href>로 다른 정적 페이지로 이동한다.
+// ============================================================
+const NAV_ITEMS = [
+    { key: "dashboard", href: "dashboard.html", label: "대시보드", icon: "🏠" },
+    { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅" },
+    { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓" },
+    { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
+];
+
+function PageShell({ session, children }) {
+    const handleLogout = () => { supabaseClient.auth.signOut(); };
+    const sidebar = h(
+        "aside",
+        { className: "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 z-20", style: { background: "#fff", borderRight: `1px solid ${LINE}` } },
+        h("a", { href: "index.html", className: "px-5 py-5 flex items-center", style: { borderBottom: `1px solid ${LINE}` } },
+            h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 26 } })
+        ),
+        h("nav", { className: "flex-1 px-3 py-4 flex flex-col gap-1" },
+            NAV_ITEMS.map((t) => h("a", {
+                key: t.key,
+                href: t.href,
+                className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
+                style: { background: t.key === "students" ? NAVY_SOFT : "transparent", color: t.key === "students" ? NAVY : SUBINK, textDecoration: "none" },
+            }, h("span", { style: { fontSize: 15 } }, t.icon), t.label))
+        ),
+        h(
+            "div",
+            { className: "px-4 py-4", style: { borderTop: `1px solid ${LINE}` } },
+            h("div", { style: { fontSize: 12, fontWeight: 700, color: INK, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, session.user.email),
+            h("div", { className: "flex items-center gap-1.5 mt-1", style: { color: "#22c55e", fontSize: 11 } },
+                h("span", { style: { width: 6, height: 6, borderRadius: 999, background: "#22c55e", display: "inline-block" } }),
+                h("span", { style: { color: SUBINK } }, "실시간 동기화")),
+            h("button", { onClick: handleLogout, className: "w-full mt-3 py-2 rounded-lg text-xs font-bold", style: { background: PAPER, color: SUBINK } }, "로그아웃")
+        )
+    );
+    const mobileHeader = h(
+        "header",
+        { className: "md:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3", style: { background: "#fff", borderBottom: `1px solid ${LINE}` } },
+        h("a", { href: "index.html" }, h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 24 } })),
+        h("button", { onClick: handleLogout, style: { color: SUBINK, fontSize: 12, fontWeight: 700, background: PAPER, padding: "6px 10px", borderRadius: 8 } }, "로그아웃")
+    );
+    const mobileNav = h(
+        "nav",
+        { className: "md:hidden fixed bottom-0 inset-x-0 z-20 flex", style: { background: "#fff", borderTop: `1px solid ${LINE}` } },
+        NAV_ITEMS.map((t) => h("a", {
+            key: t.key,
+            href: t.href,
+            className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
+            style: { color: t.key === "students" ? NAVY : SUBINK, textDecoration: "none" },
+        }, h("span", { style: { fontSize: 17 } }, t.icon), t.label))
+    );
+    return h(
+        "div",
+        { style: { background: PAPER, color: INK, minHeight: "100vh" } },
+        sidebar,
+        mobileHeader,
+        h("div", { className: "md:pl-60" },
+            h("div", { className: "max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-10" }, children)
+        ),
+        mobileNav
+    );
+}
+
+// 원장 전용 화면 안내 카드 (LoginScreen과 동일한 카드 톤으로 통일)
+function DirectorOnlyMessage() {
+    return h("div", { style: { background: PAPER, minHeight: "100vh" }, className: "flex items-center justify-center px-4" },
+        h("div", { className: "w-full max-w-sm rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 34, margin: "0 auto 20px", display: "block" } }),
+            h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8, color: INK } }, "이 화면은 원장님 전용입니다"),
+            h("div", { style: { fontSize: 12, color: SUBINK, marginBottom: 20 } }, "This page is for the director only."),
+            h("a", { href: "index.html", className: "inline-block px-5 py-2.5 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff", textDecoration: "none" } }, "홈으로 돌아가기")
+        )
+    );
+}
+
+// ============================================================
+// 학생관리 페이지 최상위 컴포넌트
+// 원래 attendance.html의 MainApp이 studentCourses(추가강좌 전체 목록)를 한 번 불러와서
+// StudentManager에 props로 내려주던 구조를 그대로 유지한다(StudentManager 자체는 students는
+// 직접 fetchStudents()로 관리하지만, studentCourses는 상위에서 받아 쓰는 구조라 그 부분만 옮김).
+// goToWorkLog(근무일지 이동)와 prefill(진단평가 → 학생등록 다리)은 attendance.html의 다른 탭(스태프룸/
+// 보강)에 의존하는 기능이라 이 독립 페이지에는 해당 탭이 없다 - goToWorkLog는 넘기지 않아 그 버튼이
+// 자동으로 숨겨지고(StudentManager 코드가 `goToWorkLog &&`로 이미 방어), prefill은 항상 null로 둔다.
+// ============================================================
+function StudentsPage({ session }) {
+    const [studentCourses, setStudentCourses] = useState([]);
+    const reloadStudentCourses = async () => {
+        try {
+            setStudentCourses(await fetchAllStudentCourses());
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { reloadStudentCourses(); }, []);
+    // realtime: 다른 사람이 추가강좌를 등록/수정/삭제하면 자동 반영
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_student_courses_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_student_courses" }, () => {
+                reloadStudentCourses();
+            })
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    return h(PageShell, { session },
+        h(StudentManager, {
+            onChanged: undefined,
+            prefill: null,
+            onPrefillConsumed: () => {},
+            studentCourses,
+            reloadStudentCourses,
+            goToWorkLog: undefined,
+        })
+    );
+}
+
+// ============================================================
+// 로그인 12시간 후 자동 로그아웃 (index.html / attendance.html / allgoodstudy.html과 동일 정책,
+// 같은 도메인이라 로그인 세션이 공유되므로 여기서도 같은 규칙을 맞춰둠)
+// ============================================================
+const LOGIN_AT_KEY = "attn_login_at";
+const AUTO_LOGOUT_MS = 12 * 60 * 60 * 1000;
+
+function Root() {
+  const [session, setSession] = useState(null);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    const checkAutoLogout = () => {
+      const loginAt = Number(localStorage.getItem(LOGIN_AT_KEY) || 0);
+      if (loginAt && Date.now() - loginAt > AUTO_LOGOUT_MS) {
+        supabaseClient.auth.signOut();
+      }
+    };
+    supabaseClient.auth.getSession().then(({ data }) => {
+      if (data.session && !localStorage.getItem(LOGIN_AT_KEY)) {
+        localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+      }
+      checkAutoLogout();
+      setSession(data.session);
+      setChecked(true);
+    });
+    const { data: sub } = supabaseClient.auth.onAuthStateChange((event, s) => {
+      if (event === "SIGNED_IN") {
+        localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+      } else if (event === "SIGNED_OUT") {
+        localStorage.removeItem(LOGIN_AT_KEY);
+      }
+      setSession(s);
+    });
+    const timer = setInterval(checkAutoLogout, 5 * 60 * 1000);
+    return () => { sub.subscription.unsubscribe(); clearInterval(timer); };
+  }, []);
+
+  if (!checked) {
+    return h("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 } }, "불러오는 중...");
+  }
+  if (!session) {
+    return h(LoginScreen, null);
+  }
+  const isDirector = session.user.app_metadata && session.user.app_metadata.role === "director";
+  if (!isDirector) {
+    return h(DirectorOnlyMessage, null);
+  }
+  return h(StudentsPage, { session });
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(Root, null));
+</script>
+</body>
+</html>
