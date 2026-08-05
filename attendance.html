@@ -2591,10 +2591,11 @@ function AttendancePillTabs({ pageTab, setPageTab, isDirector }) {
 // students·studentCourses·assistants(myAssistant 계산용)를 불러오고 실시간 구독을 유지하는 부분은
 // 원래 MainApp 로직을 그대로 옮겼다 - Attendance/MonthlyAttendanceReport가 그대로 필요로 하기 때문.
 // goRegisterStudentFromDiagnostic(학생관리로 이동)/goToWorkLog(스태프룸 근무일지로 이동)/goToClockIn(스태프룸
-// 출퇴근으로 이동)은 전부 다른(분리된) 페이지로 건너뛰던 다리 역할이라 여기서는 undefined로 전달한다.
-// students.html이 goToWorkLog를 undefined로 넘긴 것과 동일한 방식 - Attendance/AttendanceRow/
-// CourseAttendanceRow가 이미 `goToWorkLog &&`/`goToClockIn &&` 등으로 방어하고 있어 해당 버튼만 자동으로
-// 숨겨진다(진단평가의 "학생등록" 버튼만 예외라서 Attendance 안에서 별도로 방어 처리를 추가했다).
+// 출퇴근으로 이동)은 원래 같은 페이지 안에서 setTab()으로 건너뛰던 다리 역할이었는데, 이제 다른(분리된)
+// 페이지로 실제 이동해야 해서 sessionStorage 키 "attn_cross_page_handoff"에 이동할 곳/필요한 값을 담아두고
+// 그 페이지로 location 이동하는 방식으로 바꿨다(2026-08 후속 수정). dashboard.html은 이미 이 키를 읽어서
+// workLog/clockIn 페이로드를 소비하도록 만들어져 있었고, students.html에도 studentPrefill 페이로드를
+// 소비하는 로직을 같은 방식으로 추가했다.
 // ============================================================
 function MainApp({ session }) {
     const role = session.user.app_metadata && session.user.app_metadata.role === "director" ? "director" : "assistant";
@@ -2667,6 +2668,20 @@ function MainApp({ session }) {
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
     const myAssistant = useMemo(() => assistants.find((a) => a.email === session.user.email) || null, [assistants, session.user.email]);
+    // 다른 페이지(dashboard.html/students.html)로 넘어가면서 그 화면이 특정 항목에 바로 포커스하도록
+    // sessionStorage에 페이로드를 남겨두는 다리 함수들 - 페이지 이동은 location.href로 실제 이동한다.
+    const goToWorkLog = (studentId, date, mode) => {
+        sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "workLog", studentId, date, mode: mode || "write", token: Date.now() }));
+        window.location.href = "dashboard.html";
+    };
+    const goToClockIn = () => {
+        sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "clockIn", token: Date.now() }));
+        window.location.href = "dashboard.html";
+    };
+    const goRegisterStudentFromDiagnostic = (prefillData) => {
+        sessionStorage.setItem("attn_cross_page_handoff", JSON.stringify({ to: "studentPrefill", ...prefillData, token: Date.now() }));
+        window.location.href = "students.html";
+    };
     const content = !studentsLoaded
         ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "불러오는 중...")
         : React.createElement(
@@ -2676,8 +2691,8 @@ function MainApp({ session }) {
             pageTab === "attendance" && React.createElement(Attendance, {
                 students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email,
                 attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode,
-                isDirector: isDirector, goRegisterStudentFromDiagnostic: undefined, studentCourses: studentCourses, goToWorkLog: undefined,
-                myAssistant: myAssistant, goToClockIn: undefined, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true),
+                isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog,
+                myAssistant: myAssistant, goToClockIn: goToClockIn, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true),
             }),
             pageTab === "monthlyReport" && isDirector && React.createElement(MonthlyAttendanceReport, { students: students, studentCourses: studentCourses })
         );
