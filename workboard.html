@@ -3544,6 +3544,11 @@ function MainApp({ session }) {
             } else if (payload.to === "clockIn") {
                 setPageTab("staffroom");
                 setFocusSubTab({ tab: "attendance", token: payload.token });
+            } else if (payload.to === "notices") {
+                // index.html 홈 화면의 "최근 공지" 카드에서 "전체 공지 보기"를 눌렀을 때 넘어오는 다리
+                // (2026-08-06 추가) - 위 workLog/clockIn과 동일한 handoff 패턴.
+                setPageTab("staffroom");
+                setFocusSubTab({ tab: "notices", token: payload.token });
             }
         } catch (e) {
             console.error(e);
