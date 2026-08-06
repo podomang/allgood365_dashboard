@@ -1083,15 +1083,20 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
 // attendance.html의 실제 구현 패턴(hidden md:flex / md:hidden)으로 옮긴 것. 학생관리는 원장 전용 페이지라
 // 별도 탭 전환 없이 4개 메뉴 모두 <a href>로 다른 정적 페이지로 이동한다.
 // ============================================================
+// [2026-08-06] 조교쌤은 실제로 업무보드·출결관리 두 화면만 쓰고 수업관리·학생관리는 접근 권한이 없어서,
+// 애초에 사이드바/하단 내비게이션에도 그 두 메뉴가 안 보이도록 directorOnly 플래그로 걸러낸다
+// (index.html 허브 화면의 카드 필터링과 동일한 방식). 이 페이지(학생관리) 자체는 항상 원장님만
+// 도달하므로(Root에서 이미 차단) isDirector는 늘 true로 넘어온다.
 const NAV_ITEMS = [
     { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
     { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅" },
-    { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓" },
-    { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
+    { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓", directorOnly: true },
+    { key: "students", href: "students.html", label: "학생관리", icon: "👥", directorOnly: true },
 ];
 
-function PageShell({ session, children }) {
+function PageShell({ session, isDirector, children }) {
     const handleLogout = () => { supabaseClient.auth.signOut(); };
+    const visibleNavItems = NAV_ITEMS.filter((t) => !t.directorOnly || isDirector);
     const sidebar = h(
         "aside",
         { className: "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 z-20", style: { background: "#fff", borderRight: `1px solid ${LINE}` } },
@@ -1099,7 +1104,7 @@ function PageShell({ session, children }) {
             h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 26 } })
         ),
         h("nav", { className: "flex-1 px-3 py-4 flex flex-col gap-1" },
-            NAV_ITEMS.map((t) => h("a", {
+            visibleNavItems.map((t) => h("a", {
                 key: t.key,
                 href: t.href,
                 className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
@@ -1125,7 +1130,7 @@ function PageShell({ session, children }) {
     const mobileNav = h(
         "nav",
         { className: "md:hidden fixed bottom-0 inset-x-0 z-20 flex", style: { background: "#fff", borderTop: `1px solid ${LINE}` } },
-        NAV_ITEMS.map((t) => h("a", {
+        visibleNavItems.map((t) => h("a", {
             key: t.key,
             href: t.href,
             className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
@@ -1202,7 +1207,7 @@ function StudentsPage({ session }) {
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
-    return h(PageShell, { session },
+    return h(PageShell, { session, isDirector: true },
         h(StudentManager, {
             onChanged: undefined,
             prefill,
