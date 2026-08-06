@@ -2522,24 +2522,13 @@ function MainApp({ session }) {
   );
 }
 
-// 원장 전용(테스트 모드) 안내 카드 - students.html의 DirectorOnlyMessage와 동일한 톤.
-// [2026-08-06] 수업관리는 아직 원장님 테스트 모드라 조교쌤 계정은 접근 권한이 없음(추후 권한 확대 여부는
-// 별도 결정). index.html 홈 화면에서도 이 화면 타일 자체를 조교쌤껜 숨겨두지만, 즐겨찾기나 URL 직접
-// 입력으로 들어오는 경우까지 막기 위해 이 페이지 안에서도 한 번 더 막아준다.
-function DirectorOnlyMessage() {
-  return h("div", { style: { background: PAPER, minHeight: "100vh" }, className: "flex items-center justify-center px-4" },
-    h("div", { className: "w-full max-w-sm rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}` } },
-      h("img", { src: LOGO_HORIZONTAL, alt: "올곧수학 더센텀", style: { height: 34, margin: "0 auto 20px", display: "block" } }),
-      h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8, color: INK } }, "이 화면은 아직 원장님 전용입니다"),
-      h("div", { style: { fontSize: 12, color: SUBINK, marginBottom: 20 } }, "수업관리는 현재 테스트 중이라 조교쌤 계정으로는 이용하실 수 없어요. 이용 범위는 추후 확대될 수 있습니다."),
-      h("a", { href: "index.html", className: "inline-block px-5 py-2.5 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff", textDecoration: "none" } }, "홈으로 돌아가기")
-    )
-  );
-}
-
 // ============================================================
 // Root
 // ============================================================
+// [2026-08-06] 수업관리는 아직 원장님 테스트 모드라 조교쌤 계정은 접근 권한이 없음(추후 권한 확대 여부는
+// 별도 결정). index.html 홈 화면에서 이 화면 타일 자체를 조교쌤껜 숨겨두지만, 즐겨찾기나 URL 직접 입력으로
+// 들어오는 경우까지 막기 위해 여기서 한 번 더 확인한다 - students.html처럼 "원장 전용" 안내 카드를 보여주는
+// 대신, 조교쌤 화면에는 이 페이지의 존재 자체가 드러나지 않도록 안내 문구 없이 곧바로 홈으로 돌려보낸다.
 function App() {
   const [session, setSession] = useState(undefined);
 
@@ -2549,12 +2538,16 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  const isDirector = session && session.user.app_metadata && session.user.app_metadata.role === "director";
+  useEffect(() => {
+    if (session && !isDirector) window.location.replace("index.html");
+  }, [session, isDirector]);
+
   if (session === undefined) {
     return h("div", { style: { background: PAPER, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: SUBINK, fontSize: 13 } }, "확인 중...");
   }
   if (!session) return h(LoginScreen);
-  const isDirector = session.user.app_metadata && session.user.app_metadata.role === "director";
-  if (!isDirector) return h(DirectorOnlyMessage);
+  if (!isDirector) return h("div", { style: { background: PAPER, minHeight: "100vh" } });
   return h(MainApp, { session });
 }
 
