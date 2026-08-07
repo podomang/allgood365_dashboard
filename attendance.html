@@ -251,6 +251,31 @@ function korWeekdayOf(dateStr) {
     return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
 
+// ---------- 출결 자동 시간기록(checked_at) 관련 헬퍼 (2026-08-07 추가) ----------
+// "18:00~20:30" 같은 시간범위 문자열에서 시작 시각("18:00")만 뽑아낸다. 보강(scheduledTime)처럼
+// 범위 없이 "19:00"만 있는 경우도 그대로 통과시킨다.
+function parseStartTime(rangeStr) {
+    if (!rangeStr) return "";
+    const first = String(rangeStr).split("~")[0].trim();
+    return /^\d{1,2}:\d{2}$/.test(first) ? first : "";
+}
+// timestamptz(checked_at) -> 브라우저 로컬시각(=학원 기준 한국시간) "HH:MM" 문자열
+function checkedAtHHMM(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+// "HH:MM" 두 시각의 분 차이 (a - b). 정시보다 늦으면 양수, 이르면 음수.
+function minutesDiffHHMM(aHHMM, bHHMM) {
+    const [ah, am] = aHHMM.split(":").map(Number);
+    const [bh, bm] = bHHMM.split(":").map(Number);
+    return (ah * 60 + am) - (bh * 60 + bm);
+}
+// "HH:MM" 입력값 + 기준 날짜(attn_date)를 합쳐서 checked_at에 저장할 ISO 문자열로 변환(시각 직접 수정용).
+function hhmmToIsoOnDate(dateStr, hhmm) {
+    return new Date(`${dateStr}T${hhmm}:00`).toISOString();
+}
+
 function monthLabel(d) { return `${d.getFullYear()}년 ${d.getMonth() + 1}월`; }
 
 function mapStudentRoster(row) {
@@ -361,7 +386,7 @@ async function fetchAttendanceForDate(date) {
     if (error)
         throw error;
     const result = { regular: {}, clinic: {}, extra: {} };
-    data.forEach((r) => { result[r.session][r.student_id] = { status: r.status, reason: r.reason || "", targetDate: r.target_date || "", targetTime: r.target_time || "" }; });
+    data.forEach((r) => { result[r.session][r.student_id] = { status: r.status, reason: r.reason || "", targetDate: r.target_date || "", targetTime: r.target_time || "", checkedAt: r.checked_at || null }; });
     return result;
 }
 async function setAttendanceReason(date, session, studentId, reason) {
@@ -370,6 +395,8 @@ async function setAttendanceReason(date, session, studentId, reason) {
     if (error)
         throw error;
 }
+// 출석/지각/조퇴 버튼을 누른 "순간"의 시각을 checked_at에 자동 기록한다. 결석·일정변경은 시간 기록 대상이
+// 아니므로 항상 null(2026-08-07 원장님 확인 - 결석은 애초에 등원을 안 한 것이라 시각이 의미 없음).
 async function setAttendanceRow(date, session, studentId, status, isCurrentlyActive) {
     if (isCurrentlyActive) {
         const { error } = await supabaseClient.from("attn_attendance").delete()
@@ -378,10 +405,18 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
             throw error;
     }
     else {
-        const { error } = await supabaseClient.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
+        const checkedAt = (status === "출석" || status === "지각" || status === "조퇴") ? new Date().toISOString() : null;
+        const { error } = await supabaseClient.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, checked_at: checkedAt, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
         if (error)
             throw error;
     }
+}
+// 자동 기록된 시각을 원장/조교가 잘못 눌렀을 때 직접 정정하는 용도.
+async function setAttendanceCheckedAt(date, session, studentId, checkedAtIso) {
+    const { error } = await supabaseClient.from("attn_attendance").update({ checked_at: checkedAtIso, updated_at: new Date().toISOString() })
+        .eq("attn_date", date).eq("session", session).eq("student_id", studentId);
+    if (error)
+        throw error;
 }
 // ---------- 보강(extra) 명단 ----------
 async function fetchExtraRoster(date) {
@@ -664,16 +699,23 @@ async function setCourseScheduleChange(date, courseId, studentId, targetDate, ta
 
 // ---------- 월별출석부(원장 전용) - 한 달 범위를 한 번에 불러오는 함수들 ----------
 // 기존 화면(출석체크)의 하루 단위 fetch 함수들과는 완전히 별개로 새로 추가한 것이라 기존 로직에는 영향 없음.
+// checkedAtByDate는 같은 모양(attn_date -> session -> student_id)으로, 값이 있는 건(출석/지각/조퇴)만 채워진다.
+// byDate(상태 문자열 그리드)는 기존 그대로 두고 시각만 별도 맵으로 얹은 것 - 기존 사용처(격자표)는 영향 없음.
 async function fetchAttendanceRange(startDate, endDate) {
-    const { data, error } = await supabaseClient.from("attn_attendance").select("attn_date, session, student_id, status").gte("attn_date", startDate).lte("attn_date", endDate);
+    const { data, error } = await supabaseClient.from("attn_attendance").select("attn_date, session, student_id, status, checked_at").gte("attn_date", startDate).lte("attn_date", endDate);
     if (error)
         throw error;
     const byDate = {};
+    const checkedAtByDate = {};
     data.forEach((r) => {
         byDate[r.attn_date] = byDate[r.attn_date] || { regular: {}, clinic: {}, extra: {} };
         byDate[r.attn_date][r.session][r.student_id] = r.status;
+        if (r.checked_at) {
+            checkedAtByDate[r.attn_date] = checkedAtByDate[r.attn_date] || { regular: {}, clinic: {}, extra: {} };
+            checkedAtByDate[r.attn_date][r.session][r.student_id] = r.checked_at;
+        }
     });
-    return byDate;
+    return { byDate, checkedAtByDate };
 }
 // 보강은 그날그날 명단에 있어야만 "그 학생이 그날 보강 대상이었다"는 뜻이라, 정규수업/클리닉처럼
 // 요일로 계산할 수 없다 - attn_extra_roster에 실제로 있었던 날짜만 별도로 불러온다.
@@ -1095,7 +1137,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         setSessionAttendance((prev) => {
             const rec = { ...prev[session] };
             if (isActive) delete rec[studentId];
-            else rec[studentId] = { status, reason: rec[studentId]?.reason || "" };
+            else {
+                // 출석/지각/조퇴는 버튼을 누르는 이 순간의 시각을 그대로 자동 기록(2026-08-07 추가).
+                // 결석·일정변경은 시간 기록 대상이 아니라 항상 checkedAt이 비어있다.
+                const checkedAt = (status === "출석" || status === "지각" || status === "조퇴") ? new Date().toISOString() : null;
+                rec[studentId] = { status, reason: rec[studentId]?.reason || "", checkedAt };
+            }
             return { ...prev, [session]: rec };
         });
         try {
@@ -1109,6 +1156,17 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         setSessionAttendance((prev) => ({ ...prev, [session]: { ...prev[session], [studentId]: { ...prev[session][studentId], reason } } }));
         try {
             await setAttendanceReason(selectedDate, session, studentId, reason);
+        } catch (e) {
+            console.error(e);
+            load();
+        }
+    };
+    // 자동 기록된 시각을 잘못 눌렀을 때 정정하는 용도(연필 아이콘 -> 시각 직접 입력).
+    const saveCheckedAt = async (studentId, hhmm) => {
+        const iso = hhmmToIsoOnDate(selectedDate, hhmm);
+        setSessionAttendance((prev) => ({ ...prev, [session]: { ...prev[session], [studentId]: { ...prev[session][studentId], checkedAt: iso } } }));
+        try {
+            await setAttendanceCheckedAt(selectedDate, session, studentId, iso);
         } catch (e) {
             console.error(e);
             load();
@@ -1548,7 +1606,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
         );
     } else {
         listBody = React.createElement(
@@ -1570,7 +1628,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -1690,6 +1748,70 @@ function ReasonField({ status, initialValue, onSave, onCancel }) {
         onCancel && React.createElement("button", { onClick: onCancel, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
     );
 }
+// 출석/지각/조퇴 자동 시간기록(checked_at) 배지 (2026-08-07 추가): 버튼을 누른 순간 자동 저장된 시각을
+// 학생의 정시 시작시각과 비교해서 "정시/지각 몇분/일찍 몇분" 메시지를 계산해 보여준다. 결석은 이 블록
+// 자체가 호출되지 않는다(원장님 확인 - 결석은 시간 기록 대상 아님). 연필 아이콘으로 잘못 찍힌 시각을
+// 직접 정정할 수 있다.
+function CheckedAtBlock({ status, checkedAt, scheduledStart, onSave, locked }) {
+    const [editing, setEditing] = useState(false);
+    if (editing) {
+        return React.createElement(CheckedAtField, {
+            status: status, initialValue: checkedAt ? checkedAtHHMM(checkedAt) : "",
+            onSave: async (hhmm) => { await onSave(hhmm); setEditing(false); },
+            onCancel: checkedAt ? () => setEditing(false) : null,
+        });
+    }
+    if (!checkedAt) {
+        // 이 기능이 생기기 전에 이미 저장돼 있던 옛날 기록에는 checked_at이 없을 수 있음 - 그 경우만 안내.
+        return React.createElement(
+            "div",
+            { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "기록된 시각 없음"),
+            !locked && React.createElement("button", { onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color: STATUS[status].color }, title: "시각 입력" }, "\u270E")
+        );
+    }
+    const hhmm = checkedAtHHMM(checkedAt);
+    let tone = STATUS[status].color, soft = STATUS[status].soft, msg = `\uD83D\uDD52 ${hhmm} 자동 기록`;
+    if (scheduledStart) {
+        const diff = minutesDiffHHMM(hhmm, scheduledStart);
+        if (status === "지각") {
+            msg = `\uD83D\uDD52 ${hhmm} 지각 자동 기록 · 정시 ${scheduledStart} 대비 ${Math.max(diff, 1)}분 지각`;
+        } else if (status === "출석") {
+            if (diff >= 1) msg = `\uD83D\uDD52 ${hhmm} 출석 처리 · 정시보다 ${diff}분 늦게 체크됐지만 출석으로 처리됨`;
+            else if (diff <= -1) { msg = `\uD83D\uDD52 ${hhmm} 일찍 출석 자동 기록 · 정시 ${scheduledStart} 대비 ${Math.abs(diff)}분 일찍`; tone = TEAL; soft = TEAL_SOFT; }
+            else msg = `\uD83D\uDD52 ${hhmm} 정시 출석 자동 기록`;
+        } else if (status === "조퇴") {
+            msg = `\uD83D\uDD52 ${hhmm} 조퇴 자동 기록`;
+        }
+    }
+    return React.createElement(
+        "div",
+        { className: "mt-2 flex items-center gap-1.5 flex-wrap" },
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, background: soft, color: tone, borderRadius: 5, padding: "2px 7px" } }, msg),
+        !locked && React.createElement("button", { onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color: tone }, title: "시각 수정" }, "\u270E")
+    );
+}
+function CheckedAtField({ status, initialValue, onSave, onCancel }) {
+    const [value, setValue] = useState(initialValue);
+    const [saving, setSaving] = useState(false);
+    const save = async () => {
+        if (!value) return;
+        setSaving(true);
+        try {
+            await onSave(value);
+        }
+        finally {
+            setSaving(false);
+        }
+    };
+    return React.createElement(
+        "div",
+        { className: "mt-2 flex gap-2 flex-wrap items-center" },
+        React.createElement("input", { type: "time", value: value, autoFocus: true, onChange: (e) => setValue(e.target.value), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${STATUS[status].color}`, background: STATUS[status].soft, color: INK } }),
+        React.createElement("button", { onClick: save, disabled: saving || !value, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: STATUS[status].color, color: "#fff", opacity: (saving || !value) ? 0.6 : 1 } }, saving ? "\uC800\uC7A5 \uC911..." : "\uC800\uC7A5"),
+        onCancel && React.createElement("button", { onClick: onCancel, className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "\uCDE8\uC18C")
+    );
+}
 // 일정변경: 목적지 날짜/시간 + 메모. 저장하면 그 날짜의 보강 명단에 자동 등록됨
 // 일정변경 배지 + 연필(수정) 버튼. 값이 이미 있으면 평소엔 접혀있고, 연필을 눌러야 편집창이 열림
 // \uC77C\uC815\uBCC0\uACBD \uC9C0\uC815/\uC218\uC815\uC740 \uC6D0\uC7A5 \uC804\uC6A9 - \uC870\uAD50 \uD654\uBA74\uC5D0\uC11C\uB294 \uC774\uBBF8 \uC9C0\uC815\uB41C \uB0B4\uC6A9\uC744 \uC77D\uAE30\uC804\uC6A9 \uBC30\uC9C0\uB85C\uB9CC \uBCF4\uC5EC\uC90C(\u270E \uC218\uC815 \uBC84\uD2BC \uC5C6\uC74C).
@@ -1796,12 +1918,16 @@ function ExtraTimeControl({ initialValue, onSave, locked }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveCheckedAt, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
     const targetTime = current[s.id]?.targetTime || "";
+    const checkedAt = current[s.id]?.checkedAt || null;
     const scheduledTime = (extraMeta[s.id] && extraMeta[s.id].time) || "";
+    // 출석/지각/조퇴 자동기록 시각과 비교할 "정시" 시작시각 - 세션별로 기준이 다르다(정규/클리닉은 학생
+    // 등록정보, 보강은 그날 보강명단에 입력해둔 예정시간).
+    const scheduledStart = session === "extra" ? parseStartTime(scheduledTime) : parseStartTime(session === "clinic" ? s.clinicTime : s.regularTime);
     // "보강" 탭에서만 쓰이는 출처 정보 - 일정변경으로 자동 등록된 경우에만 값이 있고(정규수업/클리닉/특강),
     // "+추가"로 직접 넣은 경우엔 비어있어 배지가 표시되지 않는다.
     const originSession = (extraMeta[s.id] && extraMeta[s.id].originSession) || "";
@@ -1853,6 +1979,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
             }))),
             session === "extra" && React.createElement("button", { onClick: () => { if (!locked) removeFromExtra(s.id); }, disabled: locked, style: { fontSize: 11, color: SUBINK, flexShrink: 0, opacity: locked ? 0.4 : 1, cursor: locked ? "not-allowed" : "pointer" }, className: "px-2 py-1 rounded-md", title: locked ? "출근 기록 후 가능해요" : "목록에서 제거" }, "✕")
         ),
+        (st === "출석" || st === "지각" || st === "조퇴") && React.createElement(CheckedAtBlock, { status: st, checkedAt: checkedAt, scheduledStart: scheduledStart, onSave: (hhmm) => saveCheckedAt(s.id, hhmm), locked: locked }),
         st === "일정변경" && React.createElement(ScheduleChangeBlock, { targetDate: targetDate, targetTime: targetTime, note: reason, onSave: (td, tt, note) => saveScheduleChange(s.id, td, tt, note), isDirector: isDirector }),
         st && st !== "출석" && st !== "일정변경" && React.createElement(ReasonBlock, { status: st, initialValue: reason, onSave: (val) => saveReason(s.id, val), locked: locked }),
         showNoteLine && (noteEditing
@@ -2126,6 +2253,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
     const [subTab, setSubTab] = useState("regular");
     const [history, setHistory] = useState([]);
     const [attByDate, setAttByDate] = useState({});
+    const [checkedAtByDate, setCheckedAtByDate] = useState({});
     const [extraByDate, setExtraByDate] = useState({});
     const [courseAttByDate, setCourseAttByDate] = useState({});
     const [loading, setLoading] = useState(true);
@@ -2139,9 +2267,10 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
         let cancelled = false;
         setLoading(true);
         Promise.all([fetchAttendanceRange(startDate, endDate), fetchExtraRosterRange(startDate, endDate), fetchCourseAttendanceRange(startDate, endDate)])
-            .then(([att, extra, courseAtt]) => {
+            .then(([attResult, extra, courseAtt]) => {
             if (cancelled) return;
-            setAttByDate(att);
+            setAttByDate(attResult.byDate);
+            setCheckedAtByDate(attResult.checkedAtByDate);
             setExtraByDate(extra);
             setCourseAttByDate(courseAtt);
         })
@@ -2214,31 +2343,31 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const detail = [];
             let stats = { 출석: 0, 지각: 0, 조퇴: 0, 결석: 0 };
             let total = 0;
-            const addHit = (label, status, dateStr, weekday) => {
+            const addHit = (label, status, dateStr, weekday, checkedAt) => {
                 if (!status) return;
-                detail.push({ dateStr, weekday, label, status });
+                detail.push({ dateStr, weekday, label, status, checkedAt: checkedAt || null });
                 if (status !== "일정변경" && stats[status] !== undefined) { stats[status]++; total++; }
             };
             days.forEach((d) => {
                 const rs = resolvedFor(s, d.dateStr);
                 if ((rs.days || []).includes(d.weekday))
-                    addHit("정규수업", attByDate[d.dateStr]?.regular?.[s.id] || "", d.dateStr, d.weekday);
+                    addHit("정규수업", attByDate[d.dateStr]?.regular?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.regular?.[s.id]);
                 if (rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday))
-                    addHit("클리닉", attByDate[d.dateStr]?.clinic?.[s.id] || "", d.dateStr, d.weekday);
+                    addHit("클리닉", attByDate[d.dateStr]?.clinic?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.clinic?.[s.id]);
                 if (extraByDate[d.dateStr] && extraByDate[d.dateStr][s.id])
-                    addHit("보강", attByDate[d.dateStr]?.extra?.[s.id] || "", d.dateStr, d.weekday);
+                    addHit("보강", attByDate[d.dateStr]?.extra?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.extra?.[s.id]);
             });
             (studentCourses || []).filter((c) => c.studentId === s.id).forEach((c) => {
                 days.forEach((d) => {
                     if ((c.days || []).includes(d.weekday) && (!c.startDate || d.dateStr >= c.startDate) && (!c.endDate || d.dateStr <= c.endDate))
-                        addHit(`특강 · ${c.courseName}`, courseAttByDate[d.dateStr]?.[c.id] || "", d.dateStr, d.weekday);
+                        addHit(`특강 · ${c.courseName}`, courseAttByDate[d.dateStr]?.[c.id] || "", d.dateStr, d.weekday, null);
                 });
             });
             detail.sort((a, b) => a.dateStr < b.dateStr ? -1 : a.dateStr > b.dateStr ? 1 : 0);
             const rate = total > 0 ? Math.round(((stats.출석 + stats.지각) / total) * 1000) / 10 : null;
             return { student: s, stats, rate, detail };
         }).filter((row) => row.detail.length > 0);
-    }, [students, studentCourses, days, historyByStudent, attByDate, extraByDate, courseAttByDate]);
+    }, [students, studentCourses, days, historyByStudent, attByDate, checkedAtByDate, extraByDate, courseAttByDate]);
     const sortedStudentRows = useMemo(() => {
         const list = studentRows.slice();
         if (studentSort === "name")
@@ -2322,10 +2451,12 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                                         ? React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, "이 달에 기록이 없습니다.")
                                         : row.detail.map((d, i) => React.createElement(
                                             "div",
-                                            { key: i, style: { display: "flex", gap: 8, fontSize: 11.5, padding: "2px 0" } },
+                                            { key: i, style: { display: "flex", gap: 8, fontSize: 11.5, padding: "2px 0", alignItems: "baseline", flexWrap: "wrap" } },
                                             React.createElement("span", { style: { color: SUBINK, minWidth: 70 } }, d.dateStr.slice(5), "(", d.weekday, ")"),
                                             React.createElement("span", { style: { minWidth: 110, color: SUBINK } }, d.label),
-                                            React.createElement("span", { style: { fontWeight: 700, color: STATUS[d.status] ? STATUS[d.status].color : INK } }, d.status)
+                                            React.createElement("span", { style: { fontWeight: 700, color: STATUS[d.status] ? STATUS[d.status].color : INK } }, d.status),
+                                            // 출석/지각/조퇴는 버튼을 누른 순간 자동 기록된 시각이 있으면 같이 보여준다(결석·일정변경은 시간 없음).
+                                            d.checkedAt && React.createElement("span", { style: { fontSize: 10.5, color: SUBINK, fontVariantNumeric: "tabular-nums" } }, checkedAtHHMM(d.checkedAt))
                                         ))
                                 )
                             )
