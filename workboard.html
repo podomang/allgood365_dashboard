@@ -507,6 +507,14 @@ const ACADEMIC_EVENT_COLORS = {
     공휴일: ACAD_MAGENTA, 명절: ACAD_MAGENTA_LIGHT, 수능: ACAD_YELLOW, 학원휴무: ACAD_BLUE, 학원일정: ACAD_ORANGE,
     방학식: ACAD_AQUA, 개학: ACAD_GREEN, 시험: ACAD_RED, 학교행사: ACAD_VIOLET, 기타: SUBINK,
 };
+// 하루에 여러 학사일정이 겹칠 때 어떤 걸 먼저 보여줄지 정하는 우선순위(숫자가 작을수록 먼저 표시).
+// 지금은 "개학이 방학보다 먼저 확인해야 하는 이벤트"라는 원장님 판단만 반영(2026-08-08) - 그 외
+// 유형(시험/학교행사/공휴일 등)은 아직 순서를 정하지 않아서 전부 동순위로 두고, 정해지는 대로 여기에
+// 추가하면 됨. 동순위 항목끼리는 원래 있던 순서(학교 처리 순서)를 그대로 유지(안정 정렬).
+const ACAD_DAY_ORDER_PRIORITY = { 개학: 0, 방학식: 1 };
+function acadDayPriority(e) {
+    return Object.prototype.hasOwnProperty.call(ACAD_DAY_ORDER_PRIORITY, e.type) ? ACAD_DAY_ORDER_PRIORITY[e.type] : 2;
+}
 
 // ---------- 조교명단 ----------
 async function fetchAssistants() {
@@ -896,6 +904,10 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                 guard++;
             }
         });
+        // 같은 날짜에 여러 학사일정이 겹칠 때(예: 어떤 학교는 개학, 다른 학교는 아직 여름방학 중)
+        // 학교 처리 순서에 따라 우연히 정해지던 표시 순서 대신, 위 ACAD_DAY_ORDER_PRIORITY 기준으로
+        // 정렬한다(동순위끼리는 원래 순서 유지 - Array.sort는 안정 정렬).
+        Object.keys(m).forEach((d) => { m[d] = m[d].slice().sort((a, b) => acadDayPriority(a) - acadDayPriority(b)); });
         return m;
     }, [filteredAcademicEvents, holidayDates]);
     // 대시보드 캘린더 위쪽/아래쪽 어디에 있든 한눈에 보이도록, 오늘 이후 가장 가까운 학원휴무·학원일정
