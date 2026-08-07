@@ -1276,208 +1276,6 @@ function AssignRosterView({ students, textbooks, progress, assignments, onAssign
 }
 
 // ============================================================
-// 과제 카드 (관리자용 - 확인/코멘트 작성)
-// ============================================================
-function AdminAssignmentCard({ a, isDirector, onDelete, onSaveComment }) {
-  const [comment, setComment] = useState(a.teacher_comment || "");
-  const [saving, setSaving] = useState(false);
-  const isDone = a.status === "제출완료";
-  const isOverdue = !isDone && a.due_date && a.due_date < new Date().toISOString().slice(0, 10);
-
-  const save = async () => {
-    setSaving(true);
-    await onSaveComment(a.id, comment.trim());
-    setSaving(false);
-  };
-
-  let badgeColor = AMBER, badgeSoft = AMBER_SOFT, badgeLabel = "미제출";
-  if (isDone) { badgeColor = TEAL; badgeSoft = TEAL_SOFT; badgeLabel = "제출완료"; }
-  else if (isOverdue) { badgeColor = RED; badgeSoft = RED_SOFT; badgeLabel = "기한초과"; }
-
-  return h("div", { className: "rounded-xl p-4 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
-    h("div", { className: "flex items-start justify-between gap-2" },
-      h("div", null,
-        h("div", { style: { fontSize: 11.5, color: SUBINK, marginBottom: 3 } },
-          a.attn_students ? a.attn_students.name : "(삭제된 학생)",
-          " · ", a.class_date, " 수업",
-          a.clm_textbooks ? " · " + a.clm_textbooks.name : ""
-        ),
-        h("div", { style: { fontSize: 14, fontWeight: 700, color: INK } },
-          a.description + (a.range_from ? ` (${a.range_from}~${a.range_to || a.range_from})` : "")
-        ),
-        h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 2 } }, "제출기한: " + a.due_date)
-      ),
-      h("div", { className: "flex items-center gap-2 flex-shrink-0" },
-        h(Badge, { color: badgeColor, soft: badgeSoft }, badgeLabel),
-        isDirector && h("button", { type: "button", onClick: () => onDelete(a.id), style: { fontSize: 11, color: SUBINK, fontWeight: 600 } }, "삭제")
-      )
-    ),
-
-    isDone && h("div", { className: "mt-3 pt-3", style: { borderTop: `1px dashed ${LINE}` } },
-      a.student_note && h("div", { style: { fontSize: 12.5, color: INK, marginBottom: 8 } }, "학생 메모: ", a.student_note),
-      a.question_photo_urls && a.question_photo_urls.length > 0 && h("div", { className: "flex gap-2 flex-wrap mb-2" },
-        a.question_photo_urls.map((url, i) => h("a", { key: i, href: url, target: "_blank", rel: "noreferrer" },
-          h("img", { src: url, style: { width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: `1px solid ${LINE}` } })
-        ))
-      ),
-      h("label", { style: { fontSize: 11.5, color: SUBINK, fontWeight: 700, display: "block", marginBottom: 4 } }, "확인 코멘트"),
-      isDirector
-        ? h(React.Fragment, null,
-            h("textarea", {
-              value: comment, onChange: (e) => setComment(e.target.value), placeholder: "학생에게 남길 코멘트를 입력하세요",
-              className: "w-full px-3 py-2 rounded-lg text-sm outline-none mb-2", style: { border: `1px solid ${LINE}`, minHeight: 56, resize: "vertical", fontFamily: "inherit" },
-            }),
-            h("button", { type: "button", onClick: save, disabled: saving || comment.trim() === (a.teacher_comment || ""),
-              className: "px-4 py-1.5 rounded-lg text-xs font-bold",
-              style: { background: NAVY, color: "#fff", opacity: saving || comment.trim() === (a.teacher_comment || "") ? 0.5 : 1 } },
-              saving ? "저장 중..." : "코멘트 저장")
-          )
-        : h("p", { style: { fontSize: 12.5, color: a.teacher_comment ? INK : SUBINK } }, a.teacher_comment || "아직 코멘트가 없어요.")
-    )
-  );
-}
-
-// ============================================================
-// 과제 관리 대시보드
-// ============================================================
-const ASSIGNMENT_FILTERS = [
-  { key: "all", label: "전체" },
-  { key: "pending", label: "미제출" },
-  { key: "done", label: "제출완료" },
-];
-
-function AssignmentsDashboard({ session, role }) {
-  const isDirector = role === "director";
-  const [students, setStudents] = useState([]);
-  const [textbooks, setTextbooks] = useState([]);
-  const [progress, setProgress] = useState([]);
-  const [assignments, setAssignments] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [filter, setFilter] = useState("all");
-  const [subView, setSubView] = useState(isDirector ? "assign" : "status");
-
-  const loadAll = useCallback(async () => {
-    setErrorMsg("");
-    const [studentsRes, textbooksRes, progressRes, assignmentsRes] = await Promise.all([
-      supabaseClient.from("attn_students").select("id,name,school,grade,class").neq("status", "퇴원").order("name"),
-      supabaseClient.from("clm_textbooks").select("id,name,category").order("name"),
-      supabaseClient.from("clm_textbook_progress").select("*, clm_textbooks(name,category)").eq("scope", "student"),
-      supabaseClient.from("clm_assignments")
-        .select("*, attn_students(name,school,grade), clm_textbooks(name)")
-        .order("due_date", { ascending: true }),
-    ]);
-    if (studentsRes.error || textbooksRes.error || progressRes.error || assignmentsRes.error) {
-      setErrorMsg("데이터를 불러오는 중 문제가 생겼어요. 새로고침 해보세요.");
-    }
-    setStudents(studentsRes.data || []);
-    setTextbooks(textbooksRes.data || []);
-    setProgress(progressRes.data || []);
-    setAssignments(assignmentsRes.data || []);
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => { loadAll(); }, [loadAll]);
-
-  useEffect(() => {
-    const channel = supabaseClient
-      .channel("clm_assignments_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "clm_assignments" }, () => loadAll())
-      .subscribe();
-    return () => { supabaseClient.removeChannel(channel); };
-  }, [loadAll]);
-
-  const actions = {
-    addAssignment: async (payload) => {
-      const { error } = await supabaseClient.from("clm_assignments").insert({ ...payload, created_by: session.user.email });
-      if (error) { setErrorMsg("과제 등록에 실패했어요: " + error.message); return; }
-      await loadAll();
-    },
-    cancelAssignment: async (id) => {
-      // 관제탑 뷰에서 도장 취소: 확인창 없이 즉시 취소 (아직 제출/코멘트 없는 배정만 가능하도록 위에서 걸러짐)
-      const { error } = await supabaseClient.from("clm_assignments").delete().eq("id", id);
-      if (error) { setErrorMsg("배정 취소에 실패했어요: " + error.message); return; }
-      await loadAll();
-    },
-    deleteAssignment: async (id) => {
-      if (!window.confirm("이 과제를 삭제할까요?")) return;
-      const { error } = await supabaseClient.from("clm_assignments").delete().eq("id", id);
-      if (error) { setErrorMsg("삭제에 실패했어요: " + error.message); return; }
-      await loadAll();
-    },
-    saveComment: async (id, comment) => {
-      const { error } = await supabaseClient.from("clm_assignments")
-        .update({ teacher_comment: comment || null, teacher_comment_by: session.user.email, teacher_comment_at: new Date().toISOString() })
-        .eq("id", id);
-      if (error) { setErrorMsg("코멘트 저장에 실패했어요: " + error.message); return; }
-      await loadAll();
-    },
-  };
-
-  const filtered = useMemo(() => {
-    if (filter === "pending") return assignments.filter((a) => a.status !== "제출완료");
-    if (filter === "done") return assignments.filter((a) => a.status === "제출완료");
-    return assignments;
-  }, [assignments, filter]);
-
-  const pendingCount = assignments.filter((a) => a.status !== "제출완료").length;
-
-  if (!loaded) return h("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "불러오는 중...");
-
-  return h("div", null,
-    errorMsg && h("div", { className: "rounded-xl px-4 py-2.5 mb-4", style: { background: RED_SOFT, color: RED, fontSize: 12.5, fontWeight: 600 } }, errorMsg),
-
-    isDirector && h("div", { className: "flex items-center gap-2 mb-4" },
-      [["assign", "배정하기"], ["status", "제출 현황"]].map(([key, label]) =>
-        h("button", { key, type: "button", onClick: () => setSubView(key),
-          className: "px-4 py-2 rounded-xl text-sm font-bold",
-          style: { background: subView === key ? NAVY : "#fff", color: subView === key ? "#fff" : SUBINK, border: `1px solid ${subView === key ? NAVY : LINE}` } },
-          label)
-      )
-    ),
-
-    isDirector && subView === "assign" && h(AssignRosterView, {
-      students, textbooks, progress, assignments,
-      onAssign: actions.addAssignment, onCancelAssign: actions.cancelAssignment,
-    }),
-
-    (!isDirector || subView === "status") && h(React.Fragment, null,
-      h("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-5" },
-        [["전체 과제", assignments.length + "건", NAVY], ["미제출", pendingCount + "건", AMBER], ["제출완료", (assignments.length - pendingCount) + "건", TEAL]].map(([label, value, color]) =>
-          h("div", { key: label, className: "rounded-xl px-3 py-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            h("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, label),
-            h("div", { style: { fontSize: 16, fontWeight: 800, color } }, value)
-          )
-        )
-      ),
-
-      isDirector && h("div", { className: "mb-4" },
-        adding
-          ? h(AddAssignmentForm, { students, textbooks, session, onAdd: actions.addAssignment, onClose: () => setAdding(false) })
-          : h("button", { type: "button", onClick: () => setAdding(true),
-              className: "px-4 py-2.5 rounded-xl text-sm font-bold",
-              style: { background: "#fff", color: NAVY, border: `1.5px dashed ${NAVY_SOFT}` } }, "+ 학생 1명 개별 등록")
-      ),
-
-      h("div", { className: "flex items-center gap-2 mb-4 flex-wrap" },
-        ASSIGNMENT_FILTERS.map((f) =>
-          h("button", { key: f.key, type: "button", onClick: () => setFilter(f.key),
-            className: "px-3 py-1.5 rounded-lg text-xs font-bold",
-            style: { background: filter === f.key ? NAVY : "#fff", color: filter === f.key ? "#fff" : SUBINK, border: `1px solid ${filter === f.key ? NAVY : LINE}` } },
-            f.label)
-        ),
-        !isDirector && h("span", { style: { marginLeft: "auto", fontSize: 11.5, color: SUBINK } }, "조회 전용 계정입니다")
-      ),
-
-      filtered.length === 0
-        ? h("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } }, "해당하는 과제가 없어요.")
-        : filtered.map((a) => h(AdminAssignmentCard, { key: a.id, a, isDirector, onDelete: actions.deleteAssignment, onSaveComment: actions.saveComment }))
-    )
-  );
-}
-
-// ============================================================
 // 수업일지 - 출석체크 명단과 연동된 관제탑 (수업내용 메모 + 과제 배정, 반별 일괄 배정)
 // 원장님 전용 화면 (2026-07-31 확인: 조교는 당분간 출결체크 보조 역할만).
 // ============================================================
@@ -2386,6 +2184,723 @@ function ClassLogDashboard({ session }) {
 }
 
 // ============================================================
+// 과제 관리 탭 개편판 (2026-08-07) — 미리보기 목업(mockup_classlog_studentscreen.html) 구조를 그대로
+// 코드로 옮김: 알약버튼 학생목록 + 학생별 원스크린. 기존 AssignmentsDashboard(교재별로 죽 나열하던
+// 과제 목록 화면)를 완전히 대체함 — 원장님이 "이제 새 화면으로 넘어간다"고 확정하셔서 구버전은
+// allgoodstudy.html.orig_backup / allgoodstudy-beta.html에만 보관하고 이 파일에서는 삭제함(2026-08-07).
+// 수업일지 탭(아래 ClassLogDashboard)은 이번 작업으로 하나도 안 건드리고 그대로 둠 — 별개 탭.
+// 조교 계정은 아직 App()의 로그인 리다이렉트로 이 페이지 자체에 못 들어와서(App() 참고) 실제로 조교가
+// 테스트할 수는 없음 — 원장님이 로그인한 상태에서 "🙋 조교 화면 미리보기" 토글로 조교가 보게 될 화면
+// (과제체크+조교코멘트만 가능, 수업내용/새과제/근무일지 안 보임)을 미리 확인할 수 있게 함.
+// 실제 조교 계정에 이 탭을 열어주는 건 이 디자인이 검증된 다음 별도 작업(로그인 리다이렉트 조건 수정).
+// ============================================================
+
+function isAssignmentDoneV2(a) {
+  const hasRange = a.range_from != null && a.range_to != null;
+  const percent = assignmentProgressPercent(a);
+  return a.status === "제출완료" || (hasRange && percent !== null && percent >= 100);
+}
+
+function fmtStampV2(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+// 알약버튼 하나 - 이름 + 출결 색점 + 아이콘들(🎓특강 📝수업내용 ✏️과제).
+function PillRosterButtonV2({ label, active, attnStatus, hasCourse, hasNote, hasAssign, onClick }) {
+  const meta = attnStatus ? CLASS_LOG_ATTN_STATUS[attnStatus] : null;
+  return h("button", { type: "button", onClick,
+    className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors flex-shrink-0",
+    style: { border: `1.5px solid ${active ? NAVY : LINE}`, background: active ? NAVY : "#fff", color: active ? "#fff" : INK } },
+    h("span", { style: { width: 6, height: 6, borderRadius: 999, background: active ? "#fff" : (meta ? meta.color : "#9ca3af"), display: "inline-block", flexShrink: 0 } }),
+    h("span", null, label),
+    hasCourse && h("span", { style: { fontSize: 10 } }, "🎓"),
+    hasNote && h("span", { style: { fontSize: 10 } }, "📝"),
+    hasAssign && h("span", { style: { fontSize: 10 } }, "✏️")
+  );
+}
+
+function PillRosterGroupV2({ groups, renderPill }) {
+  return h("div", { className: "flex flex-col gap-2.5" },
+    groups.map((g) => h("div", { key: g.label },
+      h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK, marginBottom: 5 } }, g.label, " · ", g.items.length, "명"),
+      h("div", { className: "flex flex-wrap gap-2" }, g.items.map(renderPill))
+    ))
+  );
+}
+
+// 과제체크 이력 펼침 줄 - 누가·언제·체크/취소 전부 다 보여줌(감사 이력, 지우지 않고 누적).
+function CheckLogListV2({ logs }) {
+  if (!logs || logs.length === 0) return h("div", { className: "text-xs py-1", style: { color: SUBINK } }, "아직 체크 이력이 없어요.");
+  return h("div", { className: "flex flex-col gap-1" },
+    logs.map((l) => h("div", { key: l.id, className: "flex items-center gap-2 text-xs py-0.5" },
+      h("span", { style: { fontWeight: 700, color: NAVY } }, l.actor_name || (l.actor_role === "student" ? "학생 본인" : l.actor_role)),
+      h("span", { style: { color: SUBINK } }, fmtStampV2(l.created_at)),
+      h("span", { style: { fontWeight: 700, color: l.action === "체크" ? TEAL : RED } }, l.action)
+    ))
+  );
+}
+
+// "오늘 확인할 과제" 한 줄 - 동그라미 체크(원터치, 범위 유무 상관없이 완료/미완료만 다룸 - 세부 진행률
+// 입력은 아래 "오늘 수업" 섹션의 기존 AssignmentEditableField에서 그대로 함) + 🕘이력 펼치기.
+function DueAssignmentRowV2({ a, today, logs, expanded, onToggleExpand, onToggle, busy }) {
+  const done = isAssignmentDoneV2(a);
+  const overdue = a.due_date && a.due_date < today && !done;
+  return h("div", { className: "rounded-lg", style: { background: done ? PAPER : "#fff", border: `1px solid ${LINE}` } },
+    h("div", { className: "flex items-center gap-2.5 px-2.5 py-2" },
+      h("button", { type: "button", disabled: busy, onClick: () => onToggle(!done),
+        className: "flex items-center justify-center flex-shrink-0",
+        style: { width: 22, height: 22, borderRadius: 999, border: `2px solid ${done ? TEAL : LINE}`, background: done ? TEAL : "#fff", color: "#fff", fontSize: 12, opacity: busy ? 0.5 : 1 } },
+        done ? "✓" : ""),
+      h("div", { className: "flex-1 min-w-0" },
+        h("div", { className: "text-xs font-bold", style: { textDecoration: done ? "line-through" : "none", color: done ? SUBINK : INK } },
+          a.description, a.range_from != null && a.range_to != null ? ` (${a.range_from}~${a.range_to})` : ""),
+        h("div", { style: { fontSize: 10.5, color: SUBINK, marginTop: 2 } },
+          a.due_date ? `기한 ${a.due_date}` : "기한 없음",
+          overdue && h("span", { style: { color: RED, fontWeight: 700, marginLeft: 6 } }, "밀림"))
+      ),
+      h("button", { type: "button", onClick: onToggleExpand,
+        className: "text-xs font-bold flex-shrink-0 px-2 py-1 rounded-md",
+        style: { color: SUBINK, background: expanded ? NAVY_SOFT : "transparent" } },
+        `🕘 이력${logs && logs.length ? " " + logs.length : ""}`)
+    ),
+    expanded && h("div", { className: "px-2.5 pb-2 pt-0.5", style: { borderTop: `1px dashed ${LINE}`, margin: "0 10px" } },
+      h(CheckLogListV2, { logs }))
+  );
+}
+
+// 조교코멘트 목록 - 한 칸에 덮어쓰지 않고 "누가·언제·무슨말"이 쌓이는 목록. 수정/삭제 없음(append-only).
+function AssistantCommentListV2({ comments }) {
+  if (!comments || comments.length === 0) return h("div", { className: "text-xs py-1", style: { color: SUBINK } }, "아직 남긴 코멘트가 없어요.");
+  return h("div", { className: "flex flex-col gap-1.5" },
+    comments.map((c) => h("div", { key: c.id, className: "px-3 py-2 rounded-lg text-xs", style: { background: AMBER_SOFT } },
+      h("div", { className: "flex items-center gap-2 mb-0.5" },
+        h("span", { style: { fontWeight: 700, color: NAVY } }, c.author_name),
+        h("span", { style: { color: SUBINK } }, fmtStampV2(c.created_at))
+      ),
+      h("div", { style: { color: INK } }, c.comment)
+    ))
+  );
+}
+
+// 새 과제 추가(V2 전용) - 관련 교재를 고르면 시작 범위를 그 교재의 현재 진도+1로 자동 채워서
+// 원장님은 끝 번호만 입력하면 되게 함("범위를 매번 손으로 기록하는 게 불편하다" 피드백 해결, 4-5 참고).
+// 기존 AssignmentEditableField는 그대로 두고(구버전 탭이 쓰고 있어서), 이 폼만 새로 만듦.
+function AssignmentQuickCreateV2({ textbookOptions, onCreate }) {
+  const [open, setOpen] = useState(false);
+  const [desc, setDesc] = useState("");
+  const [due, setDue] = useState("");
+  const [textbookId, setTextbookId] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const [autoFilled, setAutoFilled] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const onTextbookChange = (e) => {
+    const id = e.target.value;
+    setTextbookId(id);
+    if (!id) { setAutoFilled(false); return; }
+    const opt = textbookOptions.find((t) => t.textbookId === id);
+    if (opt && opt.currentUnit != null) {
+      setRangeFrom(String(opt.currentUnit + 1));
+      setAutoFilled(true);
+    }
+  };
+
+  const canSave = desc.trim() !== "" && due !== "";
+  const reset = () => { setOpen(false); setDesc(""); setDue(""); setTextbookId(""); setRangeFrom(""); setRangeTo(""); setAutoFilled(false); };
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      await onCreate(desc.trim(), due, rangeFrom ? Number(rangeFrom) : null, rangeTo ? Number(rangeTo) : null, textbookId || null);
+      reset();
+    } finally { setSaving(false); }
+  };
+
+  if (!open) return h("button", { type: "button", onClick: () => setOpen(true),
+    className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: NAVY, color: "#fff" } }, "＋ 새 과제 추가");
+
+  return h("div", { className: "flex flex-col gap-1.5 p-3 rounded-xl", style: { background: PAPER } },
+    h("div", { className: "flex gap-2 flex-wrap items-center" },
+      h("input", { type: "text", autoFocus: true, value: desc, onChange: (e) => setDesc(e.target.value),
+        placeholder: "과제 입력 (예: p.32~40 풀어오기)",
+        className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } }),
+      h("input", { type: "date", value: due, onChange: (e) => setDue(e.target.value),
+        className: "px-3 py-2 rounded-lg text-xs outline-none flex-shrink-0", style: { border: `1px solid ${TEAL}`, background: TEAL_SOFT, color: INK } })
+    ),
+    (textbookOptions || []).length > 0 && h("div", { className: "flex items-center gap-1.5" },
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "관련 교재(선택, 시작범위 자동입력+진도연동)"),
+      h("select", { value: textbookId, onChange: onTextbookChange,
+        className: "px-2 py-1 rounded-md text-xs outline-none", style: { border: `1px solid ${LINE}`, background: "#fff", color: INK } },
+        h("option", { value: "" }, "선택 안 함"),
+        textbookOptions.map((t) => h("option", { key: t.textbookId, value: t.textbookId }, t.name))
+      )
+    ),
+    h("div", { className: "flex items-center gap-1.5" },
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "범위(선택)"),
+      h("input", { type: "number", value: rangeFrom, onChange: (e) => { setRangeFrom(e.target.value); setAutoFilled(false); }, placeholder: "시작",
+        className: "text-center rounded-md text-xs outline-none", style: { width: 52, padding: "3px 2px", border: `1px solid ${autoFilled ? TEAL : LINE}`, background: autoFilled ? TEAL_SOFT : "#fff" } }),
+      h("span", { style: { fontSize: 10.5, color: SUBINK } }, "~"),
+      h("input", { type: "number", value: rangeTo, onChange: (e) => setRangeTo(e.target.value), placeholder: "끝",
+        className: "text-center rounded-md text-xs outline-none", style: { width: 52, padding: "3px 2px", border: `1px solid ${LINE}` } }),
+      autoFilled && h("span", { style: { fontSize: 10.5, fontWeight: 700, color: TEAL } }, "✓ 시작번호 자동입력됨")
+    ),
+    h("div", { className: "flex gap-2 flex-wrap items-center" },
+      h("button", { type: "button", onClick: save, disabled: saving || !canSave,
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: TEAL, color: "#fff", opacity: (saving || !canSave) ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+      h("button", { type: "button", onClick: reset,
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+    )
+  );
+}
+
+function ClassLogDashboardV2({ session, isDirector }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [selectedDate, setSelectedDate] = useState(() => today);
+  const [activeSession, setActiveSession] = useState("regular");
+  const [groupMode, setGroupMode] = useState("none");
+  const [students, setStudents] = useState([]);
+  const [extraRows, setExtraRows] = useState([]);
+  const [classLogs, setClassLogs] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [attendance, setAttendance] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [courseAttendance, setCourseAttendance] = useState([]);
+  const [textbookProgress, setTextbookProgress] = useState([]);
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
+  const [selectedCourseId, setSelectedCourseId] = useState(null);
+
+  // 원장님 전용: 실제 조교 계정이 아직 이 파일에 못 들어오니, 로그인은 원장님으로 한 채 "조교라면
+  // 어떻게 보일지"를 미리 확인해보는 토글. 실제 조교 로그인 시에는 이 토글 없이 isDirector가 그대로 false.
+  const [previewAsAssistant, setPreviewAsAssistant] = useState(false);
+  const viewAsDirector = isDirector && !previewAsAssistant;
+
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [workLogs, setWorkLogs] = useState([]);
+  const [dueAssignments, setDueAssignments] = useState([]);
+  const [dueLoading, setDueLoading] = useState(false);
+  const [checkLogs, setCheckLogs] = useState({}); // assignment id -> log 배열
+  const [expandedLogIds, setExpandedLogIds] = useState({});
+  const [busyDueIds, setBusyDueIds] = useState({});
+  const [comments, setComments] = useState([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    setErrorMsg("");
+    const [studentsRes, extraRes, logsRes, assignRes, attnRes, coursesRes, courseAttnRes, tbProgressRes] = await Promise.all([
+      supabaseClient.from("attn_students").select("id,name,school,grade,class,days,clinic,clinic_days,clinic_time,regular_time,enroll_date").neq("status", "퇴원").order("name"),
+      supabaseClient.from("attn_extra_roster").select("student_id,scheduled_time,plan_note").eq("attn_date", selectedDate),
+      supabaseClient.from("clm_class_logs").select("*").eq("class_date", selectedDate),
+      supabaseClient.from("clm_assignments").select("id,student_id,description,status,teacher_comment,student_note,due_date,range_from,range_to,progress_to,course_id,textbook_id").eq("class_date", selectedDate),
+      supabaseClient.from("attn_attendance").select("student_id,session,status").eq("attn_date", selectedDate),
+      supabaseClient.from("attn_student_courses").select("id,student_id,course_name,days,start_date,end_date"),
+      supabaseClient.from("attn_course_attendance").select("course_id,status").eq("attn_date", selectedDate),
+      supabaseClient.from("clm_textbook_progress").select("id,textbook_id,student_id,current_unit,total_units,clm_textbooks(name,unit_label,total_units)").eq("scope", "student"),
+    ]);
+    if (studentsRes.error || extraRes.error || logsRes.error || assignRes.error || attnRes.error || coursesRes.error || courseAttnRes.error || tbProgressRes.error) {
+      setErrorMsg("데이터를 불러오는 중 문제가 생겼어요. 새로고침 해보세요.");
+    }
+    setStudents(studentsRes.data || []);
+    setExtraRows(extraRes.data || []);
+    setClassLogs(logsRes.data || []);
+    setAssignments(assignRes.data || []);
+    setAttendance(attnRes.data || []);
+    setCourses(coursesRes.data || []);
+    setCourseAttendance(courseAttnRes.data || []);
+    setTextbookProgress(tbProgressRes.data || []);
+    setLoaded(true);
+  }, [selectedDate]);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  useEffect(() => {
+    const channel = supabaseClient
+      .channel(`clm_class_log_v2_${selectedDate}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clm_class_logs", filter: `class_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "clm_assignments", filter: `class_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "attn_extra_roster", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "attn_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "attn_course_attendance", filter: `attn_date=eq.${selectedDate}` }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "clm_textbook_progress" }, () => loadAll())
+      .subscribe();
+    return () => { supabaseClient.removeChannel(channel); };
+  }, [selectedDate, loadAll]);
+
+  // 학생 한 명에게 이미 배정된 교재 목록 - 현재 진도(currentUnit)까지 같이 돌려줘서 범위 자동입력에 씀.
+  const textbookOptionsFor = (studentId) =>
+    textbookProgress
+      .filter((p) => p.student_id === studentId)
+      .map((p) => ({ progressId: p.id, textbookId: p.textbook_id, name: (p.clm_textbooks && p.clm_textbooks.name) || "(삭제된 교재)", currentUnit: p.current_unit }));
+
+  const extraMap = useMemo(() => {
+    const m = {};
+    extraRows.forEach((r) => { m[r.student_id] = { time: r.scheduled_time || "", note: r.plan_note || "" }; });
+    return m;
+  }, [extraRows]);
+
+  const weekday = korWeekdayOfDate(selectedDate);
+  const roster = useMemo(() => {
+    if (activeSession === "course") return [];
+    if (activeSession === "extra") return students.filter((s) => extraMap[s.id]);
+    return students.filter((s) => {
+      if (s.enroll_date && selectedDate < s.enroll_date) return false;
+      if (activeSession === "clinic") {
+        if (s.clinic === false) return false;
+        const clinicDays = (s.clinic_days && s.clinic_days.length > 0) ? s.clinic_days : (s.days || []);
+        return clinicDays.includes(weekday);
+      }
+      return (s.days || []).includes(weekday);
+    });
+  }, [students, extraMap, activeSession, selectedDate, weekday]);
+
+  const groups = useMemo(() => {
+    if (groupMode === "class") return groupRosterByClassName(roster);
+    if (groupMode === "grade") return buildStudentGroups("grade", roster, [], []);
+    if (groupMode === "time") return groupRosterByTime(roster, activeSession, extraMap);
+    return null;
+  }, [groupMode, roster, activeSession, extraMap]);
+
+  const attendanceFor = (studentId) => {
+    const row = attendance.find((a) => a.student_id === studentId && a.session === activeSession);
+    return row ? row.status : null;
+  };
+
+  const courseStatusFor = (courseId) => {
+    const row = courseAttendance.find((a) => a.course_id === courseId);
+    return row ? row.status : null;
+  };
+  const coursesForStudentToday = (studentId) => courses
+    .filter((c) => c.student_id === studentId && (c.days || []).includes(weekday)
+      && (!c.start_date || c.start_date <= selectedDate) && (!c.end_date || c.end_date >= selectedDate))
+    .map((c) => {
+      const status = courseStatusFor(c.id);
+      return { id: c.id, courseName: c.course_name, status, meta: status ? CLASS_LOG_ATTN_STATUS[status] : null };
+    });
+
+  const courseGroups = useMemo(() => {
+    if (activeSession !== "course") return [];
+    const map = new Map();
+    students.forEach((s) => {
+      coursesForStudentToday(s.id).forEach((c) => {
+        if (!map.has(c.courseName)) map.set(c.courseName, { label: c.courseName, items: [] });
+        map.get(c.courseName).items.push({ student: s, enrollmentId: c.id, courseName: c.courseName, status: c.status, meta: c.meta });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ko"));
+  }, [activeSession, students, courses, courseAttendance, weekday, selectedDate]);
+
+  const courseEntries = useMemo(() => courseGroups.flatMap((g) => g.items), [courseGroups]);
+
+  useEffect(() => {
+    if (activeSession === "course") return;
+    if (roster.length === 0) { setSelectedStudentId(null); return; }
+    if (!roster.some((s) => s.id === selectedStudentId)) setSelectedStudentId(roster[0].id);
+  }, [roster, selectedStudentId, activeSession]);
+
+  useEffect(() => {
+    if (activeSession !== "course") return;
+    if (courseEntries.length === 0) { setSelectedCourseId(null); return; }
+    if (!courseEntries.some((e) => e.enrollmentId === selectedCourseId)) setSelectedCourseId(courseEntries[0].enrollmentId);
+  }, [activeSession, courseEntries, selectedCourseId]);
+
+  const selectedStudent = roster.find((s) => s.id === selectedStudentId) || null;
+  const selectedCourseEntry = courseEntries.find((e) => e.enrollmentId === selectedCourseId) || null;
+  const selectedCourseNoteSession = selectedCourseEntry ? "course_" + selectedCourseEntry.enrollmentId : null;
+  const isCourseTab = activeSession === "course";
+  const effectiveStudent = isCourseTab ? (selectedCourseEntry ? selectedCourseEntry.student : null) : selectedStudent;
+  const effectiveStudentId = effectiveStudent ? effectiveStudent.id : null;
+
+  // 학습현황(최근 과제 이력) - 날짜/세션과 무관하게 학생 기준 최신 5건.
+  useEffect(() => {
+    if (!effectiveStudentId) { setHistory([]); return; }
+    let cancelled = false;
+    setHistoryLoading(true);
+    supabaseClient.from("clm_assignments").select("id,description,status,due_date,class_date")
+      .eq("student_id", effectiveStudentId).order("class_date", { ascending: false }).limit(5)
+      .then(({ data, error }) => { if (!cancelled) { setHistory(error ? [] : (data || [])); setHistoryLoading(false); } });
+    return () => { cancelled = true; };
+  }, [effectiveStudentId]);
+
+  // 근무일지 연동(읽기전용, 원장님 화면에만 표시).
+  useEffect(() => {
+    if (!effectiveStudentId || !viewAsDirector) { setWorkLogs([]); return; }
+    let cancelled = false;
+    supabaseClient.from("attn_work_logs").select("id,log_date,author_name,author_email,content")
+      .contains("student_ids", [effectiveStudentId]).order("log_date", { ascending: false }).limit(5)
+      .then(({ data, error }) => { if (!cancelled) setWorkLogs(error ? [] : (data || [])); });
+    return () => { cancelled = true; };
+  }, [effectiveStudentId, viewAsDirector]);
+
+  // "오늘 확인할 과제" - 이 학생 기준으로 제출기한이 오늘이거나 이미 지난 과제까지 전부(세션 무관 - 정규때
+  // 낸 과제라도 기한을 클리닉 요일로 잡아두면 클리닉 탭에서 열어도 그대로 뜬다, 11-2 참고).
+  const reloadDue = useCallback(async () => {
+    if (!effectiveStudentId) { setDueAssignments([]); return; }
+    setDueLoading(true);
+    const { data, error } = await supabaseClient.from("clm_assignments")
+      .select("id,student_id,description,status,due_date,range_from,range_to,progress_to,textbook_id,course_id")
+      .eq("student_id", effectiveStudentId).not("due_date", "is", null).lte("due_date", selectedDate)
+      .order("due_date", { ascending: true });
+    if (error) { setErrorMsg("과제 목록을 불러오지 못했어요: " + error.message); setDueLoading(false); return; }
+    setDueAssignments(data || []);
+    setDueLoading(false);
+    if ((data || []).length > 0) {
+      const ids = data.map((a) => a.id);
+      const { data: logData } = await supabaseClient.from("clm_assignment_check_logs")
+        .select("*").in("assignment_id", ids).order("created_at", { ascending: true });
+      const map = {};
+      (logData || []).forEach((l) => { (map[l.assignment_id] = map[l.assignment_id] || []).push(l); });
+      setCheckLogs(map);
+    } else {
+      setCheckLogs({});
+    }
+  }, [effectiveStudentId, selectedDate]);
+  useEffect(() => { reloadDue(); }, [reloadDue]);
+
+  // 조교코멘트 - 세션 상관없이 "이 학생 + 이 날짜" 기준으로 전부 보여줌(11-4 참고, 어느 탭에서 남겼든
+  // 그날 코멘트는 다 같이 보이는 게 자연스러움).
+  const reloadComments = useCallback(async () => {
+    if (!effectiveStudentId) { setComments([]); return; }
+    setCommentsLoading(true);
+    const { data, error } = await supabaseClient.from("clm_assistant_comments")
+      .select("*").eq("student_id", effectiveStudentId).eq("class_date", selectedDate).order("created_at", { ascending: true });
+    setComments(error ? [] : (data || []));
+    setCommentsLoading(false);
+  }, [effectiveStudentId, selectedDate]);
+  useEffect(() => { reloadComments(); }, [reloadComments]);
+
+  const noteForSession = (studentId, sessionKey) => {
+    const row = classLogs.find((l) => l.student_id === studentId && l.session === sessionKey);
+    return (row && row.lesson_note) || "";
+  };
+  const saveNoteForSession = async (studentId, sessionKey, value) => {
+    const { error } = await supabaseClient.from("clm_class_logs").upsert({
+      student_id: studentId, class_date: selectedDate, session: sessionKey,
+      lesson_note: value || null, created_by: session.user.email, updated_at: new Date().toISOString(),
+    }, { onConflict: "student_id,class_date,session" });
+    if (error) { setErrorMsg("수업내용 저장에 실패했어요: " + error.message); return; }
+    await loadAll();
+  };
+  const noteFor = (studentId) => noteForSession(studentId, activeSession);
+
+  const assignmentsFor = (studentId) => assignments.filter((a) => a.student_id === studentId && !a.course_id);
+  const assignmentsForCourse = (studentId, courseId) => assignments.filter((a) => a.student_id === studentId && a.course_id === courseId);
+
+  const actorName = (session.user.user_metadata && session.user.user_metadata.name) || session.user.email;
+  const actorEmail = session.user.email;
+
+  const createAssignment = async (desc, dueDate, rangeFrom, rangeTo, textbookId, courseId) => {
+    if (!effectiveStudent) return;
+    const { error } = await supabaseClient.from("clm_assignments").insert({
+      student_id: effectiveStudent.id, class_date: selectedDate, description: desc, due_date: dueDate, created_by: session.user.email,
+      range_from: rangeFrom ?? null, range_to: rangeTo ?? null, textbook_id: textbookId ?? null, course_id: courseId ?? null,
+    });
+    if (error) { setErrorMsg("과제 추가에 실패했어요: " + error.message); return; }
+    await loadAll(); await reloadDue();
+  };
+  const updateAssignmentDescription = async (assignmentId, description) => {
+    const { error } = await supabaseClient.from("clm_assignments").update({ description }).eq("id", assignmentId);
+    if (error) { setErrorMsg("과제 수정에 실패했어요: " + error.message); return; }
+    await loadAll();
+  };
+  const deleteAssignmentRow = async (assignmentId) => {
+    const { error } = await supabaseClient.from("clm_assignments").delete().eq("id", assignmentId);
+    if (error) { setErrorMsg("과제 삭제에 실패했어요: " + error.message); return; }
+    await loadAll(); await reloadDue();
+  };
+  const toggleAssignmentStatus = async (assignmentId, done) => {
+    const { error } = await supabaseClient.from("clm_assignments").update({ status: done ? "제출완료" : "미제출" }).eq("id", assignmentId);
+    if (error) { setErrorMsg("과제 상태 변경에 실패했어요: " + error.message); return; }
+    await loadAll(); await reloadDue();
+  };
+  const updateAssignmentProgress = async (assignmentId, progressTo, rangeTo) => {
+    const done = progressTo != null && rangeTo != null && progressTo >= rangeTo;
+    const { error } = await supabaseClient.from("clm_assignments").update({ progress_to: progressTo, status: done ? "제출완료" : "미제출" }).eq("id", assignmentId);
+    if (error) { setErrorMsg("진행률 저장에 실패했어요: " + error.message); return; }
+    if (progressTo != null) {
+      const a = assignments.find((x) => x.id === assignmentId);
+      if (a && a.textbook_id) {
+        const progressRow = textbookProgress.find((p) => p.student_id === a.student_id && p.textbook_id === a.textbook_id);
+        if (progressRow) {
+          await supabaseClient.from("clm_textbook_progress").update({ current_unit: progressTo, updated_at: new Date().toISOString(), updated_by: session.user.email }).eq("id", progressRow.id);
+        }
+      }
+    }
+    await loadAll(); await reloadDue();
+  };
+
+  // "오늘 확인할 과제" 체크 토글 - 상태 변경 + 과제체크이력(clm_assignment_check_logs)에 누가/언제/체크·취소
+  // 기록을 하나씩 추가(지우지 않음, 11-5). 미리보기 토글이 조교면 actor_role도 "assistant"로 남는다.
+  const toggleDueCheck = async (a, done) => {
+    setBusyDueIds((b) => ({ ...b, [a.id]: true }));
+    try {
+      const { error } = await supabaseClient.from("clm_assignments").update({ status: done ? "제출완료" : "미제출" }).eq("id", a.id);
+      if (error) { setErrorMsg("과제 상태 변경에 실패했어요: " + error.message); return; }
+      const { error: logError } = await supabaseClient.from("clm_assignment_check_logs").insert({
+        assignment_id: a.id, student_id: a.student_id, action: done ? "체크" : "취소",
+        actor_role: viewAsDirector ? "director" : "assistant", actor_name: actorName, actor_email: actorEmail,
+      });
+      if (logError) { setErrorMsg("체크 이력 기록에는 실패했어요(상태는 저장됨): " + logError.message); }
+      await loadAll(); await reloadDue();
+    } finally {
+      setBusyDueIds((b) => { const n = { ...b }; delete n[a.id]; return n; });
+    }
+  };
+
+  const addComment = async () => {
+    if (!newComment.trim() || !effectiveStudent) return;
+    setCommentSaving(true);
+    try {
+      const { error } = await supabaseClient.from("clm_assistant_comments").insert({
+        student_id: effectiveStudent.id, class_date: selectedDate, session: isCourseTab ? selectedCourseNoteSession : activeSession,
+        author_name: actorName, author_email: actorEmail, comment: newComment.trim(),
+      });
+      if (error) { setErrorMsg("조교코멘트 저장에 실패했어요: " + error.message); return; }
+      setNewComment("");
+      await reloadComments();
+    } finally { setCommentSaving(false); }
+  };
+
+  const renderPill = (s) => h(PillRosterButtonV2, {
+    key: s.id, label: s.name, active: s.id === selectedStudentId, onClick: () => setSelectedStudentId(s.id),
+    attnStatus: attendanceFor(s.id), hasCourse: coursesForStudentToday(s.id).length > 0,
+    hasNote: !!noteFor(s.id), hasAssign: assignmentsFor(s.id).length > 0,
+  });
+
+  if (!loaded) return h("div", { style: { color: SUBINK, fontSize: 13, padding: "40px 0", textAlign: "center" } }, "불러오는 중...");
+
+  const selectedAttnStatus = selectedStudent ? attendanceFor(selectedStudent.id) : null;
+  const selectedAttnMeta = selectedAttnStatus ? CLASS_LOG_ATTN_STATUS[selectedAttnStatus] : null;
+  const selectedCourses = selectedStudent ? coursesForStudentToday(selectedStudent.id) : [];
+  const todaysAssignments = isCourseTab
+    ? (selectedCourseEntry ? assignmentsForCourse(selectedCourseEntry.student.id, selectedCourseEntry.enrollmentId) : [])
+    : (selectedStudent ? assignmentsFor(selectedStudent.id) : []);
+  const currentNote = isCourseTab
+    ? (selectedCourseEntry ? noteForSession(selectedCourseEntry.student.id, selectedCourseNoteSession) : "")
+    : (selectedStudent ? noteFor(selectedStudent.id) : "");
+
+  return h("div", null,
+    errorMsg && h("div", { className: "rounded-xl px-4 py-2.5 mb-4", style: { background: RED_SOFT, color: RED, fontSize: 12.5, fontWeight: 600 } }, errorMsg),
+
+    // 상단: 날짜/요일 + (원장님한테만) 조교 화면 미리보기 토글
+    h("div", { className: "flex items-center justify-between flex-wrap gap-2 mb-3" },
+      h("div", { className: "flex items-center gap-2" },
+        h("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value),
+          className: "px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" } }),
+        h("span", { style: { fontSize: 12.5, fontWeight: 800, color: NAVY, background: NAVY_SOFT, borderRadius: 8, padding: "6px 10px" } }, weekday, "요일")
+      ),
+      isDirector && h("button", { type: "button", onClick: () => setPreviewAsAssistant((v) => !v),
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+        style: { background: previewAsAssistant ? AMBER : "#fff", color: previewAsAssistant ? "#fff" : SUBINK, border: `1px solid ${previewAsAssistant ? AMBER : LINE}` } },
+        previewAsAssistant ? "🙋 조교 화면 미리보기 중 (끄기)" : "🙋 조교 화면 미리보기")
+    ),
+
+    !viewAsDirector && h("div", { className: "rounded-xl px-4 py-2.5 mb-3 text-xs font-bold", style: { background: AMBER_SOFT, color: AMBER } },
+      "🙋 조교 화면" + (previewAsAssistant ? " 미리보기 중" : "") + " — 과제체크와 조교코멘트만 남길 수 있어요. 수업내용·새 과제 추가·근무일지는 원장님 화면에서만 보여요."),
+
+    // 세션 탭
+    h("div", { className: "grid grid-cols-4 gap-1.5 p-1.5 rounded-2xl mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+      CLASS_LOG_SESSION_ORDER.map((key) => h("button", { key, type: "button", onClick: () => setActiveSession(key),
+        className: "px-1.5 py-2 rounded-xl text-xs font-semibold",
+        style: { background: activeSession === key ? NAVY : "transparent", color: activeSession === key ? "#fff" : SUBINK } },
+        CLASS_LOG_SESSIONS[key]))
+    ),
+
+    // 그룹모드(특강 탭 제외)
+    !isCourseTab && h("div", { className: "flex items-center gap-1.5 flex-wrap mb-3" },
+      CLASS_LOG_GROUP_MODES.map((m) => h("button", { key: m.key, type: "button", onClick: () => setGroupMode(m.key),
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+        style: { background: groupMode === m.key ? NAVY : "#fff", color: groupMode === m.key ? "#fff" : SUBINK, border: `1px solid ${groupMode === m.key ? NAVY : LINE}` } },
+        m.label))
+    ),
+
+    // 알약 학생목록
+    h("div", { className: "mb-5" },
+      isCourseTab
+        ? (courseGroups.length === 0
+            ? h("div", { className: "rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 12.5 } }, `${weekday}요일에 열리는 특강이 없어요.`)
+            : h("div", { className: "flex flex-col gap-3" },
+                courseGroups.map((g) => h("div", { key: g.label },
+                  h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK, marginBottom: 5 } }, "🎓 ", g.label, " · ", g.items.length, "명"),
+                  h("div", { className: "flex flex-wrap gap-2" },
+                    g.items.map((item) => h(PillRosterButtonV2, {
+                      key: item.enrollmentId, label: item.student.name, active: item.enrollmentId === selectedCourseId,
+                      onClick: () => setSelectedCourseId(item.enrollmentId),
+                      attnStatus: item.status, hasCourse: false,
+                      hasNote: !!noteForSession(item.student.id, "course_" + item.enrollmentId),
+                      hasAssign: assignmentsForCourse(item.student.id, item.enrollmentId).length > 0,
+                    }))
+                  )
+                ))
+              )
+            )
+        : roster.length === 0
+          ? h("div", { className: "rounded-2xl p-6 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 12.5 } },
+              activeSession === "extra" ? "오늘 등록된 보강 학생이 없어요." : `${weekday}요일 ${CLASS_LOG_SESSIONS[activeSession]}에 배정된 학생이 없어요.`)
+          : groupMode === "none"
+            ? h("div", { className: "flex flex-wrap gap-2" }, roster.map(renderPill))
+            : h(PillRosterGroupV2, { groups: groups || [], renderPill })
+    ),
+
+    // 학생 원스크린
+    !effectiveStudent
+      ? h("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } }, "위에서 학생을 선택해주세요.")
+      : h("div", { className: "flex flex-col gap-3" },
+
+          // 헤더
+          h("div", { className: "rounded-2xl p-4 flex items-center gap-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { style: { width: 44, height: 44, borderRadius: 14, background: NAVY_SOFT, color: NAVY, fontWeight: 800, fontSize: 17 }, className: "flex items-center justify-center flex-shrink-0" }, effectiveStudent.name.slice(0, 1)),
+            h("div", null,
+              h("div", { className: "flex items-center gap-2 flex-wrap" },
+                h("span", { style: { fontWeight: 800, fontSize: 15, color: INK } }, effectiveStudent.name),
+                isCourseTab
+                  ? h("span", { style: { fontSize: 11, fontWeight: 700, color: PURPLE, background: PURPLE_SOFT, borderRadius: 6, padding: "3px 9px" } }, "🎓 ", selectedCourseEntry.courseName, " (", selectedCourseEntry.status || "미체크", ")")
+                  : (selectedAttnMeta && h("span", { style: { fontSize: 11, fontWeight: 700, color: selectedAttnMeta.color, background: selectedAttnMeta.soft, borderRadius: 6, padding: "3px 9px" } }, selectedAttnStatus))
+              ),
+              h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 2 } },
+                [effectiveStudent.school, effectiveStudent.grade ? effectiveStudent.grade + "학년" : "", effectiveStudent.class].filter(Boolean).join(" · ") || "정보 미등록")
+            )
+          ),
+
+          !isCourseTab && selectedCourses.length > 0 && h("div", { className: "flex items-center gap-2 flex-wrap" },
+            selectedCourses.map((c) => h("span", { key: c.id,
+              style: { fontSize: 11, fontWeight: 700, color: c.meta ? c.meta.color : SUBINK, background: c.meta ? c.meta.soft : PAPER, borderRadius: 6, padding: "3px 9px" } },
+              "🎓 특강 · ", c.courseName, " (", c.status || "미체크", ")"))
+          ),
+
+          // 오늘 확인할 과제
+          h("div", { className: "rounded-2xl p-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { className: "flex items-center justify-between mb-2.5" },
+              h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK } }, "📋 오늘 확인할 과제 (기한 도래 · 밀린 과제 포함)"),
+              (() => {
+                const doneCount = dueAssignments.filter((a) => isAssignmentDoneV2(a)).length;
+                return h("div", { style: { fontSize: 11.5, fontWeight: 700, color: dueAssignments.length === 0 ? SUBINK : (doneCount === dueAssignments.length ? TEAL : AMBER) } },
+                  dueAssignments.length === 0 ? "없음" : `${dueAssignments.length}건 · ${doneCount}건 제출완료`);
+              })()
+            ),
+            dueLoading
+              ? h("div", { style: { fontSize: 12, color: SUBINK } }, "불러오는 중...")
+              : dueAssignments.length === 0
+                ? h("div", { style: { fontSize: 12, color: SUBINK, padding: "8px 0" } }, "이 학생에게 확인할 과제가 없어요.")
+                : h("div", { className: "flex flex-col gap-1.5" },
+                    dueAssignments.map((a) => h(DueAssignmentRowV2, {
+                      key: a.id, a, today, logs: checkLogs[a.id], expanded: !!expandedLogIds[a.id], busy: !!busyDueIds[a.id],
+                      onToggleExpand: () => setExpandedLogIds((prev) => ({ ...prev, [a.id]: !prev[a.id] })),
+                      onToggle: (done) => toggleDueCheck(a, done),
+                    }))
+                  )
+          ),
+
+          // 학습현황
+          h("div", { className: "rounded-2xl p-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } }, "📊 학습현황"),
+            (() => {
+              const opts = textbookOptionsFor(effectiveStudent.id);
+              return opts.length === 0
+                ? h("div", { style: { fontSize: 12, color: SUBINK, marginBottom: 10 } }, "등록된 교재가 없어요.")
+                : h("div", { className: "flex flex-col gap-2 mb-3" },
+                    opts.map((p) => {
+                      const total = p.currentUnit != null ? Math.max(p.currentUnit, 1) : 1; // 총량 정보가 없을 때도 막대가 보이게 최소 보정
+                      return h("div", { key: p.progressId },
+                        h("div", { className: "flex items-center justify-between text-xs mb-1" },
+                          h("span", { style: { fontWeight: 700 } }, "📘 ", p.name),
+                          h("span", { style: { color: SUBINK } }, p.currentUnit != null ? `현재 ${p.currentUnit}` : "진도 미기록")
+                        )
+                      );
+                    })
+                  );
+            })(),
+            h("div", { style: { fontSize: 11, fontWeight: 700, color: SUBINK, marginBottom: 6 } }, "최근 과제 이력"),
+            historyLoading
+              ? h("div", { style: { fontSize: 12, color: SUBINK } }, "불러오는 중...")
+              : history.length === 0
+                ? h("div", { style: { fontSize: 12, color: SUBINK } }, "아직 과제 이력이 없어요.")
+                : h("div", { className: "flex flex-col gap-2" },
+                    history.map((a) => h("div", { key: a.id, className: "flex items-center justify-between gap-2 flex-wrap", style: { fontSize: 12 } },
+                      h("div", { style: { color: INK, flex: "1 1 160px" } }, a.description),
+                      h("div", { className: "flex items-center gap-2 flex-shrink-0" },
+                        h("span", { style: { color: SUBINK } }, a.class_date),
+                        h("span", { style: { fontWeight: 700, color: a.status === "제출완료" ? TEAL : AMBER } }, a.status === "제출완료" ? "제출완료" : "미제출")
+                      )
+                    ))
+                  )
+          ),
+
+          // 조교코멘트 - 원장님 화면에선 읽기전용 목록, 조교(또는 미리보기) 화면에선 목록 + 새 코멘트 입력.
+          h("div", { className: "rounded-2xl p-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } },
+              "🙋 조교코멘트 ", h("span", { style: { fontWeight: 400 } }, viewAsDirector ? "(읽기 전용 · 조교별로 따로 남아요)" : "(조교별로 따로 쌓여요, 남이 쓴 건 못 고쳐요)")),
+            commentsLoading ? h("div", { style: { fontSize: 12, color: SUBINK } }, "불러오는 중...") : h(AssistantCommentListV2, { comments }),
+            !viewAsDirector && h("div", { className: "mt-2" },
+              h("textarea", { rows: 2, value: newComment, onChange: (e) => setNewComment(e.target.value),
+                placeholder: "새 코멘트 입력 (예: 오답노트 다시 설명해줬어요)",
+                className: "w-full px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${AMBER}`, background: AMBER_SOFT } }),
+              h("button", { type: "button", onClick: addComment, disabled: commentSaving || !newComment.trim(),
+                className: "px-3 py-1.5 rounded-lg text-xs font-bold mt-1.5",
+                style: { background: NAVY, color: "#fff", opacity: (commentSaving || !newComment.trim()) ? 0.6 : 1 } },
+                commentSaving ? "저장 중..." : "코멘트 남기기")
+            )
+          ),
+
+          // 오늘 수업(원장님 전용) - 수업내용 + 새 과제 추가.
+          viewAsDirector && h("div", { className: "rounded-2xl p-4", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } }, "📝 오늘 수업"),
+            h("div", { className: "mb-3" },
+              h("div", { style: { fontSize: 10.5, fontWeight: 700, color: SUBINK, marginBottom: 4 } }, "수업내용"),
+              h(EditableNote, {
+                value: currentNote, placeholder: "수업내용 입력 (예: 3단원 인수분해 복습)", color: PURPLE, soft: PURPLE_SOFT,
+                icon: "📝", iconTitle: "수업내용 추가", allowEmpty: true,
+                onSave: (v) => isCourseTab ? saveNoteForSession(selectedCourseEntry.student.id, selectedCourseNoteSession, v) : saveNoteForSession(selectedStudent.id, activeSession, v),
+              })
+            ),
+            h("div", { className: "flex flex-col gap-1.5 mb-2" },
+              todaysAssignments.map((a) => {
+                const locked = !!a.teacher_comment || !!a.student_note;
+                return h(AssignmentEditableField, {
+                  key: a.id, assignment: a, locked, textbookOptions: textbookOptionsFor(effectiveStudent.id),
+                  onUpdate: (desc) => updateAssignmentDescription(a.id, desc),
+                  onDelete: () => deleteAssignmentRow(a.id),
+                  onToggleStatus: (done) => toggleAssignmentStatus(a.id, done),
+                  onUpdateProgress: (id, progressTo) => updateAssignmentProgress(id, progressTo, a.range_to),
+                });
+              })
+            ),
+            h(AssignmentQuickCreateV2, {
+              textbookOptions: textbookOptionsFor(effectiveStudent.id),
+              onCreate: (desc, due, rf, rt, tbId) => createAssignment(desc, due, rf, rt, tbId, isCourseTab ? selectedCourseEntry.enrollmentId : null),
+            })
+          ),
+
+          // 근무일지(읽기전용, 원장님 화면에만)
+          viewAsDirector && h("div", { className: "rounded-2xl p-3.5", style: { background: "#fff", border: `1px solid ${LINE}` } },
+            h("div", { style: { fontSize: 11.5, fontWeight: 800, color: SUBINK, marginBottom: 8 } }, "📔 근무일지 · 최근 기록 (읽기 전용)"),
+            workLogs.length === 0
+              ? h("div", { style: { fontSize: 12, color: SUBINK } }, "이 학생에 대해 작성된 근무일지가 아직 없어요.")
+              : h("div", { className: "flex flex-col gap-2.5" },
+                  workLogs.map((w) => h("div", { key: w.id, style: { fontSize: 12 } },
+                    h("div", { className: "flex items-center gap-2 flex-wrap", style: { marginBottom: 2 } },
+                      h("span", { style: { fontWeight: 700, color: NAVY } }, w.log_date),
+                      h("span", { style: { color: SUBINK } }, w.author_name || w.author_email)
+                    ),
+                    h("div", { style: { color: INK } }, w.content)
+                  ))
+                )
+          )
+        )
+  );
+}
+
+
+// ============================================================
 // 공용 페이지 셸 (사이드바 / 모바일 상단바+하단 내비게이션)
 // [2026-08-05 복원] 화면 폭을 넓히려고(원장님 요청, 2026-08-01) 왼쪽 세로 사이드바 대신 맨 위
 // 가로 탭바로 바꿨었는데, attendance.html/workboard.html/students.html과 내비게이션 위치가
@@ -2471,7 +2986,7 @@ const TAB_DEFS = [
 ];
 const TAB_HEADERS = {
   textbooks: { title: "교재별 진도", subtitle: "학생별 · 교재별로 진도를 등록하고 관리하세요." },
-  assignments: { title: "과제 관리", subtitle: "과제를 등록하고, 학생이 제출한 내용을 확인·코멘트하세요." },
+  assignments: { title: "과제 관리", subtitle: "알약버튼으로 학생을 고르면, 그 학생 화면 하나로 오늘 확인할 과제와 학습현황을 볼 수 있어요." },
   classlog: { title: "수업일지", subtitle: "왼쪽에서 학생을 고르면 오른쪽에서 출결·과제·특강현황을 보며 수업내용/과제를 바로 기록할 수 있어요." },
 };
 const LAST_TAB_KEY = "clm_last_tab";
@@ -2522,7 +3037,7 @@ function MainApp({ session }) {
     h(ClassLogPillTabs, { tab, setTab, visibleTabs }),
     pageHeader,
     tab === "textbooks" && h(TextbookDashboard, { session, role }),
-    tab === "assignments" && h(AssignmentsDashboard, { session, role }),
+    tab === "assignments" && h(ClassLogDashboardV2, { session, isDirector }),
     tab === "classlog" && isDirector && h(ClassLogDashboard, { session })
   );
 }
