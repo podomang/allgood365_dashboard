@@ -2674,7 +2674,7 @@ const NAV_ITEMS = [
     { key: "students", href: "students.html", label: "학생관리", icon: "👥", directorOnly: true },
 ];
 function PageShell({ session, isDirector, children }) {
-    const handleLogout = () => { supabaseClient.auth.signOut(); };
+    const handleLogout = () => { supabaseClient.auth.signOut().then(() => { window.location.href = "index.html"; }); };
     const visibleNavItems = NAV_ITEMS.filter((t) => !t.directorOnly || isDirector);
     const sidebar = React.createElement(
         "aside",
