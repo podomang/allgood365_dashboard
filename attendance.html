@@ -397,6 +397,10 @@ async function setAttendanceReason(date, session, studentId, reason) {
 }
 // 출석/지각/조퇴 버튼을 누른 "순간"의 시각을 checked_at에 자동 기록한다. 결석·일정변경은 시간 기록 대상이
 // 아니므로 항상 null(2026-08-07 원장님 확인 - 결석은 애초에 등원을 안 한 것이라 시각이 의미 없음).
+// 자동 기록은 "오늘 날짜"를 체크할 때만 의미가 있다(실시간으로 등원하는 순간이니까) - 원장님이 다른
+// 날짜(내일 것을 미리 눌러보거나, 지난 날짜를 나중에 채울 때)의 출석부를 열어서 누르면 실제 클릭 시각과
+// 그 날짜의 정시가 전혀 무관해져서 "699분 지각" 같은 엉뚱한 계산이 나옴(2026-08-08 발견/수정) - 그래서
+// 오늘 날짜가 아니면 자동으로는 시각을 채우지 않고, 필요하면 연필 아이콘으로 직접 입력하게 한다.
 async function setAttendanceRow(date, session, studentId, status, isCurrentlyActive) {
     if (isCurrentlyActive) {
         const { error } = await supabaseClient.from("attn_attendance").delete()
@@ -405,7 +409,8 @@ async function setAttendanceRow(date, session, studentId, status, isCurrentlyAct
             throw error;
     }
     else {
-        const checkedAt = (status === "출석" || status === "지각" || status === "조퇴") ? new Date().toISOString() : null;
+        const isTimeStatus = (status === "출석" || status === "지각" || status === "조퇴");
+        const checkedAt = (isTimeStatus && date === todayStr()) ? new Date().toISOString() : null;
         const { error } = await supabaseClient.from("attn_attendance").upsert({ attn_date: date, session, student_id: studentId, status, checked_at: checkedAt, updated_at: new Date().toISOString() }, { onConflict: "attn_date,session,student_id" });
         if (error)
             throw error;
@@ -756,6 +761,25 @@ function StampButton({ status, active, onClick, disabled, title }) {
             transition: "transform 150ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease",
             opacity: disabled ? 0.4 : 1, cursor: disabled ? "not-allowed" : "pointer",
         } }, status));
+}
+// 실제 현재 날짜/요일/시각을 초 단위로 보여주는 상시 표시 바 (2026-08-08 추가). 출석체크 화면 상단,
+// 날짜 선택 바로 아래에 둬서 "자동 시간기록은 지금 이 순간 기준"이라는 걸 직관적으로 알 수 있게 하고,
+// 오늘이 아닌 다른 날짜를 보고 있을 때는 위 날짜 선택과 이 실제 시각이 서로 다르다는 게 한눈에 보여서
+// 자동기록이 왜 안 채워지는지도 자연스럽게 짐작 가능하게 함.
+function LiveClockBar() {
+    const [now, setNow] = useState(() => new Date());
+    useEffect(() => {
+        const id = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(id);
+    }, []);
+    const dateLabel = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일(${JS_DAY_TO_KOR[now.getDay()]})`;
+    const timeLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+    return React.createElement(
+        "div",
+        { className: "flex items-center gap-2 flex-wrap rounded-xl mt-2", style: { background: NAVY, color: "#fff", padding: "10px 14px" } },
+        React.createElement("span", { style: { fontSize: 11.5, opacity: 0.8, flexShrink: 0 } }, "현재 시각"),
+        React.createElement("span", { style: { fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3 } }, dateLabel, " · ", timeLabel)
+    );
 }
 
 // ============================================================
@@ -1139,8 +1163,11 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             if (isActive) delete rec[studentId];
             else {
                 // 출석/지각/조퇴는 버튼을 누르는 이 순간의 시각을 그대로 자동 기록(2026-08-07 추가).
-                // 결석·일정변경은 시간 기록 대상이 아니라 항상 checkedAt이 비어있다.
-                const checkedAt = (status === "출석" || status === "지각" || status === "조퇴") ? new Date().toISOString() : null;
+                // 단, "오늘" 출석부를 체크할 때만 - 다른 날짜(내일 미리보기, 지난 날짜 나중에 채우기)는
+                // 실제 클릭 시각이 그 날짜의 정시와 무관해서 엉뚱한 지각 계산이 나오므로 자동으로는
+                // 채우지 않는다(2026-08-08 수정). 결석·일정변경은 시간 기록 대상이 아니라 항상 비어있다.
+                const isTimeStatus = (status === "출석" || status === "지각" || status === "조퇴");
+                const checkedAt = (isTimeStatus && selectedDate === todayStr()) ? new Date().toISOString() : null;
                 rec[studentId] = { status, reason: rec[studentId]?.reason || "", checkedAt };
             }
             return { ...prev, [session]: rec };
@@ -1395,6 +1422,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: NAVY, background: NAVY_SOFT, borderRadius: 8, padding: "6px 10px" } }, weekday, "\uC694\uC77C")
     );
     const dateInput = React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none mt-2", style: { border: `1px solid ${LINE}` } });
+    // 지금 실제 시각을 항상 보여줘서, 자동 시간기록이 "지금 이 순간" 기준으로 찍힌다는 걸 직관적으로
+    // 알 수 있게 함 - 특히 오늘이 아닌 날짜를 보고 있을 때 자동기록이 안 되는 이유도 이걸로 짐작 가능.
+    const liveClock = React.createElement(LiveClockBar, null);
     const sessionTabs = React.createElement(
         "div",
         { className: "grid grid-cols-5 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -1634,7 +1664,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         );
     }
     if (session === "diagnostic") {
-        return React.createElement("div", null, header, dateInput, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
+        return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
     if (session === "course") {
         // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
@@ -1694,9 +1724,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                     );
                 })
             );
-        return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseGroupToggle, courseListBody, clockInModal);
+        return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseGroupToggle, courseListBody, clockInModal);
     }
-    return React.createElement("div", null, header, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
+    return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, blockedByClockIn && clockInBlockedBanner, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
 }
 
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
