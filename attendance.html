@@ -776,9 +776,9 @@ function LiveClockBar() {
     const timeLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
     return React.createElement(
         "div",
-        { className: "flex items-center gap-2 flex-wrap rounded-xl mt-2", style: { background: NAVY_SOFT, color: NAVY, padding: "9px 14px" } },
-        React.createElement("span", { style: { fontSize: 11.5, opacity: 0.75, flexShrink: 0 } }, "현재 시각"),
-        React.createElement("span", { style: { fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums", letterSpacing: 0.2 } }, dateLabel, " · ", timeLabel)
+        { className: "flex items-center justify-center gap-2 flex-wrap rounded-xl mt-2 text-center", style: { background: NAVY_SOFT, color: NAVY, padding: "12px 16px" } },
+        React.createElement("span", { style: { fontSize: 13, opacity: 0.75, flexShrink: 0 } }, "현재 시각"),
+        React.createElement("span", { style: { fontSize: 19, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3 } }, dateLabel, " · ", timeLabel)
     );
 }
 
