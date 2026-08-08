@@ -1344,18 +1344,22 @@ function NoteFieldEditor({ initialValue, placeholder, color, soft, allowEmpty, o
     setSaving(true);
     try { await onSave(text.trim()); } finally { setSaving(false); }
   };
-  return h("div", { className: "flex gap-2 flex-wrap items-center", style: { flex: "1 1 200px" } },
-    h("input", {
-      type: "text", autoFocus: true, value: text, onChange: (e) => setText(e.target.value),
-      onKeyDown: (e) => { if (e.key === "Enter") save(); }, placeholder,
-      className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${color}`, background: soft, color: INK },
+  // [2026-08-08] 원장님 요청 — 한 줄 입력칸(Enter=저장) 대신, 스태프룸 "업무공지" 글쓰기칸처럼
+  // 여러 줄 입력 + 줄바꿈(Enter) + 마우스로 크기 조절 가능한 textarea로 변경.
+  return h("div", { className: "flex flex-col gap-2", style: { flex: "1 1 200px" } },
+    h("textarea", {
+      rows: 3, autoFocus: true, value: text, onChange: (e) => setText(e.target.value),
+      placeholder,
+      className: "w-full px-3 py-2 rounded-lg text-xs outline-none", style: { border: `1px solid ${color}`, background: soft, color: INK, resize: "vertical", fontFamily: "inherit" },
     }),
-    h("button", { type: "button", onClick: save, disabled: saving || !canSave,
-      className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
-      style: { background: color, color: "#fff", opacity: (saving || !canSave) ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
-    onCancel && h("button", { type: "button", onClick: onCancel,
-      className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
-      style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+    h("div", { className: "flex gap-2 flex-wrap" },
+      h("button", { type: "button", onClick: save, disabled: saving || !canSave,
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: color, color: "#fff", opacity: (saving || !canSave) ? 0.6 : 1 } }, saving ? "저장 중..." : "저장"),
+      onCancel && h("button", { type: "button", onClick: onCancel,
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0",
+        style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+    )
   );
 }
 
@@ -1364,8 +1368,8 @@ function NoteFieldEditor({ initialValue, placeholder, color, soft, allowEmpty, o
 function EditableNote({ value, placeholder, color, soft, icon, iconTitle, locked, allowEmpty, disabled, onSave, onDelete }) {
   const [editing, setEditing] = useState(false);
   if (locked && value) {
-    return h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-      h("span", { style: { fontSize: 11, fontWeight: 700, background: soft, color, borderRadius: 5, padding: "2.5px 8px" } }, value),
+    return h("div", { className: "flex items-start gap-1.5 flex-wrap" },
+      h("span", { style: { fontSize: 11, fontWeight: 700, background: soft, color, borderRadius: 5, padding: "2.5px 8px", whiteSpace: "pre-wrap" } }, value),
       h("span", { style: { fontSize: 11, color: SUBINK }, title: "제출/코멘트가 있어 수정할 수 없어요" }, "🔒")
     );
   }
@@ -1374,8 +1378,8 @@ function EditableNote({ value, placeholder, color, soft, icon, iconTitle, locked
       className: "p-1 rounded-md flex-shrink-0", style: { color, opacity: disabled ? 0.3 : 0.55, cursor: disabled ? "default" : "pointer" }, title: iconTitle }, icon);
   }
   if (!editing) {
-    return h("div", { className: "flex items-center gap-1.5 flex-wrap" },
-      h("span", { style: { fontSize: 11, fontWeight: 700, background: soft, color, borderRadius: 5, padding: "2.5px 8px" } }, value),
+    return h("div", { className: "flex items-start gap-1.5 flex-wrap" },
+      h("span", { style: { fontSize: 11, fontWeight: 700, background: soft, color, borderRadius: 5, padding: "2.5px 8px", whiteSpace: "pre-wrap" } }, value),
       h("button", { type: "button", onClick: () => setEditing(true), className: "p-1 rounded-md", style: { color }, title: "수정" }, "✎"),
       onDelete && h("button", { type: "button", onClick: onDelete, className: "p-1 rounded-md", style: { color: SUBINK }, title: "삭제" }, "✕")
     );
