@@ -487,6 +487,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     const [baseline, setBaseline] = useState(null); // 편집 시작 시점의 이력 비교용 원본 값(school/grade/class/시간 등)
     const [editTarget, setEditTarget] = useState(null); // null | "new" | studentId
     const [saving, setSaving] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null); // 🗑 눌러서 삭제 확인창을 보고 있는 학생 객체(null이면 닫힘)
+    const [deleting, setDeleting] = useState(false);
     // 진단평가 "학생으로 등록" 버튼으로 넘어온 경우, 저장 성공 시 그 진단평가 기록에 새 학생 id를 연결해준다.
     const [prefillSourceId, setPrefillSourceId] = useState(null);
     useEffect(() => {
@@ -637,14 +639,22 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         }
         setSaving(false);
     };
-    const remove = async (id) => {
-        if (!confirm("이 학생을 삭제할까요? 출석 기록도 함께 삭제됩니다.")) return;
+    // 🗑 버튼은 바로 지우지 않고 confirmDeleteModal을 먼저 띄운다(브라우저 기본 confirm()은
+    // 카카오톡/인스타그램 인앱브라우저 등 일부 웹뷰에서 다이얼로그 없이 자동으로 "확인" 처리되어
+    // 버튼 한 번에 즉시 삭제돼버리는 문제가 있었음 - 그래서 앱 자체 모달로 교체함(2026-08-08)).
+    const requestDelete = (s) => setDeleteTarget(s);
+    const cancelDelete = () => { if (!deleting) setDeleteTarget(null); };
+    const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleting(true);
         try {
-            await deleteStudentRow(id);
+            await deleteStudentRow(deleteTarget.id);
             await reload();
+            setDeleteTarget(null);
         } catch (e) {
             alert("삭제 중 오류: " + e.message);
         }
+        setDeleting(false);
     };
     const toggleHistory = async (id) => {
         if (historyTarget === id) { setHistoryTarget(null); return; }
@@ -842,7 +852,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             React.createElement("button", { onClick: () => toggleCourses(s.id), className: "p-2 rounded-lg", style: { background: courseTarget === s.id ? TEAL_SOFT : PAPER, color: TEAL }, title: "추가강좌 관리" }, "📚"),
             goToWorkLog && React.createElement("button", { onClick: () => goToWorkLog(s.id, null, "view"), className: "p-2 rounded-lg", style: { background: PAPER, color: PURPLE }, title: "근무일지(지도 이력) 보기" }, "📔"),
             React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "✎"),
-            React.createElement("button", { onClick: () => remove(s.id), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+            React.createElement("button", { onClick: () => requestDelete(s), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
         )
     );
     const renderHistoryPanel = () => React.createElement(
@@ -1064,6 +1074,42 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         ),
         !withdrawnCollapsed && React.createElement("div", { className: "flex flex-col gap-2.5 p-3" }, withdrawnStudents.map(renderStudentBlock))
     );
+    const deleteConfirmModal = deleteTarget && React.createElement(
+        "div",
+        { className: "fixed inset-0 flex items-center justify-center p-4", style: { background: "rgba(15,23,42,0.45)", zIndex: 100 } },
+        React.createElement(
+            "div",
+            { className: "rounded-2xl p-6 w-full", style: { background: "#fff", maxWidth: 360 } },
+            React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: RED, marginBottom: 8 } }, "🗑 학생 삭제"),
+            React.createElement(
+                "div",
+                { style: { fontSize: 13.5, fontWeight: 700, color: INK, marginBottom: 6 } },
+                deleteTarget.name, " 학생의 데이터가 삭제됩니다. 정말 삭제하시겠습니까?"
+            ),
+            React.createElement(
+                "div",
+                { style: { fontSize: 12, color: SUBINK, marginBottom: 14 } },
+                "출석 기록 등 관련 데이터도 함께 삭제되며, 삭제 후에는 되돌릴 수 없습니다."
+            ),
+            React.createElement(
+                "div",
+                { style: { fontSize: 11.5, color: NAVY, background: NAVY_SOFT, borderRadius: 10, padding: "8px 10px", marginBottom: 18 } },
+                "💡 학원을 그만둔 학생이라면 삭제 대신 재원 상태를 \"퇴원\"으로 바꿔주세요. 기록은 그대로 남고 출석체크 명단에서만 빠집니다."
+            ),
+            React.createElement("button", {
+                onClick: confirmDelete,
+                disabled: deleting,
+                className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold mb-2",
+                style: { background: RED, color: "#fff", opacity: deleting ? 0.6 : 1 },
+            }, deleting ? "삭제 중..." : "삭제"),
+            React.createElement("button", {
+                onClick: cancelDelete,
+                disabled: deleting,
+                className: "w-full px-4 py-2 rounded-lg text-sm font-semibold",
+                style: { color: SUBINK },
+            }, "취소")
+        )
+    );
     return React.createElement(
         "div",
         null,
@@ -1073,7 +1119,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         groupToggle,
         editTarget === "new" && studentFormEl,
         listBody,
-        withdrawnBlock
+        withdrawnBlock,
+        deleteConfirmModal
     );
 }
 
