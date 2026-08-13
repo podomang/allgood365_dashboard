@@ -250,6 +250,11 @@ function effectiveRegularTimeFor(s, weekday) {
 function korWeekdayOf(dateStr) {
     return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
+// "2026-08-15" -> "8월 15일" (휴강 배너 등에서 짧게 날짜를 보여줄 때 사용)
+function mdKor(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
 
 // ---------- 출결 자동 시간기록(checked_at) 관련 헬퍼 (2026-08-07 추가) ----------
 // "18:00~20:30" 같은 시간범위 문자열에서 시작 시각("18:00")만 뽑아낸다. 보강(scheduledTime)처럼
@@ -322,6 +327,17 @@ async function fetchAssistants() {
     const { data, error } = await supabaseClient.from("attn_assistants").select("*").order("name");
     if (error) throw error;
     return data.map(mapAssistant);
+}
+
+// ---------- 학원휴무(휴강) 학사일정 ----------
+// 업무보드 캘린더에서 "학원휴무" 타입으로 등록해둔 학사일정(attn_academic_events)을 그대로 재사용한다.
+// 출석체크 화면에서 이 목록 중 선택한 날짜가 걸리는 항목이 있으면 "휴강일" 배너를 띄우는 데 쓴다
+// (2026-08-12 추가). 건수가 매우 적은 테이블이라 필터 없이 전부 불러온 뒤 화면에서 날짜 비교한다.
+async function fetchAcademicClosures() {
+    const { data, error } = await supabaseClient.from("attn_academic_events").select("id, title, event_date, end_date")
+        .eq("event_type", "학원휴무").order("event_date");
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, title: r.title || "휴강", eventDate: r.event_date, endDate: r.end_date || r.event_date }));
 }
 function mapAssistant(r) {
     return { id: r.id, name: r.name, subject: r.subject || "", phone: r.phone || "", status: r.status || "재직", email: r.email, memo: r.memo || "" };
@@ -1017,6 +1033,54 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    // 학원휴무(휴강) 학사일정: 업무보드 캘린더 등록분을 그대로 읽어와서, 보강 탭을 제외한 나머지
+    // 탭에서 선택한 날짜가 휴강 기간에 걸리면 안내 배너를 띄우는 데 쓴다(2026-08-12 추가).
+    const [closures, setClosures] = useState([]);
+    const loadClosures = async () => {
+        try {
+            setClosures(await fetchAcademicClosures());
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    useEffect(() => { loadClosures(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_academic_events_closures")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_academic_events", filter: "event_type=eq.학원휴무" }, () => loadClosures())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const activeClosure = useMemo(
+        () => closures.find((c) => selectedDate >= c.eventDate && selectedDate <= c.endDate),
+        [closures, selectedDate]
+    );
+    // 보강(extra) 탭은 휴강 중에도 정상적으로 체크해야 하는 탭이라 배너 대상에서 제외한다.
+    const showClosureBanner = !!activeClosure && session !== "extra";
+    const [showClosureRoster, setShowClosureRoster] = useState(false);
+    useEffect(() => { setShowClosureRoster(false); }, [selectedDate, session]);
+    // 학원휴무(휴강) 안내 배너 - 보강 탭은 정상 운영되므로 제외(showClosureBanner 계산식 참고).
+    // 진단평가 탭은 접수 목록이라 "그래도 목록 보기" 토글은 굳이 필요 없어 정보성 문구만 보여준다.
+    const closureBanner = showClosureBanner && React.createElement(
+        "div",
+        { className: "rounded-2xl p-4 mb-4", style: { background: SKY_SOFT, border: `1px solid ${SKY}` } },
+        React.createElement(
+            "div",
+            { style: { fontSize: 13.5, fontWeight: 800, color: SKY, marginBottom: 4 } },
+            "🔔 ", activeClosure.title, " · ",
+            activeClosure.eventDate === activeClosure.endDate ? mdKor(activeClosure.eventDate) : `${mdKor(activeClosure.eventDate)} ~ ${mdKor(activeClosure.endDate)}`
+        ),
+        React.createElement(
+            "div",
+            { style: { fontSize: 12.5, color: SKY, marginBottom: session === "diagnostic" ? 0 : 10 } },
+            "이 기간은 학원 휴강일입니다. 보강 대상 학생은 [보강] 탭에서 체크해 주세요."
+        ),
+        session !== "diagnostic" && React.createElement(
+            "button",
+            { onClick: () => setShowClosureRoster((v) => !v), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: "#fff", color: SKY, border: `1px solid ${SKY}` } },
+            showClosureRoster ? "▲ 목록 접기" : "▼ 그래도 목록 보기"
+        )
+    );
     const historyByStudent = useMemo(() => {
         const map = {};
         history.forEach((h) => { (map[h.studentId] = map[h.studentId] || []).push(h); });
@@ -1456,9 +1520,22 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         React.createElement("h1", { style: { fontSize: 20, fontWeight: 800 } }, "\uCD9C\uC11D\uCCB4\uD06C"),
         React.createElement("span", { style: { fontSize: 12.5, fontWeight: 800, color: NAVY, background: NAVY_SOFT, borderRadius: 8, padding: "6px 10px" } }, weekday, "\uC694\uC77C")
     );
-    const dateInput = React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none mt-2", style: { border: `1px solid ${LINE}` } });
+    // 선택한 날짜가 오늘이 아니면(미래 미리보기, 과거 기록 등) 날짜 입력칸 위에 작은 배지를 붙여서
+    // 바로 아래 "현재 시각"과 날짜가 다르다는 걸 헷갈리지 않도록 한다(2026-08-12, 원장님 피드백 반영).
+    const isTodaySelected = selectedDate === todayStr();
+    const dateInput = React.createElement(
+        "div",
+        { className: "mt-2" },
+        !isTodaySelected && React.createElement(
+            "span",
+            { style: { fontSize: 11.5, fontWeight: 800, color: AMBER, background: AMBER_SOFT, display: "inline-block", borderRadius: 6, padding: "3px 8px", marginBottom: 4 } },
+            "오늘 아님 · 다른 날짜를 보는 중"
+        ),
+        React.createElement("input", { type: "date", value: selectedDate, onChange: (e) => setSelectedDate(e.target.value), className: "w-full px-3 py-3 rounded-xl text-base outline-none", style: { border: `1px solid ${isTodaySelected ? LINE : AMBER}` } })
+    );
     // 지금 실제 시각을 항상 보여줘서, 자동 시간기록이 "지금 이 순간" 기준으로 찍힌다는 걸 직관적으로
-    // 알 수 있게 함 - 특히 오늘이 아닌 날짜를 보고 있을 때 자동기록이 안 되는 이유도 이걸로 짐작 가능.
+    // 알 수 있게 함. 순서상 날짜 선택보다 먼저 보이게 둬서 "지금은 언제다(기준)" -> "이 날짜를 보고
+    // 있다(선택)" 흐름으로 읽히게 함(2026-08-12, 날짜 입력칸과 붙어 있으면 헷갈린다는 피드백으로 순서 변경).
     const liveClock = React.createElement(LiveClockBar, null);
     const sessionTabs = React.createElement(
         "div",
@@ -1699,7 +1776,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         );
     }
     if (session === "diagnostic") {
-        return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
+        return React.createElement("div", null, header, liveClock, dateInput, sessionTabs, closureBanner, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
     if (session === "course") {
         // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
@@ -1759,9 +1836,18 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                     );
                 })
             );
-        return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, blockedByClockIn && clockInBlockedBanner, courseGroupToggle, courseListBody, clockInModal);
+        return React.createElement("div", null, header, liveClock, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, closureBanner, (!showClosureBanner || showClosureRoster) && courseGroupToggle, (!showClosureBanner || showClosureRoster) && courseListBody, clockInModal);
     }
-    return React.createElement("div", null, header, dateInput, liveClock, sessionTabs, blockedByClockIn && clockInBlockedBanner, subLine, statCards, scheduleChangeSection, groupToggle, addPicker, listBody, clockInModal);
+    return React.createElement(
+        "div", null, header, liveClock, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, closureBanner,
+        (!showClosureBanner || showClosureRoster) && subLine,
+        (!showClosureBanner || showClosureRoster) && statCards,
+        (!showClosureBanner || showClosureRoster) && scheduleChangeSection,
+        (!showClosureBanner || showClosureRoster) && groupToggle,
+        (!showClosureBanner || showClosureRoster) && addPicker,
+        (!showClosureBanner || showClosureRoster) && listBody,
+        clockInModal
+    );
 }
 
 // 결석/지각 사유 입력칸: 결석 또는 지각으로 표시된 학생 카드 아래에만 나타남
