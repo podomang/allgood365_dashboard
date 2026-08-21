@@ -2575,11 +2575,17 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
     }, [studentRows, studentSort]);
     // 이번 달 지각 TOP5 - 정렬을 직접 안 눌러도 탭에 들어가자마자 바로 보이는 요약 카드(2026-08-21 추가).
     // 지각 0회인 학생은 제외하고, 지각 횟수 desc -> 누적 지각분 desc 순.
+    // 정렬 우선순위(2026-08-21, 원장님 확인): 1순위 지각률(습관의 핵심 지표) -> 2순위 지각률이
+    // 같을 때만 지각 횟수(반복 횟수가 많을수록 우연이 아니라 진짜 패턴이라는 근거가 강함) -> 3순위
+    // 그래도 같을 때 누적 지각시간(최종 동점 처리용). 누적시간을 지각률보다 앞세우면 "어쩌다 한 번
+    // 크게 늦은" 학생이 "매번 조금씩 늦는" 학생보다 위로 올라가는 왜곡이 생겨서 순서를 이렇게 잡음.
+    // 최소 등원횟수 같은 별도 기준은 추가하지 않음(원장님 확인 - 지각률 계산 자체가 이미 결석일을
+    // 분모에서 제외하고 있어 충분하다고 판단, 더 세분화된 통계는 불필요).
     const lateTop5 = useMemo(() => {
         return studentRows
             .filter((row) => row.stats.지각 > 0)
             .slice()
-            .sort((a, b) => (b.stats.지각 - a.stats.지각) || (b.lateMinutesTotal - a.lateMinutesTotal))
+            .sort((a, b) => (b.lateRate - a.lateRate) || (b.stats.지각 - a.stats.지각) || (b.lateMinutesTotal - a.lateMinutesTotal))
             .slice(0, 5);
     }, [studentRows]);
     const header = React.createElement(
