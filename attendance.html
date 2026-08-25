@@ -301,6 +301,17 @@ async function fetchStudentsRoster() {
     return data.map(mapStudentRoster);
 }
 
+// 퇴원생 목록(월별출석부 "학생별" 탭 - "퇴원생 포함" 토글 전용, 2026-08-25 추가).
+// attn_students_roster 뷰는 재원생만 내려주므로(WHERE status = '재원'), 퇴원생 조회는 attn_students
+// 테이블을 직접 읽어야 한다. RLS(attn_students_director_only 정책)상 이 테이블은 원장 계정만 접근
+// 가능한데, 이 함수를 호출하는 "학생별" 탭 자체가 이미 원장 전용 화면(isDirector 게이트)이라 안전함.
+async function fetchWithdrawnStudentsRoster() {
+    const { data, error } = await supabaseClient.from("attn_students").select("*").eq("status", "퇴원").order("name");
+    if (error)
+        throw error;
+    return data.map((row) => ({ ...mapStudentRoster(row), isWithdrawn: true, withdrawDate: row.withdraw_date || "" }));
+}
+
 // ---------- 학생 정보 변경 이력(타임라인) ----------
 // attn_student_history: 학생의 학교/학년/반/시간/클리닉 여부 등이 언제부터 언제까지
 // 어떤 값이었는지 구간(effective_from ~ effective_to)으로 기록해두는 테이블.
@@ -2440,7 +2451,20 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
     const [loading, setLoading] = useState(true);
     const [studentSort, setStudentSort] = useState("rate");
     const [expandedStudentId, setExpandedStudentId] = useState(null);
+    // "학생별" 탭 전용 - 퇴원생 포함 토글(2026-08-25 추가). 정규수업/클리닉/보강/특강 그리드(다른
+    // 서브탭)는 재원생 명단(students prop)을 그대로 쓰고, 이 토글은 studentRows 계산에만 영향을 준다.
+    const [showWithdrawn, setShowWithdrawn] = useState(false);
+    const [withdrawnStudents, setWithdrawnStudents] = useState([]);
+    const [withdrawnLoaded, setWithdrawnLoaded] = useState(false);
     useEffect(() => { fetchAllStudentHistory().then(setHistory).catch((e) => console.error(e)); }, []);
+    useEffect(() => {
+        if (showWithdrawn && !withdrawnLoaded) {
+            fetchWithdrawnStudentsRoster()
+                .then((list) => { setWithdrawnStudents(list); setWithdrawnLoaded(true); })
+                .catch((e) => console.error(e));
+        }
+    }, [showWithdrawn, withdrawnLoaded]);
+    const studentTabStudents = useMemo(() => showWithdrawn ? [...(students || []), ...withdrawnStudents] : (students || []), [students, withdrawnStudents, showWithdrawn]);
     const days = useMemo(() => daysInMonthList(month), [month]);
     const startDate = days[0] ? days[0].dateStr : todayStr();
     const endDate = days.length ? days[days.length - 1].dateStr : todayStr();
@@ -2521,7 +2545,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
         }).filter((g) => g.rows.length > 0);
     }, [studentCourses, students, days, courseAttByDate]);
     const studentRows = useMemo(() => {
-        return (students || []).map((s) => {
+        return (studentTabStudents || []).map((s) => {
             const detail = [];
             let stats = { 출석: 0, 지각: 0, 조퇴: 0, 결석: 0 };
             let total = 0;
@@ -2562,7 +2586,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const lateRate = attendedCount > 0 ? Math.round((stats.지각 / attendedCount) * 1000) / 10 : null;
             return { student: s, stats, rate, lateRate, lateMinutesTotal, detail };
         }).filter((row) => row.detail.length > 0);
-    }, [students, studentCourses, days, historyByStudent, attByDate, checkedAtByDate, extraByDate, courseAttByDate, courseCheckedAtByDate]);
+    }, [studentTabStudents, studentCourses, days, historyByStudent, attByDate, checkedAtByDate, extraByDate, courseAttByDate, courseCheckedAtByDate]);
     const sortedStudentRows = useMemo(() => {
         const list = studentRows.slice();
         if (studentSort === "name")
@@ -2648,7 +2672,15 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             "div",
             { className: "flex items-center gap-2 mb-3 no-print flex-wrap" },
             React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "정렬"),
-            [["rate", "출석률 낮은순"], ["late", "지각 많은순"], ["name", "이름순"]].map((pair) => React.createElement("button", { key: pair[0], onClick: () => setStudentSort(pair[0]), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: studentSort === pair[0] ? NAVY : "#fff", color: studentSort === pair[0] ? "#fff" : SUBINK, border: `1px solid ${studentSort === pair[0] ? NAVY : LINE}` } }, pair[1]))
+            [["rate", "출석률 낮은순"], ["late", "지각 많은순"], ["name", "이름순"]].map((pair) => React.createElement("button", { key: pair[0], onClick: () => setStudentSort(pair[0]), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: studentSort === pair[0] ? NAVY : "#fff", color: studentSort === pair[0] ? "#fff" : SUBINK, border: `1px solid ${studentSort === pair[0] ? NAVY : LINE}` } }, pair[1])),
+            // 퇴원생 포함 토글(2026-08-25 추가) - 재원생 출결부에는 퇴원한 학생이 표시되지 않아서
+            // (attn_students_roster 뷰가 재원생만 내려줌), 그때그때 필요할 때만 별도로 불러와 합쳐 보여준다.
+            React.createElement(
+                "label",
+                { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: SUBINK, fontWeight: 600, cursor: "pointer", marginLeft: "auto", paddingLeft: 10, borderLeft: `1px solid ${LINE}` } },
+                React.createElement("input", { type: "checkbox", checked: showWithdrawn, onChange: (e) => setShowWithdrawn(e.target.checked) }),
+                "퇴원생 포함"
+            )
         );
         const table = sortedStudentRows.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "이 달에 출석 기록이 있는 학생이 없습니다.")
@@ -2673,6 +2705,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                                     "td",
                                     { style: { ...reportTdStyle, textAlign: "left", padding: "7px 10px", fontWeight: 700 } },
                                     expanded ? "▼ " : "▶ ", row.student.name,
+                                    row.student.isWithdrawn && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, color: "#fff", background: "#9ca3af", borderRadius: 6, padding: "1px 6px", marginLeft: 6 } }, "퇴원", row.student.withdrawDate ? ` · ${row.student.withdrawDate.slice(5)}` : ""),
                                     React.createElement("span", { style: { fontSize: 10.5, color: SUBINK, fontWeight: 500, marginLeft: 6 } }, [row.student.school, row.student.grade ? row.student.grade + "학년" : ""].filter(Boolean).join(" · "))
                                 ),
                                 studentReportStatTds(row)
