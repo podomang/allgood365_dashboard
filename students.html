@@ -489,6 +489,10 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     const [saving, setSaving] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null); // 🗑 눌러서 삭제 확인창을 보고 있는 학생 객체(null이면 닫힘)
     const [deleting, setDeleting] = useState(false);
+    // "적용일"을 오늘로 그대로 둔 채 반/시간표 등이 바뀌는 저장을 한 번 더 확인받는 안전장치(2026-08-29
+    // 추가) - 원장님이 다음 학기(예: 9월)부터 적용하려던 시간표를 적용일 입력을 깜빡하고 그대로
+    // 저장해서 오늘부터 바로 적용돼버리는 실수를 연달아 겪은 뒤 반영함. true면 확인 모달이 뜬 상태.
+    const [confirmingTodayApply, setConfirmingTodayApply] = useState(false);
     // 진단평가 "학생으로 등록" 버튼으로 넘어온 경우, 저장 성공 시 그 진단평가 기록에 새 학생 id를 연결해준다.
     const [prefillSourceId, setPrefillSourceId] = useState(null);
     useEffect(() => {
@@ -597,7 +601,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         const newGroups = groupMode === "grade" ? groupByGrade(active) : groupMode === "school" ? groupBySchool(active) : groupMode === "day" ? groupByDay(active) : groupMode === "course" ? groupByExtraCourse(active, studentCourses) : groupByClass(active);
         setCollapsedGroups(Object.fromEntries(newGroups.map((g) => [g.className, true])));
     }, [groupMode, loaded, studentCourses]);
-    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); };
+    const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); setConfirmingTodayApply(false); };
     const openEdit = (s) => {
         setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "" });
         setBaseline({
@@ -608,12 +612,13 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         });
         setEditTarget(s.id);
         setPrefillSourceId(null);
+        setConfirmingTodayApply(false);
     };
-    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); setPrefillSourceId(null); };
+    const closeForm = () => { setEditTarget(null); setForm(emptyForm()); setBaseline(null); setPrefillSourceId(null); setConfirmingTodayApply(false); };
     const toggleDay = (d) => setForm((f) => ({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] }));
     const toggleClinicDay = (d) => setForm((f) => ({ ...f, clinicDays: f.clinicDays.includes(d) ? f.clinicDays.filter((x) => x !== d) : [...f.clinicDays, d] }));
-    const save = async () => {
-        if (!form.name.trim()) return;
+    // 실제 저장 로직 - save()의 확인 절차를 통과했거나(또는 확인이 필요 없는 경우) 여기로 온다.
+    const performSave = async () => {
         setSaving(true);
         try {
             const composedClass = [form.courseLevel, form.courseName.trim()].filter(Boolean).join(" ");
@@ -638,6 +643,23 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             alert("저장 중 오류가 발생했습니다: " + e.message);
         }
         setSaving(false);
+        setConfirmingTodayApply(false);
+    };
+    // "저장" 버튼이 실제로 호출하는 함수. 적용일을 오늘로 그대로 둔 채 반/시간표 등 이력 대상 정보가
+    // 실제로 바뀌는 저장이면, 곧바로 저장하지 않고 확인 모달을 먼저 띄운다(2026-08-29 추가 - 아래
+    // "왜 이 확인창이 필요한가" 참고). 새 학생 등록이거나, 적용일을 이미 미래 날짜로 바꿔뒀거나,
+    // 이력 대상 정보가 실제로는 안 바뀐 저장(연락처/메모만 수정 등)은 확인 없이 바로 저장된다.
+    const save = async () => {
+        if (!form.name.trim()) return;
+        if (form.id) {
+            const newFields = historyRelevantFields(form);
+            const isTodayEffective = (form.effectiveDate || todayStr()) === todayStr();
+            if (baseline && !historyFieldsEqual(baseline, newFields) && isTodayEffective) {
+                setConfirmingTodayApply(true);
+                return;
+            }
+        }
+        await performSave();
     };
     // 🗑 버튼은 바로 지우지 않고 confirmDeleteModal을 먼저 띄운다(브라우저 기본 confirm()은
     // 카카오톡/인스타그램 인앱브라우저 등 일부 웹뷰에서 다이얼로그 없이 자동으로 "확인" 처리되어
@@ -1110,6 +1132,39 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             }, "취소")
         )
     );
+    // "적용일 = 오늘" 확인 모달(2026-08-29 추가) - 미래 날짜로 예약하려던 시간표 변경을 적용일을
+    // 안 바꾼 채 저장하려는 순간 한 번 더 물어봐서, 의도치 않게 오늘부터 바로 적용돼버리는 실수를 막는다.
+    const todayApplyConfirmModal = confirmingTodayApply && React.createElement(
+        "div",
+        { className: "fixed inset-0 flex items-center justify-center p-4", style: { background: "rgba(15,23,42,0.45)", zIndex: 100 } },
+        React.createElement(
+            "div",
+            { className: "rounded-2xl p-6 w-full", style: { background: "#fff", maxWidth: 360 } },
+            React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: AMBER, marginBottom: 8 } }, "⏰ 적용일을 확인해주세요"),
+            React.createElement(
+                "div",
+                { style: { fontSize: 13.5, fontWeight: 700, color: INK, marginBottom: 6 } },
+                "적용일이 오늘(", todayStr(), ")로 되어 있습니다."
+            ),
+            React.createElement(
+                "div",
+                { style: { fontSize: 12, color: SUBINK, marginBottom: 14 } },
+                "이대로 저장하면 반/학교/시간표 등의 변경사항이 오늘부터 바로 적용됩니다. 나중 날짜(예: 다음 학기 시작일)부터 적용하려던 것이라면 취소하고 위쪽 \"적용일\"을 먼저 바꿔주세요."
+            ),
+            React.createElement("button", {
+                onClick: performSave,
+                disabled: saving,
+                className: "w-full px-4 py-2.5 rounded-lg text-sm font-bold mb-2",
+                style: { background: AMBER, color: "#fff", opacity: saving ? 0.6 : 1 },
+            }, saving ? "저장 중..." : "네, 오늘부터 적용합니다"),
+            React.createElement("button", {
+                onClick: () => setConfirmingTodayApply(false),
+                disabled: saving,
+                className: "w-full px-4 py-2 rounded-lg text-sm font-semibold",
+                style: { color: SUBINK },
+            }, "취소하고 적용일 다시 확인")
+        )
+    );
     return React.createElement(
         "div",
         null,
@@ -1120,7 +1175,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         editTarget === "new" && studentFormEl,
         listBody,
         withdrawnBlock,
-        deleteConfirmModal
+        deleteConfirmModal,
+        todayApplyConfirmModal
     );
 }
 
