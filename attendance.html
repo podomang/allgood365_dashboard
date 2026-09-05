@@ -47,6 +47,9 @@ const TEAL = "#0f7a6c";
 const TEAL_SOFT = "#e2f3f0";
 const SKY = "#0369a1";
 const SKY_SOFT = "#e3f0f9";
+// "내신대비"(시험기간 임시 보강) 탭 전용 색상 - 특강(TEAL)과 구분되게 다른 색으로 둠(2026-09-04 추가).
+const ROSE = "#be185d";
+const ROSE_SOFT = "#fdf0f5";
 const PAPER = "#f7f8fa";
 const INK = "#111827";
 const SUBINK = "#6b7280";
@@ -180,8 +183,11 @@ function groupBySchool(list) {
     return keys.map((k) => ({ className: k, list: groups[k] }));
 }
 
-const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강", course: "특강", diagnostic: "진단평가" };
-const SESSION_ORDER = ["regular", "clinic", "extra", "course", "diagnostic"];
+const SESSIONS = { regular: "정규수업", clinic: "클리닉", extra: "보강", course: "특강", examprep: "내신대비", diagnostic: "진단평가" };
+const SESSION_ORDER = ["regular", "clinic", "extra", "course", "examprep", "diagnostic"];
+// "내신대비" 탭은 attn_student_courses의 category='examprep' 강좌만 모아 보여주는, "특강" 탭과 완전히
+// 같은 구조의 별도 탭이다(시험기간 내신대비보강을 일반 특강과 섞이지 않게 분리해달라는 원장님 요청,
+// 2026-09-04). 같은 테이블/출석기록(attn_course_attendance)을 공유하고 category로만 나뉜다.
 // "특강"(추가강좌) 출석체크는 정규/클리닉/보강과 완전히 분리된 상태(과목·요일·시간이 다름)라 색을 다르게 둠.
 // "일정변경"도 정규수업과 동일하게 지원 - 목표 날짜의 "보강" 명단에 자동 등록됨(원장만 사용 가능).
 // 클리닉과 동일한 구성으로 맞추기 위해 "조퇴"도 추가함(2026-07-24 후속).
@@ -654,6 +660,7 @@ function mapStudentCourse(r) {
         id: r.id, studentId: r.student_id, courseName: r.course_name, className: r.class_name || "",
         days: r.days || [], courseTime: r.course_time || "", startDate: r.start_date, endDate: r.end_date,
         memo: r.memo || "", memoDone: !!r.memo_done, memoDoneBy: r.memo_done_by || "", memoDoneAt: r.memo_done_at || "",
+        category: r.category || "",
     };
 }
 // [분리 작업] MainApp(reloadStudentCourses)이 필요로 하는데 원래 StudentManager 구역(attendance.html
@@ -924,7 +931,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [showPastDiag, setShowPastDiag] = useState(false);
     // 출석체크(정규/클리닉/보강/특강)는 "그날 실제로 출근 체크한 근무자"만 가능(원장은 예외).
     // 진단평가 탭은 신규등록 전 접수 목록이라 이 제한 대상이 아님.
-    const GATED_SESSIONS = ["regular", "clinic", "extra", "course"];
+    const GATED_SESSIONS = ["regular", "clinic", "extra", "course", "examprep"];
     const [hasClockInForDate, setHasClockInForDate] = useState(true);
     const [checkingClockIn, setCheckingClockIn] = useState(true);
     const refreshClockInStatus = async (dateStr) => {
@@ -1134,7 +1141,16 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // 특강(추가강좌) 명단: 선택된 날짜의 요일에 진행되고, 시작일~종료일 범위 안에 있는 강좌만 골라서
     // 학생 기본정보(이름/학교/학년)와 합친다. 정규수업과 달리 한 학생이 여러 강좌를 들을 수 있어
     // course.id를 행의 고유 키로 사용한다.
+    // "특강" 탭에는 category가 없는(일반) 강좌만, "내신대비" 탭에는 category==='examprep' 강좌만 표시한다.
     const activeCourses = useMemo(() => (studentCourses || []).filter((c) => {
+        if (c.category === "examprep") return false;
+        if (!c.days || !c.days.includes(weekday)) return false;
+        if (c.startDate && selectedDate < c.startDate) return false;
+        if (c.endDate && selectedDate > c.endDate) return false;
+        return true;
+    }), [studentCourses, weekday, selectedDate]);
+    const activeExamPrepCourses = useMemo(() => (studentCourses || []).filter((c) => {
+        if (c.category !== "examprep") return false;
         if (!c.days || !c.days.includes(weekday)) return false;
         if (c.startDate && selectedDate < c.startDate) return false;
         if (c.endDate && selectedDate > c.endDate) return false;
@@ -1152,7 +1168,15 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             return { id: c.id, courseId: c.id, studentId: c.studentId, name: st.name, school: st.school, grade: st.grade, courseName: c.courseName, className: c.className, courseTime: c.courseTime };
         })
         .filter(Boolean), [activeCourses, studentById]);
+    const examPrepRoster = useMemo(() => activeExamPrepCourses
+        .map((c) => {
+            const st = studentById[c.studentId];
+            if (!st) return null;
+            return { id: c.id, courseId: c.id, studentId: c.studentId, name: st.name, school: st.school, grade: st.grade, courseName: c.courseName, className: c.className, courseTime: c.courseTime };
+        })
+        .filter(Boolean), [activeExamPrepCourses, studentById]);
     const courseGroups = useMemo(() => courseGroupMode === "time" ? groupByTime(courseRoster, "courseTime") : groupByCourseName(courseRoster), [courseRoster, courseGroupMode]);
+    const examPrepGroups = useMemo(() => courseGroupMode === "time" ? groupByTime(examPrepRoster, "courseTime") : groupByCourseName(examPrepRoster), [examPrepRoster, courseGroupMode]);
     const setCourseStatus = async (courseId, studentId, status) => {
         const isActive = courseAttendance[courseId]?.status === status;
         setCourseAttendance((prev) => {
@@ -1201,7 +1225,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         const courseInfo = (studentCourses || []).find((c) => c.id === courseId);
         try {
             await setCourseScheduleChange(selectedDate, courseId, studentId, targetDate, targetTime, note, authorEmail, prevTargetDate, {
-                session: "course", date: selectedDate, time: courseInfo ? courseInfo.courseTime : "", label: courseInfo ? courseInfo.courseName : "",
+                session: session, date: selectedDate, time: courseInfo ? courseInfo.courseTime : "", label: courseInfo ? courseInfo.courseName : "",
             });
         } catch (e) {
             console.error(e);
@@ -1553,8 +1577,8 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const liveClock = React.createElement(LiveClockBar, null);
     const sessionTabs = React.createElement(
         "div",
-        { className: "grid grid-cols-5 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        SESSION_ORDER.map((key) => React.createElement("button", { key: key, onClick: () => setSession(key), className: "px-3 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: session === key ? (key === "diagnostic" ? AMBER : key === "course" ? TEAL : NAVY) : "transparent", color: session === key ? "#fff" : SUBINK } }, SESSIONS[key]))
+        { className: "grid grid-cols-6 gap-2 p-1.5 rounded-2xl mt-3 mb-3", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        SESSION_ORDER.map((key) => React.createElement("button", { key: key, onClick: () => setSession(key), className: "px-3 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: session === key ? (key === "diagnostic" ? AMBER : key === "course" ? TEAL : key === "examprep" ? ROSE : NAVY) : "transparent", color: session === key ? "#fff" : SUBINK } }, SESSIONS[key]))
     );
     const subLine = React.createElement(
         "p",
@@ -1792,7 +1816,14 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     if (session === "diagnostic") {
         return React.createElement("div", null, header, liveClock, dateInput, sessionTabs, closureBanner, diagSubLine, diagSection, upcomingDiagWidget, clockInModal);
     }
-    if (session === "course") {
+    if (session === "course" || session === "examprep") {
+        // "특강"과 "내신대비"는 완전히 같은 화면 구성을 쓰고, 대상 강좌 목록(activeCourses vs
+        // activeExamPrepCourses)과 강조색만 다르다(2026-09-04, 시험기간 임시보강 분리 요청).
+        const isExamPrep = session === "examprep";
+        const sectionGroups = isExamPrep ? examPrepGroups : courseGroups;
+        const accentColor = isExamPrep ? ROSE : TEAL;
+        const accentSoft = isExamPrep ? ROSE_SOFT : TEAL_SOFT;
+        const emptyLabel = isExamPrep ? "내신대비보강이" : "특강이";
         // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
         const courseGroupToggle = React.createElement(
             "div",
@@ -1800,16 +1831,16 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "보기"),
             ["name", "time"].map((m) => React.createElement(
                 "button",
-                { key: m, onClick: () => setCourseGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: courseGroupMode === m ? TEAL : "#fff", color: courseGroupMode === m ? "#fff" : SUBINK, border: `1px solid ${courseGroupMode === m ? TEAL : LINE}` } },
+                { key: m, onClick: () => setCourseGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: courseGroupMode === m ? accentColor : "#fff", color: courseGroupMode === m ? "#fff" : SUBINK, border: `1px solid ${courseGroupMode === m ? accentColor : LINE}` } },
                 m === "name" ? "강좌별" : "시간별"
             ))
         );
-        const courseListBody = courseGroups.length === 0
-            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 특강이 없습니다.")
+        const courseListBody = sectionGroups.length === 0
+            ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 ", emptyLabel, " 없습니다.")
             : React.createElement(
                 "div",
                 { className: "flex flex-col gap-3" },
-                courseGroups.map((g) => {
+                sectionGroups.map((g) => {
                     const collapsed = collapsedGroups[g.className];
                     // 강좌별 출결현황 요약 - 정규수업/클리닉/보강 탭에 있던 "미체크/출석/지각/조퇴/결석/일정변경" 카드를
                     // 특강도 강좌별로 각각 볼 수 있게 추가함(원장님 요청, 2026-07-31). 접혀있어도 한눈에 보이도록 항상 표시.
@@ -1836,12 +1867,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                         { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
                         React.createElement(
                             "button",
-                            { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: TEAL_SOFT, borderBottom: `1px solid ${LINE}` } },
-                            React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5, color: TEAL } }, g.className),
+                            { onClick: () => toggleGroupCollapsed(g.className), className: "w-full px-4 sm:px-5 py-2.5 flex items-center justify-between", style: { background: accentSoft, borderBottom: `1px solid ${LINE}` } },
+                            React.createElement("span", { style: { fontWeight: 800, fontSize: 13.5, color: accentColor } }, g.className),
                             React.createElement(
                                 "span",
                                 { className: "flex items-center gap-2" },
-                                React.createElement("span", { style: { fontSize: 12, color: TEAL, fontWeight: 700 } }, g.list.length, "명"),
+                                React.createElement("span", { style: { fontSize: 12, color: accentColor, fontWeight: 700 } }, g.list.length, "명"),
                                 React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "▼ 펼치기" : "▲ 접기")
                             )
                         ),
