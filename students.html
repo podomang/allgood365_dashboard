@@ -43,6 +43,9 @@ const TEAL = "#0f7a6c";
 const TEAL_SOFT = "#e2f3f0";
 const SKY = "#0369a1";
 const SKY_SOFT = "#e3f0f9";
+// "내신대비"(시험기간 임시보강) 강좌 표시 전용 색상 - attendance.html의 내신대비 탭과 동일한 색으로 맞춤(2026-09-04).
+const ROSE = "#be185d";
+const ROSE_SOFT = "#fdf0f5";
 const PAPER = "#f7f8fa";
 const INK = "#111827";
 const SUBINK = "#6b7280";
@@ -382,6 +385,7 @@ function mapStudentCourse(r) {
         id: r.id, studentId: r.student_id, courseName: r.course_name, className: r.class_name || "",
         days: r.days || [], courseTime: r.course_time || "", startDate: r.start_date, endDate: r.end_date,
         memo: r.memo || "", memoDone: !!r.memo_done, memoDoneBy: r.memo_done_by || "", memoDoneAt: r.memo_done_at || "",
+        category: r.category || "",
     };
 }
 async function fetchAllStudentCourses() {
@@ -394,6 +398,7 @@ async function addStudentCourse(studentId, payload) {
         student_id: studentId, course_name: payload.courseName, class_name: payload.className || null,
         days: payload.days || [], course_time: payload.courseTime || null,
         start_date: payload.startDate || todayStr(), end_date: payload.endDate || null,
+        category: payload.category || null,
     });
     if (error) throw error;
 }
@@ -402,6 +407,7 @@ async function updateStudentCourse(id, payload) {
         course_name: payload.courseName, class_name: payload.className || null,
         days: payload.days || [], course_time: payload.courseTime || null,
         start_date: payload.startDate, end_date: payload.endDate || null, updated_at: new Date().toISOString(),
+        category: payload.category || null,
     }).eq("id", id);
     if (error) throw error;
 }
@@ -510,8 +516,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     const [courseTarget, setCourseTarget] = useState(null); // 📚 눌러서 추가강좌 패널을 보고 있는 학생 id
     const [courseForm, setCourseForm] = useState(null); // null | {id, studentId, courseName, className, days, courseTime, startDate, endDate}
     const toggleCourses = (studentId) => { setCourseTarget((prev) => (prev === studentId ? null : studentId)); setCourseForm(null); };
-    const openNewCourseForm = (studentId) => setCourseForm({ id: null, studentId, courseName: "", className: "", days: [], courseTime: "", startDate: todayStr(), endDate: "" });
-    const openEditCourseForm = (c) => setCourseForm({ id: c.id, studentId: c.studentId, courseName: c.courseName, className: c.className, days: c.days.slice(), courseTime: c.courseTime, startDate: c.startDate, endDate: c.endDate || "" });
+    const openNewCourseForm = (studentId) => setCourseForm({ id: null, studentId, courseName: "", className: "", days: [], courseTime: "", startDate: todayStr(), endDate: "", category: "" });
+    const openEditCourseForm = (c) => setCourseForm({ id: c.id, studentId: c.studentId, courseName: c.courseName, className: c.className, days: c.days.slice(), courseTime: c.courseTime, startDate: c.startDate, endDate: c.endDate || "", category: c.category || "" });
     const closeCourseForm = () => setCourseForm(null);
     const toggleCourseFormDay = (d) => setCourseForm((prev) => ({ ...prev, days: prev.days.includes(d) ? prev.days.filter((x) => x !== d) : [...prev.days, d] }));
     const [savingCourse, setSavingCourse] = useState(false);
@@ -902,6 +908,14 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         { className: "rounded-xl p-3 mt-2", style: { background: TEAL_SOFT } },
         React.createElement(
             "div", { className: "flex flex-col gap-2" },
+            React.createElement(
+                "div", { className: "flex gap-1.5" },
+                [{ key: "", label: "특강" }, { key: "examprep", label: "내신대비" }].map((opt) => React.createElement("button", {
+                    key: opt.key || "normal", onClick: () => setCourseForm({ ...courseForm, category: opt.key }),
+                    className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+                    style: { background: courseForm.category === opt.key ? (opt.key ? ROSE : TEAL) : "#fff", color: courseForm.category === opt.key ? "#fff" : SUBINK, border: `1px solid ${courseForm.category === opt.key ? (opt.key ? ROSE : TEAL) : LINE}` }
+                }, opt.label))
+            ),
             React.createElement("input", {
                 value: courseForm.courseName, onChange: (e) => setCourseForm({ ...courseForm, courseName: e.target.value }),
                 placeholder: "강좌명 (예: 영어 특강)", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` }
@@ -966,14 +980,21 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                             )
                             : React.createElement("button", { onClick: () => openMemoEditor(c), className: "mt-1.5", style: { fontSize: 11, color: SUBINK } }, "+ 메모")
                         );
+                    const isExamPrep = c.category === "examprep";
+                    const cAccent = isExamPrep ? ROSE : TEAL;
+                    const cAccentSoft = isExamPrep ? ROSE_SOFT : TEAL_SOFT;
                     return React.createElement(
                         "div",
-                        { key: c.id, className: "rounded-lg px-3 py-2", style: { background: ended ? "#f5f5f3" : TEAL_SOFT, opacity: ended ? 0.6 : 1 } },
+                        { key: c.id, className: "rounded-lg px-3 py-2", style: { background: ended ? "#f5f5f3" : cAccentSoft, opacity: ended ? 0.6 : 1 } },
                         React.createElement(
                             "div", { className: "flex items-center justify-between gap-2 flex-wrap" },
                             React.createElement(
                                 "div", { className: "min-w-0" },
-                                React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: ended ? SUBINK : TEAL } }, c.courseName, c.className ? ` · ${c.className}` : "", ended ? " (종강)" : ""),
+                                React.createElement(
+                                    "div", { style: { fontSize: 12.5, fontWeight: 800, color: ended ? SUBINK : cAccent } },
+                                    isExamPrep && React.createElement("span", { style: { fontSize: 10, fontWeight: 800, background: "#fff", borderRadius: 4, padding: "1px 5px", marginRight: 5 } }, "내신대비"),
+                                    c.courseName, c.className ? ` · ${c.className}` : "", ended ? " (종강)" : ""
+                                ),
                                 React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 2 } }, (c.days && c.days.length ? c.days.join("·") : "요일 미지정"), c.courseTime ? ` · ${c.courseTime}` : "", " · ", c.startDate, " ~ ", c.endDate || "상시")
                             ),
                             React.createElement(
