@@ -350,9 +350,12 @@ async function fetchAssistants() {
 // 업무보드 캘린더에서 "학원휴무" 타입으로 등록해둔 학사일정(attn_academic_events)을 그대로 재사용한다.
 // 출석체크 화면에서 이 목록 중 선택한 날짜가 걸리는 항목이 있으면 "휴강일" 배너를 띄우는 데 쓴다
 // (2026-08-12 추가). 건수가 매우 적은 테이블이라 필터 없이 전부 불러온 뒤 화면에서 날짜 비교한다.
+// 2026-09-21 추가: "학원휴무"를 따로 등록하지 않아도, 이미 캘린더에 자동 계산되어 있는 "공휴일"·
+// "명절"(추석/설날 연휴 포함) 날짜에도 정규수업+클리닉이 똑같이 휴강 처리되도록 대상 event_type을
+// 확장함(원장님 확인 - 수능일은 정상 수업하는 경우가 많아 대상에서 제외).
 async function fetchAcademicClosures() {
     const { data, error } = await supabaseClient.from("attn_academic_events").select("id, title, event_date, end_date")
-        .eq("event_type", "학원휴무").order("event_date");
+        .in("event_type", ["학원휴무", "공휴일", "명절"]).order("event_date");
     if (error) throw error;
     return data.map((r) => ({ id: r.id, title: r.title || "휴강", eventDate: r.event_date, endDate: r.end_date || r.event_date }));
 }
