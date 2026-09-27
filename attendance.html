@@ -1159,6 +1159,20 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         if (c.endDate && selectedDate > c.endDate) return false;
         return true;
     }), [studentCourses, weekday, selectedDate]);
+    // 내신대비보강(examprep) 활성 기간 동안은 클리닉을 통째로 쉬는 것으로 본다(2026-09-21, 원장님 확인 -
+    // 시험기간엔 주말 집중보강으로 대체되어 평소 클리닉에는 오지 않음). 내신대비보강 요일과 클리닉 요일이
+    // 서로 다를 수 있어서(예: 내신대비보강 일요일, 클리닉 월요일), activeExamPrepCourses(오늘 요일에 진행되는
+    // 강좌만 골라냄)와는 별도로 "요일과 무관하게 기간만" 보는 학생 집합을 둔다.
+    const examPrepActiveStudentIds = useMemo(() => {
+        const set = new Set();
+        (studentCourses || []).forEach((c) => {
+            if (c.category !== "examprep") return;
+            if (c.startDate && selectedDate < c.startDate) return;
+            if (c.endDate && selectedDate > c.endDate) return;
+            set.add(c.studentId);
+        });
+        return set;
+    }, [studentCourses, selectedDate]);
     const studentById = useMemo(() => {
         const m = {};
         resolvedStudents.forEach((s) => { m[s.id] = s; });
@@ -1290,6 +1304,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             if (s.enrollDate && selectedDate < s.enrollDate) return false;
             if (session === "clinic") {
                 if (!s.clinic) return false;
+                if (examPrepActiveStudentIds.has(s.id)) return false;
                 const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
                 return clinicDays.includes(weekday);
             }
@@ -2524,6 +2539,12 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
         return map;
     }, [history]);
     const resolvedFor = (student, dateStr) => applyHistoryAsOf(student, historyByStudent[student.id], dateStr);
+    // 내신대비보강(examprep) 활성 기간엔 클리닉을 통째로 쉬는 것으로 본다 - 출석체크 화면(Attendance
+    // 컴포넌트)의 examPrepActiveStudentIds와 같은 규칙을 월별출석부에도 그대로 적용(2026-09-21).
+    // 내신대비보강 요일과 클리닉 요일이 다를 수 있어 요일 조건 없이 기간만 비교한다.
+    const examPrepActiveFor = (studentId, dateStr) => (studentCourses || []).some((c) =>
+        c.category === "examprep" && c.studentId === studentId &&
+        (!c.startDate || dateStr >= c.startDate) && (!c.endDate || dateStr <= c.endDate));
     const regularRows = useMemo(() => (students || []).map((s) => {
         const cells = days.map((d) => {
             const rs = resolvedFor(s, d.dateStr);
@@ -2538,10 +2559,12 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const rs = resolvedFor(s, d.dateStr);
             if (!(rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday)))
                 return { scheduled: false };
+            if (examPrepActiveFor(s.id, d.dateStr))
+                return { scheduled: false };
             return { scheduled: true, status: attByDate[d.dateStr]?.clinic?.[s.id] || "" };
         });
         return { student: s, cells };
-    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate]);
+    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate, studentCourses]);
     const extraRows = useMemo(() => {
         const ids = new Set();
         days.forEach((d) => { const m = extraByDate[d.dateStr]; if (m) Object.keys(m).forEach((sid) => ids.add(sid)); });
@@ -2601,7 +2624,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                 const rs = resolvedFor(s, d.dateStr);
                 if ((rs.days || []).includes(d.weekday))
                     addHit("정규수업", attByDate[d.dateStr]?.regular?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.regular?.[s.id], parseStartTime(effectiveRegularTimeFor(rs, d.weekday)));
-                if (rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday))
+                if (rs.clinic !== false && (rs.clinicDays || []).includes(d.weekday) && !examPrepActiveFor(s.id, d.dateStr))
                     addHit("클리닉", attByDate[d.dateStr]?.clinic?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.clinic?.[s.id], parseStartTime(rs.clinicTime));
                 if (extraByDate[d.dateStr] && extraByDate[d.dateStr][s.id])
                     addHit("보강", attByDate[d.dateStr]?.extra?.[s.id] || "", d.dateStr, d.weekday, checkedAtByDate[d.dateStr]?.extra?.[s.id], parseStartTime(extraByDate[d.dateStr][s.id].time));
