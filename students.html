@@ -8,7 +8,10 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" />
 <style>
+  /* [2026-10-31] 메뉴 이모지는 기기와 상관없이 같은 모양(구글 Noto 컬러 이모지)으로 보이게 고정 */
+  .nav-emoji { font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif; font-style: normal; line-height: 1; }
   body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f7f8fa; }
 </style>
 </head>
@@ -1243,7 +1246,7 @@ function SidebarNavGroup({ item, activeKey }) {
             className: "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
             style: { background: "transparent", color: containsActive ? NAVY : SUBINK, textAlign: "left" },
         },
-            React.createElement("span", { style: { fontSize: 15 } }, item.icon),
+            React.createElement("span", { className: "nav-emoji", style: { fontSize: 15 } }, item.icon),
             React.createElement("span", { style: { flex: 1 } }, item.label),
             React.createElement("span", { style: { fontSize: 10, display: "inline-block", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" } }, "▾")
         ),
@@ -1252,7 +1255,7 @@ function SidebarNavGroup({ item, activeKey }) {
                 key: c.key, href: c.href,
                 className: "flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold transition-colors",
                 style: { background: c.key === activeKey ? NAVY_SOFT : "transparent", color: c.key === activeKey ? NAVY : SUBINK, textDecoration: "none" },
-            }, React.createElement("span", { style: { fontSize: 13 } }, c.icon), c.label))
+            }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 13 } }, c.icon), c.label))
         )
     );
 }
@@ -1263,7 +1266,7 @@ function renderSidebarNav(items, activeKey) {
             key: t.key, href: t.href,
             className: "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
             style: { background: t.key === activeKey ? NAVY_SOFT : "transparent", color: t.key === activeKey ? NAVY : SUBINK, textDecoration: "none" },
-        }, React.createElement("span", { style: { fontSize: 15 } }, t.icon), t.label));
+        }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 15 } }, t.icon), t.label));
 }
 function renderMobileNav(items, activeKey) {
     return items.map((t) => {
@@ -1272,7 +1275,7 @@ function renderMobileNav(items, activeKey) {
             key: t.key, href: t.href,
             className: "flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold",
             style: { color: on ? NAVY : SUBINK, textDecoration: "none" },
-        }, React.createElement("span", { style: { fontSize: 17 } }, t.icon), t.mobileLabel || t.label);
+        }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 17 } }, t.icon), t.mobileLabel || t.label);
     });
 }
 // 학원운영관리 안의 화면(학생관리/급여 정산/시급 관리) 위쪽에 놓는 알약 탭 - 모바일에서는 하단 내비게이션에
@@ -1288,7 +1291,7 @@ function OpsPillTabs({ activeKey, onSelect }) {
                 onClick: sameHash ? (e) => { e.preventDefault(); onSelect(c.key); } : undefined,
                 className: "px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap",
                 style: { background: on ? NAVY : "#fff", color: on ? "#fff" : SUBINK, border: `1px solid ${on ? NAVY : LINE}`, textDecoration: "none" },
-            }, c.icon + " " + c.label);
+            }, React.createElement("span", { className: "nav-emoji", style: { marginRight: 5 } }, c.icon), c.label);
         })
     );
 }

@@ -8,7 +8,10 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" />
 <style>
+  /* [2026-10-31] 메뉴 이모지는 기기와 상관없이 같은 모양(구글 Noto 컬러 이모지)으로 보이게 고정 */
+  .nav-emoji { font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif; font-style: normal; line-height: 1; }
   body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f7f8fa; }
 </style>
 </head>
@@ -221,7 +224,7 @@ function HubCard({ def, statNode, alertDot }) {
       onMouseLeave: (e) => { e.currentTarget.style.borderColor = LINE; } },
     alertDot && h("span", { style: { position: "absolute", top: 14, right: 14, width: 8, height: 8, borderRadius: 999, background: RED } }),
     h("div", { className: "flex items-center gap-3 mb-3" },
-      h("div", { className: "flex items-center justify-center flex-shrink-0", style: { width: 38, height: 38, borderRadius: 10, background: def.colorSoft, color: def.color, fontSize: 18 } }, def.icon),
+      h("div", { className: "nav-emoji flex items-center justify-center flex-shrink-0", style: { width: 38, height: 38, borderRadius: 10, background: def.colorSoft, color: def.color, fontSize: 18 } }, def.icon),
       h("div", null,
         h("p", { style: { fontSize: 14.5, fontWeight: 800, color: INK, margin: "0 0 1px" } }, def.label),
         h("p", { style: { fontSize: 11.5, color: SUBINK, margin: 0 } }, def.sub)
