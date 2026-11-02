@@ -3384,7 +3384,7 @@ function AcademicEventsManager({ students, isDirector, typeFilter, setTypeFilter
 // 애초에 사이드바/하단 내비게이션에도 그 두 메뉴가 안 보이도록 directorOnly 플래그로 걸러낸다
 // (index.html 허브 화면의 카드 필터링과 동일한 방식).
 // [2026-10-31] "학원운영관리" 그룹 - 원장·실장(director 권한)에게만 보이는 메뉴 묶음. 학생관리를 이 안으로 옮기고
-// 급여 정산·시급 관리를 추가했다. workboard/attendance/allgoodstudy/students/operations 5개 페이지가 같은 코드를 쓴다
+// 급여 정산·시급 관리를 추가했다. [2026-11-02] 월간 일정표(planner.html) 추가. workboard/attendance/allgoodstudy/students/operations/planner 6개 페이지가 같은 코드를 쓴다
 // (한 곳을 고치면 나머지 페이지도 똑같이 맞춰줄 것). 그룹 펼침 상태는 localStorage에 기억한다.
 const NAV_ITEMS = [
     { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
@@ -3394,6 +3394,7 @@ const NAV_ITEMS = [
         { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
         { key: "payroll", href: "operations.html#payroll", label: "급여 정산", icon: "💰" },
         { key: "payrates", href: "operations.html#rates", label: "시급 관리", icon: "🧾" },
+        { key: "planner", href: "planner.html", label: "월간 일정표", icon: "🗓️" },
     ] },
 ];
 const NAV_GROUP_OPEN_KEY = "nav_group_ops_open";
