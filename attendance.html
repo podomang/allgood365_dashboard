@@ -420,6 +420,35 @@ async function syncPlanCommentToWorkLog(date, studentId, comment, authorEmail) {
     });
 }
 
+// ---------- 신규생 배지(2026-11-04 추가) ----------
+// 등록일(enroll_date)이 기준일로부터 60일 이내인 학생 중, 정규수업 출석(출석·지각·조퇴) 횟수가 3회 미만인
+// 학생을 "신규생"으로 본다. 회차는 기준일 "이전" 정규수업 출석 횟수 + 1(=오늘이 몇 번째 수업인지).
+// 결석·일정변경은 회차에 포함하지 않는다.
+// 정규수업 외 출석부(클리닉·보강·특강·내신대비)는 회차와 무관하게 "등록일부터 2주(등록일 포함 14일)" 동안
+// 회차 없이 "신규"로만 표시한다(2026-11-04 원장님 확인 - 신규생은 학원에 처음 온 학생, 정규수업으로만 시작).
+const NEWBIE_WINDOW_DAYS = 60;
+const NEWBIE_MAX_CLASSES = 3;
+const NEWBIE_OTHER_SESSION_DAYS = 14;
+async function fetchRegularAttendCountsBefore(date, studentIds) {
+    if (!studentIds || studentIds.length === 0) return {};
+    const { data, error } = await supabaseClient.from("attn_attendance").select("student_id")
+        .eq("session", "regular").in("status", ["출석", "지각", "조퇴"]).lt("attn_date", date).in("student_id", studentIds);
+    if (error) throw error;
+    const counts = {};
+    studentIds.forEach((id) => { counts[id] = 0; });
+    (data || []).forEach((r) => { counts[r.student_id] = (counts[r.student_id] || 0) + 1; });
+    return counts;
+}
+function NewbieBadge({ info }) {
+    if (!info) return null;
+    const strong = info.strong;
+    return React.createElement("span", {
+        style: { display: "inline-flex", alignItems: "center", fontSize: 10.5, fontWeight: 800, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap", flexShrink: 0,
+            background: strong ? "#2f8a4f" : "#e6f4ea", color: strong ? "#ffffff" : "#2f8a4f", border: strong ? "none" : "1px solid #bfe3c9" },
+        title: "신규생 (정규수업: 3회차까지 / 그 외 수업: 등록 후 2주간 표시)",
+    }, info.label);
+}
+
 async function fetchAttendanceForDate(date) {
     const { data, error } = await supabaseClient.from("attn_attendance").select("*").eq("attn_date", date);
     if (error)
@@ -1116,6 +1145,37 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // selectedDate 기준으로 각 학생의 학교/학년/반/시간/클리닉 정보를 그 시점 이력으로 치환한 목록.
     // 아래 명단 필터링·그룹핑·화면 표시가 전부 이 목록을 사용해야 과거 날짜가 정확히 보인다.
     const resolvedStudents = useMemo(() => students.map((s) => applyHistoryAsOf(s, historyByStudent[s.id], selectedDate)), [students, historyByStudent, selectedDate]);
+    // 신규생 배지: 등록 60일 이내 학생만 후보로 두고, 선택 날짜 이전 정규수업 출석 횟수를 조회한다.
+    const newbieCandidateIds = useMemo(() => {
+        const from = addDays(selectedDate, -NEWBIE_WINDOW_DAYS);
+        return students.filter((s) => s.enrollDate && s.enrollDate >= from && s.enrollDate <= selectedDate).map((s) => s.id).sort();
+    }, [students, selectedDate]);
+    const newbieKey = newbieCandidateIds.join(",");
+    const [newbieCounts, setNewbieCounts] = useState({});
+    useEffect(() => {
+        let alive = true;
+        if (newbieCandidateIds.length === 0) { setNewbieCounts({}); return; }
+        fetchRegularAttendCountsBefore(selectedDate, newbieCandidateIds)
+            .then((c) => { if (alive) setNewbieCounts(c); })
+            .catch((e) => { console.error(e); if (alive) setNewbieCounts({}); });
+        return () => { alive = false; };
+    }, [selectedDate, newbieKey]);
+    const enrollDateById = useMemo(() => {
+        const m = {};
+        students.forEach((s) => { m[s.id] = s.enrollDate || ""; });
+        return m;
+    }, [students]);
+    const newbieInfoFor = (studentId, sess) => {
+        if (sess !== "regular") {
+            const ed = enrollDateById[studentId];
+            if (!ed || ed > selectedDate || ed < addDays(selectedDate, -(NEWBIE_OTHER_SESSION_DAYS - 1))) return null;
+            return { label: "🌱 신규", strong: false };
+        }
+        if (!Object.prototype.hasOwnProperty.call(newbieCounts, studentId)) return null;
+        const prior = newbieCounts[studentId];
+        if (prior >= NEWBIE_MAX_CLASSES) return null;
+        return prior === 0 ? { label: "🌱 첫수업", strong: true } : { label: `🌱 ${prior + 1}회차`, strong: false };
+    };
     const loadQuiet = async () => {
         try {
             const [att, extra, notes, diag, courseAtt, courseNoteMap] = await Promise.all([fetchAttendanceForDate(selectedDate), fetchExtraRoster(selectedDate), fetchSessionNotesForDate(selectedDate), fetchDiagnosticTestsForDate(selectedDate), fetchCourseAttendanceForDate(selectedDate), fetchCourseNotesForDate(selectedDate)]);
@@ -1807,7 +1867,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
         );
     } else {
         listBody = React.createElement(
@@ -1829,7 +1889,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -1898,7 +1958,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             )
                         ),
                         gStatCards,
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveCheckedAt: saveCourseCheckedAt, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveCheckedAt: saveCourseCheckedAt, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, newbieInfo: newbieInfoFor(c.studentId, "course"), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                     );
                 })
             );
@@ -2135,7 +2195,7 @@ function ExtraTimeControl({ initialValue, onSave, locked }) {
     );
 }
 // 출결체크 한 줄: 보강(extra) 세션일 때만 예정시간/보강계획 컨트롤이 붙음
-function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveCheckedAt, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked }) {
+function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveCheckedAt, saveScheduleChange, saveExtraTime, removeFromExtra, isDirector, goToWorkLog, locked, newbieInfo }) {
     const st = current[s.id]?.status;
     const reason = current[s.id]?.reason || "";
     const targetDate = current[s.id]?.targetDate || "";
@@ -2172,9 +2232,11 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
             React.createElement(
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
-                clickableName
-                    ? React.createElement("button", { onClick: () => goToWorkLog(s.id), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: NAVY }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, s.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
-                    : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
+                React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                    clickableName
+                        ? React.createElement("button", { onClick: () => goToWorkLog(s.id), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: NAVY }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, s.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                        : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, s.name),
+                    React.createElement(NewbieBadge, { info: newbieInfo })),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (s.school || s.grade) ? `${s.school || ""}${s.school && s.grade ? " · " : ""}${s.grade ? s.grade + "학년" : ""}` : "학교/학년 미지정", session === "clinic" && s.clinicTime && ` · 클리닉 ${s.clinicTime}`, session === "regular" && s.regularTime && ` · ${s.regularTime}`),
                 session === "extra" && originSession && React.createElement(
                     "span",
@@ -2265,7 +2327,7 @@ function AttendanceRow({ s, isLast, session, current, extraMeta, noteMeta, saveN
 // 특강(추가강좌) 출석체크 행 - 클리닉 AttendanceRow와 동일한 구성으로 맞춤(2026-07-24 후속):
 // 출석/지각/조퇴/결석/일정변경 체크하고, 지각·조퇴·결석이면 사유를, 일정변경이면 목표 날짜/시간을,
 // 그리고 클리닉과 동일한 "수업계획" 메모(완료 체크 포함)를 남길 수 있음.
-function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveCheckedAt, saveScheduleChange, isDirector, goToWorkLog, locked }) {
+function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComment, toggleNoteDone, setStatus, saveReason, saveCheckedAt, saveScheduleChange, isDirector, goToWorkLog, locked, newbieInfo }) {
     const st = current[c.courseId]?.status;
     const reason = current[c.courseId]?.reason || "";
     const targetDate = current[c.courseId]?.targetDate || "";
@@ -2291,9 +2353,11 @@ function CourseAttendanceRow({ c, isLast, current, noteMeta, saveNote, saveComme
             React.createElement(
                 "div",
                 { className: "min-w-0", style: { flex: "1 1 120px" } },
-                clickableName
-                    ? React.createElement("button", { onClick: () => goToWorkLog(c.studentId), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: TEAL }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, c.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
-                    : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
+                React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                    clickableName
+                        ? React.createElement("button", { onClick: () => goToWorkLog(c.studentId), className: "flex items-center gap-1", style: { fontWeight: 700, fontSize: 14, color: TEAL }, title: isDirector ? "이 학생 근무일지 열람" : "근무일지 작성으로 이동" }, c.name, React.createElement("span", { style: { fontSize: 11 } }, "📔"))
+                        : React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, c.name),
+                    React.createElement(NewbieBadge, { info: newbieInfo })),
                 React.createElement("div", { style: { fontSize: 11.5, color: SUBINK } }, (c.school || c.grade) ? `${c.school || ""}${c.school && c.grade ? " · " : ""}${c.grade ? c.grade + "학년" : ""}` : "학교/학년 미지정", c.className ? ` · ${c.className}` : "", c.courseTime ? ` · ${c.courseTime}` : "")
             ),
             showNoteInlinePencil && React.createElement("button", { onClick: () => setNoteEditing(true), className: "p-1 rounded-md flex-shrink-0", style: { color: PURPLE, opacity: 0.55 }, title: "수업계획 추가" }, "📝"),
