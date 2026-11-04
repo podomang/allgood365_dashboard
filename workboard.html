@@ -1134,7 +1134,24 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
 function emptyWorkNoticeForm(date) {
     return { id: null, title: "", content: "", pinned: false, noticeDate: date || todayStr() };
 }
+// 업무공지 "전체 공지사항"/"최근 공지" 접기 상태 - 브라우저별로 마지막 상태를 기억(2026-11-04 추가).
+const WORK_NOTICE_COLLAPSE_KEY = "wb_work_notice_collapsed";
+function readNoticeCollapse() {
+    try { const v = JSON.parse(localStorage.getItem(WORK_NOTICE_COLLAPSE_KEY) || "{}"); return { general: !!v.general, recent: !!v.recent }; }
+    catch (e) { return { general: false, recent: false }; }
+}
+function collapseToggleButton(collapsed, count, onClick, color) {
+    return React.createElement("button", { onClick: onClick, className: "flex items-center gap-1 px-2 py-1 rounded-md", style: { fontSize: 12, fontWeight: 700, color: color || SUBINK }, title: collapsed ? "펼치기" : "접기" },
+        collapsed ? `${count}건 ▼ 펼치기` : "▲ 접기");
+}
+
 function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
+    const [collapsed, setCollapsed] = useState(readNoticeCollapse);
+    const toggleCollapsed = (key) => setCollapsed((prev) => {
+        const next = { ...prev, [key]: !prev[key] };
+        try { localStorage.setItem(WORK_NOTICE_COLLAPSE_KEY, JSON.stringify(next)); } catch (e) { }
+        return next;
+    });
     const [notices, setNotices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState(emptyWorkNoticeForm());
@@ -1332,19 +1349,26 @@ function WorkNotices({ isDirector, authorEmail, assistants, myAssistant }) {
         { className: "rounded-2xl p-5 mb-6", style: { background: AMBER_SOFT, border: `1.5px solid ${AMBER}` } },
         React.createElement(
             "div",
-            { className: "flex items-center justify-between mb-3" },
+            { className: "flex items-center justify-between", style: { marginBottom: collapsed.general ? 0 : 12 } },
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: AMBER } }, "📌 전체 공지사항"),
-            isDirector && !showForm && React.createElement("button", { onClick: openNewGeneral, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: AMBER, color: "#fff" } }, "+ 추가")
+            React.createElement("div", { className: "flex items-center gap-2" },
+                collapseToggleButton(collapsed.general, generalNotices.length, () => toggleCollapsed("general"), AMBER),
+                isDirector && !showForm && React.createElement("button", { onClick: openNewGeneral, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: AMBER, color: "#fff" } }, "+ 추가"))
         ),
-        generalNotices.length === 0
+        collapsed.general ? null : generalNotices.length === 0
             ? React.createElement("div", { style: { fontSize: 12.5, color: "#a06a1f" } }, "등록된 전체 공지사항이 없습니다.")
             : React.createElement("div", { className: "flex flex-col gap-2" }, generalNotices.map((n) => renderNoticeItem(n)))
     );
     const recentCard = React.createElement(
         "div",
         { className: "rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 12 } }, "최근 공지"),
-        loading
+        React.createElement(
+            "div",
+            { className: "flex items-center justify-between", style: { marginBottom: collapsed.recent ? 0 : 12 } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "최근 공지"),
+            collapseToggleButton(collapsed.recent, recentNotices.length, () => toggleCollapsed("recent"))
+        ),
+        collapsed.recent ? null : loading
             ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
             : recentNotices.length === 0
                 ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "등록된 업무공지가 없습니다.")
