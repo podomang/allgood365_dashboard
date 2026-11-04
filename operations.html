@@ -374,7 +374,7 @@ function PayrollView({ session }) {
                                     )))
                                 ))
                             ),
-                            h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 6 } }, "출퇴근 기록 수정은 업무보드 스태프룸의 출퇴근 기록에서 할 수 있어요. 수정하면 이 화면에 바로 반영됩니다.")
+                            h("div", { style: { fontSize: 11.5, color: SUBINK, marginTop: 6 } }, "출퇴근 기록 수정은 학원운영관리 › 출퇴근 기록에서 할 수 있어요. 수정하면 이 화면에 바로 반영됩니다.")
                         ));
                         return [row, detail];
                     })),
@@ -493,8 +493,279 @@ function RatesView() {
     );
 }
 
+// ============================================================
+// 학원운영관리 - 출퇴근 기록 (2026-11-04 업무보드 스태프룸에서 원장용 화면만 옮겨옴)
+// 조교쌤의 출근/퇴근 버튼·내 출퇴근기록은 계속 스태프룸에 남아 있고(출결관리 출석체크·근무일지가 출근 기록을 전제로 함),
+// 여기에는 원장·실장이 보는 "전체 출퇴근기록"(조교별·월별 조회, 지난 기록 정정·삭제)만 둔다.
+// 아래 함수·컴포넌트는 workboard.html의 것을 그대로 복사한 것 - 한쪽을 고치면 다른 쪽도 맞춰줄 것.
+// ============================================================
+async function fetchAssistants() {
+    const { data, error } = await supabaseClient.from("attn_assistants").select("*").order("name");
+    if (error) throw error;
+    return data.map(mapAssistant);
+}
+function mapAssistant(r) {
+    return { id: r.id, name: r.name, subject: r.subject || "", phone: r.phone || "", status: r.status || "재직", email: r.email, memo: r.memo || "" };
+}
+async function fetchAssistantAttendance(startDate, endDate) {
+    let q = supabaseClient.from("attn_assistant_attendance").select("*").order("work_date", { ascending: false });
+    if (startDate) q = q.gte("work_date", startDate);
+    if (endDate) q = q.lte("work_date", endDate);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, assistantId: r.assistant_id, date: r.work_date, checkIn: r.check_in, checkOut: r.check_out }));
+}
+async function checkInToday(assistantId) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").insert({ assistant_id: assistantId, work_date: todayStr(), check_in: new Date().toISOString() });
+    if (error) throw error;
+}
+async function checkOutToday(rowId) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").update({ check_out: new Date().toISOString() }).eq("id", rowId);
+    if (error) throw error;
+}
+async function correctAttendanceRow(id, checkIn, checkOut) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").update({ check_in: checkIn, check_out: checkOut }).eq("id", id);
+    if (error) throw error;
+}
+async function deleteAttendanceRow(id) {
+    const { error } = await supabaseClient.from("attn_assistant_attendance").delete().eq("id", id);
+    if (error) throw error;
+}
+// ---------- 출퇴근기록 ----------
+function fmtTime(iso) {
+    if (!iso) return "-";
+    try {
+        return new Date(iso).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+    } catch (e) {
+        return "-";
+    }
+}
+function workedHours(checkIn, checkOut) {
+    if (!checkIn || !checkOut) return "-";
+    const ms = new Date(checkOut) - new Date(checkIn);
+    if (ms <= 0) return "-";
+    const h = Math.floor(ms / 3600000), m = Math.round((ms % 3600000) / 60000);
+    return h + "시간 " + m + "분";
+}
+function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
+function monthKeyLabel(key) {
+    const parts = key.split("-");
+    return parts[0] + "년 " + parseInt(parts[1], 10) + "월";
+}
+function monthKeysOf(list) {
+    const seen = {};
+    list.forEach((r) => { seen[monthKeyOf(r.date)] = true; });
+    return Object.keys(seen).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+}
+function AssistantAttendanceManager({ isDirector, assistants, myAssistant, focusAssistantId, focusToken }) {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [editingId, setEditingId] = useState(null);
+    const [editIn, setEditIn] = useState("");
+    const [editOut, setEditOut] = useState("");
+    const [rangeMonths, setRangeMonths] = useState(1); // 1~3개월 선택 조회 (원장 전용)
+    const [assistantFilter, setAssistantFilter] = useState(focusAssistantId || "");
+    useEffect(() => { if (focusAssistantId) setAssistantFilter(focusAssistantId); }, [focusToken]);
+    const load = async () => {
+        setLoading(true);
+        try {
+            const start = isDirector ? addDays(todayStr(), -30 * rangeMonths) : null;
+            setRows(await fetchAssistantAttendance(start, null));
+        } catch (e) {
+            console.error(e);
+        }
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, [isDirector, rangeMonths]);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_assistant_attendance_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_assistant_attendance" }, () => load())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, [isDirector, rangeMonths]);
+    const nameOf = (id) => (assistants.find((a) => a.id === id) || {}).name || "?";
+    const myToday = myAssistant ? rows.find((r) => r.assistantId === myAssistant.id && r.date === todayStr()) : null;
+    const doCheckIn = async () => {
+        try {
+            await checkInToday(myAssistant.id);
+            await load();
+        } catch (e) {
+            alert("출근 기록 중 오류: " + e.message);
+        }
+    };
+    const doCheckOut = async () => {
+        try {
+            await checkOutToday(myToday.id);
+            await load();
+        } catch (e) {
+            alert("퇴근 기록 중 오류: " + e.message);
+        }
+    };
+    const startEdit = (r) => { setEditingId(r.id); setEditIn(r.checkIn ? r.checkIn.slice(0, 16) : ""); setEditOut(r.checkOut ? r.checkOut.slice(0, 16) : ""); };
+    const saveEdit = async (id) => {
+        try {
+            await correctAttendanceRow(id, editIn ? new Date(editIn).toISOString() : null, editOut ? new Date(editOut).toISOString() : null);
+            setEditingId(null);
+            await load();
+        } catch (e) {
+            alert("정정 중 오류: " + e.message);
+        }
+    };
+    const doDelete = async (id) => {
+        if (!confirm("이 출퇴근 기록을 삭제할까요?")) return;
+        try {
+            await deleteAttendanceRow(id);
+            await load();
+        } catch (e) {
+            alert("삭제 중 오류: " + e.message);
+        }
+    };
+    const selfPanel = !isDirector && myAssistant && React.createElement(
+        "div",
+        { className: "rounded-2xl p-5 mb-6", style: { background: "#fff", border: `1.5px solid ${PURPLE}` } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 2 } }, "오늘 (" + todayStr() + ") 출퇴근"),
+        React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, marginBottom: 14 } }, "출근/퇴근은 당일에만 기록할 수 있고, 지난 기록은 원장님만 수정할 수 있습니다."),
+        React.createElement(
+            "div",
+            { className: "flex items-center gap-4" },
+            React.createElement(
+                "div",
+                { className: "flex-1 rounded-xl p-3 text-center", style: { background: PAPER } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "출근"),
+                React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginTop: 2 } }, fmtTime(myToday && myToday.checkIn))
+            ),
+            React.createElement(
+                "div",
+                { className: "flex-1 rounded-xl p-3 text-center", style: { background: PAPER } },
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK, fontWeight: 700 } }, "퇴근"),
+                React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginTop: 2 } }, fmtTime(myToday && myToday.checkOut))
+            )
+        ),
+        React.createElement(
+            "div",
+            { className: "flex gap-2 mt-4" },
+            !myToday && React.createElement("button", { onClick: doCheckIn, className: "flex-1 py-3 rounded-xl text-sm font-bold", style: { background: TEAL, color: "#fff" } }, "출근하기"),
+            myToday && !myToday.checkOut && React.createElement("button", { onClick: doCheckOut, className: "flex-1 py-3 rounded-xl text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "퇴근하기"),
+            myToday && myToday.checkOut && React.createElement("div", { className: "flex-1 py-3 rounded-xl text-sm font-bold text-center", style: { background: TEAL_SOFT, color: TEAL } }, "오늘 근무 완료")
+        )
+    );
+    const visibleRows = isDirector
+        ? rows.filter((r) => !assistantFilter || r.assistantId === assistantFilter)
+        : rows.filter((r) => myAssistant && r.assistantId === myAssistant.id);
+    const renderRow = (r) => React.createElement(
+        "div",
+        { key: r.id, className: "flex items-center justify-between gap-3 px-5 py-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+        React.createElement("span", { style: { fontSize: 12.5, color: SUBINK, minWidth: 108 } }, r.date + " (" + korWeekdayOf(r.date) + ")"),
+        editingId === r.id
+            ? React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("input", { type: "datetime-local", value: editIn, onChange: (e) => setEditIn(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("input", { type: "datetime-local", value: editOut, onChange: (e) => setEditOut(e.target.value), className: "px-2 py-1 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("button", { onClick: () => saveEdit(r.id), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: PURPLE, color: "#fff" } }, "저장"),
+                React.createElement("button", { onClick: () => setEditingId(null), className: "px-3 py-1 rounded-lg text-xs font-bold", style: { background: "#f0f0ee", color: SUBINK } }, "취소")
+            )
+            : React.createElement(
+                "div",
+                { className: "flex items-center gap-3" },
+                React.createElement("span", { style: { fontSize: 12.5 } }, "출근 " + fmtTime(r.checkIn)),
+                React.createElement("span", { style: { fontSize: 12.5 } }, "퇴근 " + fmtTime(r.checkOut)),
+                React.createElement("span", { style: { fontSize: 12.5, color: TEAL, fontWeight: 700 } }, workedHours(r.checkIn, r.checkOut)),
+                isDirector && React.createElement("button", { onClick: () => startEdit(r), className: "p-1 rounded-lg", style: { background: PURPLE_SOFT, color: PURPLE } }, "✎"),
+                isDirector && React.createElement("button", { onClick: () => doDelete(r.id), className: "p-1 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
+            )
+    );
+    // 원장 화면: 조교별 -> 월별로 그룹핑. 조교 본인 화면: 월별로만 그룹핑.
+    const groupedByAssistant = {};
+    if (isDirector) {
+        visibleRows.forEach((r) => {
+            const aid = r.assistantId;
+            if (!groupedByAssistant[aid]) groupedByAssistant[aid] = { name: nameOf(aid), months: {} };
+            const mk = monthKeyOf(r.date);
+            if (!groupedByAssistant[aid].months[mk]) groupedByAssistant[aid].months[mk] = [];
+            groupedByAssistant[aid].months[mk].push(r);
+        });
+    }
+    const assistantGroups = Object.keys(groupedByAssistant)
+        .map((aid) => groupedByAssistant[aid])
+        .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const myMonthKeys = monthKeysOf(visibleRows);
+    const listCard = React.createElement(
+        "div",
+        { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
+        React.createElement(
+            "div",
+            { className: "px-5 py-4 flex items-center justify-between gap-3 flex-wrap", style: { borderBottom: `1px solid ${LINE}` } },
+            React.createElement("span", { style: { fontWeight: 800, fontSize: 15 } }, isDirector ? "전체 출퇴근기록" : "내 출퇴근기록"),
+            isDirector && React.createElement(
+                "div",
+                { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement(
+                    "select",
+                    { value: assistantFilter, onChange: (e) => setAssistantFilter(e.target.value), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
+                    React.createElement("option", { value: "" }, "전체 조교"),
+                    assistants.map((a) => React.createElement("option", { key: a.id, value: a.id }, a.name))
+                ),
+                React.createElement(
+                    "select",
+                    { value: rangeMonths, onChange: (e) => setRangeMonths(Number(e.target.value)), className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } },
+                    [1, 2, 3].map((n) => React.createElement("option", { key: n, value: n }, "최근 " + n + "개월"))
+                )
+            )
+        ),
+        loading
+            ? React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "30px 0" } }, "불러오는 중...")
+            : visibleRows.length === 0
+                ? React.createElement("div", { className: "text-center", style: { color: SUBINK, fontSize: 13, padding: "30px 0" } }, "기록이 없습니다.")
+                : React.createElement(
+                    "div",
+                    null,
+                    isDirector
+                        ? assistantGroups.map((g) => React.createElement(
+                            "div",
+                            { key: g.name },
+                            React.createElement("div", { className: "px-5 py-2", style: { background: PAPER, fontWeight: 800, fontSize: 13 } }, g.name),
+                            Object.keys(g.months).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map((mk) => React.createElement(
+                                "div",
+                                { key: mk },
+                                React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                                g.months[mk].map((r) => renderRow(r))
+                            ))
+                        ))
+                        : myMonthKeys.map((mk) => React.createElement(
+                            "div",
+                            { key: mk },
+                            React.createElement("div", { className: "px-5 py-1.5", style: { fontSize: 11.5, color: SUBINK, fontWeight: 700 } }, monthKeyLabel(mk)),
+                            visibleRows.filter((r) => monthKeyOf(r.date) === mk).map((r) => renderRow(r))
+                        ))
+                )
+    );
+    return React.createElement(
+        "div",
+        null,
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 4 } }, "출퇴근기록"),
+        React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 14 } }, isDirector ? "조교별·월별로 정리된 출퇴근기록을 조회하고, 필요 시 정정·삭제할 수 있습니다." : "출근/퇴근 버튼으로 오늘 기록을 남기세요."),
+        selfPanel,
+        !isDirector && !myAssistant && React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: PAPER, color: SUBINK } }, "이 계정이 조교명단에 아직 연결되지 않았습니다."),
+        (isDirector || myAssistant) && listCard
+    );
+}
+function StaffAttendanceView() {
+    const [assistants, setAssistants] = useState([]);
+    const [err, setErr] = useState("");
+    // 스태프룸 근무일정에서 조교 이름을 누르면 operations.html?assistant=<id>#attendance 로 넘어온다
+    const focusId = new URLSearchParams(window.location.search).get("assistant") || null;
+    useEffect(() => { fetchAssistants().then(setAssistants).catch((e) => setErr(e.message || "조교명단을 불러오지 못했습니다.")); }, []);
+    return h("div", null,
+        err && h("div", { className: "mb-3 px-3 py-2 rounded-lg", style: { background: RED_SOFT, color: RED, fontSize: 12.5, fontWeight: 600 } }, err),
+        h(AssistantAttendanceManager, { isDirector: true, assistants, myAssistant: null, focusAssistantId: focusId, focusToken: focusId ? 1 : 0 })
+    );
+}
+
 // ---------------- 학원운영관리 페이지 ----------------
-function hashToKey() { return window.location.hash === "#rates" ? "payrates" : "payroll"; }
+const OPS_HASH = { payroll: "payroll", payrates: "rates", staffattn: "attendance" };
+function hashToKey() { const hs = window.location.hash.slice(1); return Object.keys(OPS_HASH).find((k) => OPS_HASH[k] === hs) || "payroll"; }
 function OperationsPage({ session }) {
     const [tab, setTab] = useState(hashToKey);
     useEffect(() => {
@@ -502,10 +773,10 @@ function OperationsPage({ session }) {
         window.addEventListener("hashchange", onHash);
         return () => window.removeEventListener("hashchange", onHash);
     }, []);
-    const select = (key) => { window.location.hash = key === "payrates" ? "rates" : "payroll"; setTab(key); };
+    const select = (key) => { window.location.hash = OPS_HASH[key]; setTab(key); };
     return h(PageShell, { session, isDirector: true, activeKey: tab },
         h(OpsPillTabs, { activeKey: tab, onSelect: select }),
-        tab === "payrates" ? h(RatesView, null) : h(PayrollView, { session })
+        tab === "payrates" ? h(RatesView, null) : tab === "staffattn" ? h(StaffAttendanceView, null) : h(PayrollView, { session })
     );
 }
 
@@ -520,7 +791,7 @@ function OperationsPage({ session }) {
 // (index.html 허브 화면의 카드 필터링과 동일한 방식). 이 페이지(학생관리) 자체는 항상 원장님만
 // 도달하므로(Root에서 이미 차단) isDirector는 늘 true로 넘어온다.
 // [2026-10-31] "학원운영관리" 그룹 - 원장·실장(director 권한)에게만 보이는 메뉴 묶음. 학생관리를 이 안으로 옮기고
-// 급여 정산·시급 관리를 추가했다. [2026-11-02] 월간 일정표(planner.html) 추가. workboard/attendance/allgoodstudy/students/operations/planner 6개 페이지가 같은 코드를 쓴다
+// 급여 정산·시급 관리를 추가했다. [2026-11-02] 월간 일정표(planner.html) 추가. [2026-11-04] 출퇴근 기록(원장용) 추가. workboard/attendance/allgoodstudy/students/operations/planner 6개 페이지가 같은 코드를 쓴다
 // (한 곳을 고치면 나머지 페이지도 똑같이 맞춰줄 것). 그룹 펼침 상태는 localStorage에 기억한다.
 const NAV_ITEMS = [
     { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
@@ -528,6 +799,7 @@ const NAV_ITEMS = [
     { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓", directorOnly: true },
     { key: "ops", href: "operations.html", label: "학원운영관리", mobileLabel: "운영관리", icon: "🏫", directorOnly: true, children: [
         { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
+        { key: "staffattn", href: "operations.html#attendance", label: "출퇴근 기록", icon: "⏱️" },
         { key: "payroll", href: "operations.html#payroll", label: "급여 정산", icon: "💰" },
         { key: "payrates", href: "operations.html#rates", label: "시급 관리", icon: "🧾" },
         { key: "planner", href: "planner.html", label: "월간 일정표", icon: "🗓️" },
