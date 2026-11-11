@@ -1417,11 +1417,11 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     }).map((s) => ({ ...s, leave: leaveOnDate(leaves, s.id, selectedDate) })) : [];
     const onLeaveBox = onLeaveRoster.length > 0 && React.createElement(
         "div",
-        { className: "rounded-2xl px-4 py-3 mt-4", style: { background: "#f1f3f6", border: `1px dashed #cbd2db` } },
-        React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: "#475569", marginBottom: 6 } }, "💤 휴원 중 ", onLeaveRoster.length, "명 (출석체크 대상 아님)"),
+        { className: "rounded-xl px-3 py-2 mb-3 flex items-center gap-x-3 gap-y-1.5 flex-wrap", style: { background: "#f1f3f6", border: `1px dashed #cbd2db` } },
+        React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: "#475569", whiteSpace: "nowrap" } }, "💤 휴원 중 ", onLeaveRoster.length, "명 ", React.createElement("span", { style: { fontWeight: 500, fontSize: 11 } }, "(출석체크 대상 아님)")),
         React.createElement(
             "div", { className: "flex flex-wrap gap-1.5" },
-            onLeaveRoster.map((s) => React.createElement("span", { key: s.id, style: { fontSize: 12, fontWeight: 700, color: "#64748b", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "3px 9px" } },
+            onLeaveRoster.map((s) => React.createElement("span", { key: s.id, style: { fontSize: 12, fontWeight: 700, color: "#64748b", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "2px 9px" } },
                 s.name, React.createElement("span", { style: { fontWeight: 500, fontSize: 11, marginLeft: 4 } }, s.leave.endDate ? `~${mdKor(s.leave.endDate)}` : "~복귀일 미정")))
         )
     );
@@ -2022,9 +2022,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         (!showClosureBanner || showClosureRoster) && statCards,
         (!showClosureBanner || showClosureRoster) && scheduleChangeSection,
         (!showClosureBanner || showClosureRoster) && groupToggle,
+        (!showClosureBanner || showClosureRoster) && onLeaveBox,
         (!showClosureBanner || showClosureRoster) && addPicker,
         (!showClosureBanner || showClosureRoster) && listBody,
-        (!showClosureBanner || showClosureRoster) && onLeaveBox,
         clockInModal
     );
 }
