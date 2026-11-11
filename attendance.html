@@ -343,6 +343,31 @@ async function fetchAllStudentHistory() {
     return data.map(mapStudentHistory);
 }
 
+// ---------- 휴원 기록(2026-11-11, 개발_21) ----------
+// attn_student_leaves_brief: 휴원 기간(학생id·시작일·마지막 휴원일)만 담은 뷰 - 조교도 조회 가능,
+// 사유·원비 메모는 원장 전용 테이블(attn_student_leaves)에만 있다. end_date가 null이면 복귀일 미정.
+async function fetchStudentLeavesBrief() {
+    const { data, error } = await supabaseClient.from("attn_student_leaves_brief").select("*");
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, studentId: r.student_id, startDate: r.start_date, endDate: r.end_date || "" }));
+}
+function leaveOnDate(leaves, studentId, dateStr) {
+    return (leaves || []).find((l) => l.studentId === studentId && dateStr >= l.startDate && (!l.endDate || dateStr <= l.endDate)) || null;
+}
+function useStudentLeaves() {
+    const [leaves, setLeaves] = useState([]);
+    const loadLeaves = () => fetchStudentLeavesBrief().then(setLeaves).catch((e) => console.error(e));
+    useEffect(() => { loadLeaves(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_student_leaves_changes_" + Math.random().toString(36).slice(2, 8))
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_student_leaves" }, () => loadLeaves())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    return leaves;
+}
+
 async function fetchAssistants() {
     const { data, error } = await supabaseClient.from("attn_assistants").select("*").order("name");
     if (error) throw error;
@@ -1208,20 +1233,23 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     // 학생 기본정보(이름/학교/학년)와 합친다. 정규수업과 달리 한 학생이 여러 강좌를 들을 수 있어
     // course.id를 행의 고유 키로 사용한다.
     // "특강" 탭에는 category가 없는(일반) 강좌만, "내신대비" 탭에는 category==='examprep' 강좌만 표시한다.
+    const leaves = useStudentLeaves();
     const activeCourses = useMemo(() => (studentCourses || []).filter((c) => {
         if (c.category === "examprep") return false;
+        if (leaveOnDate(leaves, c.studentId, selectedDate)) return false;
         if (!c.days || !c.days.includes(weekday)) return false;
         if (c.startDate && selectedDate < c.startDate) return false;
         if (c.endDate && selectedDate > c.endDate) return false;
         return true;
-    }), [studentCourses, weekday, selectedDate]);
+    }), [studentCourses, weekday, selectedDate, leaves]);
     const activeExamPrepCourses = useMemo(() => (studentCourses || []).filter((c) => {
         if (c.category !== "examprep") return false;
+        if (leaveOnDate(leaves, c.studentId, selectedDate)) return false;
         if (!c.days || !c.days.includes(weekday)) return false;
         if (c.startDate && selectedDate < c.startDate) return false;
         if (c.endDate && selectedDate > c.endDate) return false;
         return true;
-    }), [studentCourses, weekday, selectedDate]);
+    }), [studentCourses, weekday, selectedDate, leaves]);
     // 내신대비보강(examprep) 활성 기간 동안은 클리닉을 통째로 쉬는 것으로 본다(2026-09-21, 원장님 확인 -
     // 시험기간엔 주말 집중보강으로 대체되어 평소 클리닉에는 오지 않음). 내신대비보강 요일과 클리닉 요일이
     // 서로 다를 수 있어서(예: 내신대비보강 일요일, 클리닉 월요일), activeExamPrepCourses(오늘 요일에 진행되는
@@ -1365,6 +1393,8 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         })
         : resolvedStudents.filter((s) => {
             if (s.enrollDate && selectedDate < s.enrollDate) return false;
+            // 휴원 기간엔 정규·클리닉 명단에서 자동으로 빠진다(아래 onLeaveRoster로 따로 회색 표시).
+            if (leaveOnDate(leaves, s.id, selectedDate)) return false;
             if (session === "clinic") {
                 if (!s.clinic) return false;
                 if (examPrepActiveStudentIds.has(s.id)) return false;
@@ -1373,6 +1403,28 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             }
             return s.days.includes(weekday);
         });
+    // 원래라면 오늘 명단에 있었을 휴원생 - 체크 대상은 아니고 맨 아래 회색 박스로 "휴원 중"만 보여준다.
+    const onLeaveRoster = (session === "regular" || session === "clinic") ? resolvedStudents.filter((s) => {
+        const l = leaveOnDate(leaves, s.id, selectedDate);
+        if (!l) return false;
+        if (s.enrollDate && selectedDate < s.enrollDate) return false;
+        if (session === "clinic") {
+            if (!s.clinic || examPrepActiveStudentIds.has(s.id)) return false;
+            const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
+            return clinicDays.includes(weekday);
+        }
+        return s.days.includes(weekday);
+    }).map((s) => ({ ...s, leave: leaveOnDate(leaves, s.id, selectedDate) })) : [];
+    const onLeaveBox = onLeaveRoster.length > 0 && React.createElement(
+        "div",
+        { className: "rounded-2xl px-4 py-3 mt-4", style: { background: "#f1f3f6", border: `1px dashed #cbd2db` } },
+        React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: "#475569", marginBottom: 6 } }, "💤 휴원 중 ", onLeaveRoster.length, "명 (출석체크 대상 아님)"),
+        React.createElement(
+            "div", { className: "flex flex-wrap gap-1.5" },
+            onLeaveRoster.map((s) => React.createElement("span", { key: s.id, style: { fontSize: 12, fontWeight: 700, color: "#64748b", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "3px 9px" } },
+                s.name, React.createElement("span", { style: { fontWeight: 500, fontSize: 11, marginLeft: 4 } }, s.leave.endDate ? `~${mdKor(s.leave.endDate)}` : "~복귀일 미정")))
+        )
+    );
     const current = sessionAttendance[session] || {};
     const setStatus = async (studentId, status) => {
         const isActive = current[studentId]?.status === status;
@@ -1972,6 +2024,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         (!showClosureBanner || showClosureRoster) && groupToggle,
         (!showClosureBanner || showClosureRoster) && addPicker,
         (!showClosureBanner || showClosureRoster) && listBody,
+        (!showClosureBanner || showClosureRoster) && onLeaveBox,
         clockInModal
     );
 }
@@ -2484,6 +2537,8 @@ function studentReportStatTds(row) {
     ];
 }
 function reportCellMark(c) {
+    if (c && c.onLeave)
+        return React.createElement("span", { style: { fontSize: 10, opacity: 0.7 }, title: "휴원" }, "💤");
     if (!c || !c.scheduled)
         return null;
     if (!c.status)
@@ -2552,7 +2607,8 @@ function ReportLegend() {
         { className: "flex flex-wrap items-center gap-x-4 gap-y-1 px-1 mb-4", style: { fontSize: 11.5, color: SUBINK } },
         STATUS_ORDER.map((s) => React.createElement("span", { key: s, className: "flex items-center gap-1" }, React.createElement("span", { style: { color: STATUS[s].color, fontWeight: 800 } }, REPORT_STATUS_MARK[s]), s)),
         React.createElement("span", { className: "flex items-center gap-1" }, React.createElement("span", { style: { color: "#c7cbd1", fontWeight: 800 } }, "·"), "미체크"),
-        React.createElement("span", null, "(일정변경은 출석률 집계에서 제외됩니다)")
+        React.createElement("span", { className: "flex items-center gap-1" }, React.createElement("span", { style: { fontSize: 10 } }, "💤"), "휴원"),
+        React.createElement("span", null, "(일정변경·휴원은 출석률 집계에서 제외됩니다)")
     );
 }
 function MonthlyAttendanceReport({ students, studentCourses }) {
@@ -2609,6 +2665,9 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
     // 내신대비보강(examprep) 활성 기간엔 클리닉을 통째로 쉬는 것으로 본다 - 출석체크 화면(Attendance
     // 컴포넌트)의 examPrepActiveStudentIds와 같은 규칙을 월별출석부에도 그대로 적용(2026-09-21).
     // 내신대비보강 요일과 클리닉 요일이 다를 수 있어 요일 조건 없이 기간만 비교한다.
+    const leaves = useStudentLeaves();
+    // 휴원 기간 칸은 출결 집계에서 빼고 💤로만 표시(2026-11-11). 단, 그날 실제 체크 기록이 있으면 기록을 우선한다.
+    const leaveCell = (studentId, dateStr, status) => (!status && leaveOnDate(leaves, studentId, dateStr)) ? { scheduled: false, onLeave: true } : null;
     const examPrepActiveFor = (studentId, dateStr) => (studentCourses || []).some((c) =>
         c.category === "examprep" && c.studentId === studentId &&
         (!c.startDate || dateStr >= c.startDate) && (!c.endDate || dateStr <= c.endDate));
@@ -2617,10 +2676,11 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const rs = resolvedFor(s, d.dateStr);
             if (!(rs.days || []).includes(d.weekday))
                 return { scheduled: false };
-            return { scheduled: true, status: attByDate[d.dateStr]?.regular?.[s.id] || "" };
+            const st = attByDate[d.dateStr]?.regular?.[s.id] || "";
+            return leaveCell(s.id, d.dateStr, st) || { scheduled: true, status: st };
         });
         return { student: s, cells };
-    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate]);
+    }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave)), [students, days, historyByStudent, attByDate, leaves]);
     const clinicRows = useMemo(() => (students || []).map((s) => {
         const cells = days.map((d) => {
             const rs = resolvedFor(s, d.dateStr);
@@ -2628,10 +2688,11 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                 return { scheduled: false };
             if (examPrepActiveFor(s.id, d.dateStr))
                 return { scheduled: false };
-            return { scheduled: true, status: attByDate[d.dateStr]?.clinic?.[s.id] || "" };
+            const st = attByDate[d.dateStr]?.clinic?.[s.id] || "";
+            return leaveCell(s.id, d.dateStr, st) || { scheduled: true, status: st };
         });
         return { student: s, cells };
-    }).filter((row) => row.cells.some((c) => c.scheduled)), [students, days, historyByStudent, attByDate, studentCourses]);
+    }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave)), [students, days, historyByStudent, attByDate, studentCourses, leaves]);
     const extraRows = useMemo(() => {
         const ids = new Set();
         days.forEach((d) => { const m = extraByDate[d.dateStr]; if (m) Object.keys(m).forEach((sid) => ids.add(sid)); });
@@ -2661,13 +2722,14 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                     const match = courses.find((c) => (c.days || []).includes(d.weekday) && (!c.startDate || d.dateStr >= c.startDate) && (!c.endDate || d.dateStr <= c.endDate));
                     if (!match)
                         return { scheduled: false };
-                    return { scheduled: true, status: courseAttByDate[d.dateStr]?.[match.id] || "" };
+                    const st = courseAttByDate[d.dateStr]?.[match.id] || "";
+                    return leaveCell(student.id, d.dateStr, st) || { scheduled: true, status: st };
                 });
                 return { student, cells };
-            }).filter((row) => row.cells.some((c) => c.scheduled));
+            }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave));
             return { courseName: name, rows };
         }).filter((g) => g.rows.length > 0);
-    }, [studentCourses, students, days, courseAttByDate]);
+    }, [studentCourses, students, days, courseAttByDate, leaves]);
     const studentRows = useMemo(() => {
         return (studentTabStudents || []).map((s) => {
             const detail = [];
@@ -2678,7 +2740,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             // 몇 분 늦었는지 계산한다(2026-08-21 추가, 지각왕 관리용). 옛날 기록이나 checked_at이
             // 없는 지각(수동 입력 이전)은 scheduledStart/checkedAt 중 하나가 없어서 자연히 제외된다.
             const addHit = (label, status, dateStr, weekday, checkedAt, scheduledStart) => {
-                if (!status) return;
+                if (!status) return; // 휴원 기간은 체크 기록이 없으므로 여기서 자연히 집계 제외됨
                 let lateMinutes = null;
                 if (status === "지각" && checkedAt && scheduledStart) {
                     lateMinutes = Math.max(minutesDiffHHMM(checkedAtHHMM(checkedAt), scheduledStart), 1);

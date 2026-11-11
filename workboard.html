@@ -90,6 +90,17 @@ function resolveScheduleAsOf(scheduleSegments, dateStr) {
     });
     return result;
 }
+// 휴원 끝난 다음날부터 가장 가까운 정규/클리닉 수업일(최대 3주 탐색) - "첫 수업 12/15(화)" 표시용.
+function firstClassDateFrom(student, fromDate) {
+    if (!student || !fromDate) return "";
+    const clinicDays = student.clinic !== false ? ((student.clinicDays && student.clinicDays.length) ? student.clinicDays : []) : [];
+    for (let i = 0; i < 21; i++) {
+        const d = addDays(fromDate, i);
+        const w = korWeekdayOf(d);
+        if ((student.days || []).includes(w) || clinicDays.includes(w)) return d;
+    }
+    return "";
+}
 function korWeekdayOf(dateStr) {
     return JS_DAY_TO_KOR[new Date(dateStr + "T00:00:00").getDay()];
 }
@@ -921,6 +932,36 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
             .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
             .slice(0, 6);
     }, [academicEvents, today]);
+    // 💤 휴원생 요약(원장 전용, 2026-11-11) - attn_student_leaves(원장 전용 RLS)를 읽어서
+    // 지금 휴원 중 / 이번 주 복귀 예정 / 곧 휴원 시작 학생을 한 카드로 보여준다.
+    const [leaveRows, setLeaveRows] = useState([]);
+    useEffect(() => {
+        if (!isDirector) return;
+        const load = () => supabaseClient.from("attn_student_leaves").select("*").then(({ data, error }) => { if (error) console.error(error); else setLeaveRows(data || []); });
+        load();
+        const channel = supabaseClient.channel("attn_student_leaves_dashboard")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_student_leaves" }, () => load())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, [isDirector]);
+    const leaveSummary = useMemo(() => {
+        const t = todayStr();
+        const weekEnd = addDays(t, 7);
+        const soon = addDays(t, 14);
+        const stuOf = (id) => (students || []).find((x) => x.id === id) || null;
+        const nameOf = (id) => (stuOf(id) || {}).name || "(이름 없음)";
+        const items = [];
+        leaveRows.forEach((r) => {
+            const end = r.end_date || "";
+            const returnDate = end ? (firstClassDateFrom(stuOf(r.student_id), addDays(end, 1)) || addDays(end, 1)) : "";
+            const active = t >= r.start_date && (!end || t <= end);
+            const upcoming = t < r.start_date && r.start_date <= soon;
+            if (!active && !upcoming) return;
+            items.push({ id: r.id, name: nameOf(r.student_id), startDate: r.start_date, endDate: end, returnDate, reason: r.reason || "", paymentNote: r.payment_note || "", active, returningThisWeek: active && !!returnDate && returnDate <= weekEnd, undecided: active && !end });
+        });
+        items.sort((a, b) => (a.returnDate || "9999").localeCompare(b.returnDate || "9999"));
+        return { items, activeCount: items.filter((i) => i.active).length, returningCount: items.filter((i) => i.returningThisWeek).length, undecidedCount: items.filter((i) => i.undecided).length };
+    }, [leaveRows, students]);
     const jumpToAcadEvent = (e) => {
         const d = new Date(e.date + "T00:00:00");
         setMonth(new Date(d.getFullYear(), d.getMonth(), 1));
@@ -1094,6 +1135,23 @@ function Dashboard({ month, setMonth, selectedDate, setSelectedDate, goToAttenda
                         React.createElement("span", { style: { fontSize: 13, fontWeight: 600 } }, e.title),
                         isDirector && React.createElement("button", { onClick: () => removeEvent(e.id), style: { color: SUBINK } }, "\u2715"))))),
                 React.createElement("button", { onClick: goToAttendance, className: "w-full mt-4 py-2.5 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "\uC774 \uB0A0\uC9DC\uB85C \uCD9C\uC11D\uCCB4\uD06C \uD558\uB7EC\uAC00\uAE30"))),
+        isDirector && leaveSummary.items.length > 0 && React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid #cbd2db` } },
+            React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2 mb-1" },
+                React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: "#475569" } }, "💤 휴원생"),
+                React.createElement("a", { href: "students.html", style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, "학생관리에서 보기 →")),
+            React.createElement("p", { style: { color: SUBINK, fontSize: 12.5, marginBottom: 12 } },
+                `휴원 중 ${leaveSummary.activeCount}명`,
+                leaveSummary.returningCount > 0 ? ` · 이번 주 복귀 예정 ${leaveSummary.returningCount}명` : "",
+                leaveSummary.undecidedCount > 0 ? ` · 복귀일 미정 ${leaveSummary.undecidedCount}명` : ""),
+            React.createElement("div", { className: "flex flex-col gap-2" },
+                leaveSummary.items.map((i) => React.createElement("div", { key: i.id, className: "flex items-center gap-2 px-3 py-2 rounded-lg flex-wrap", style: { background: i.returningThisWeek ? "#e2f3f0" : i.active ? "#eef0f3" : "#fdf3e2" } },
+                    React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: "#fff", borderRadius: 5, padding: "1px 6px", color: i.returningThisWeek ? "#0f7a6c" : i.active ? "#475569" : "#b45309" } }, i.returningThisWeek ? "복귀 임박" : i.active ? "휴원 중" : "휴원 예정"),
+                    React.createElement("span", { style: { fontSize: 13, fontWeight: 800 } }, i.name),
+                    i.reason && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, i.reason),
+                    React.createElement("span", { style: { fontSize: 11.5, color: SUBINK, marginLeft: "auto" } },
+                        i.active ? (i.returnDate ? `복귀 첫 수업 ${i.returnDate} (${korWeekdayOf(i.returnDate)})` : "복귀일 미정") : `${i.startDate} (${korWeekdayOf(i.startDate)})부터`),
+                    i.paymentNote && React.createElement("div", { style: { width: "100%", fontSize: 11, color: "#b45309" } }, "💳 ", i.paymentNote)
+                )))),
         upcomingAcadOps.length > 0 && React.createElement("div", { className: "mt-6 rounded-2xl p-5", style: { background: "#fff", border: `1px solid ${LINE}` } },
             React.createElement("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 10 } }, "\uD83D\uDCCC \uB2E4\uAC00\uC624\uB294 \uD559\uC6D0\uD734\uBB34\u00B7\uD559\uC6D0\uC77C\uC815"),
             React.createElement("div", { className: "flex flex-col gap-2" },

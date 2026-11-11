@@ -297,6 +297,59 @@ async function fetchStudents() {
         throw error;
     return data.map(mapStudent);
 }
+// ============================================================
+// 휴원 기록(2026-11-11, 개발_21) - attn_student_leaves (원장 전용 RLS).
+// 휴원 기간(start_date~end_date, end_date 비우면 복귀일 미정) 동안 출석체크 명단에서 자동으로 빠지고,
+// 기간이 끝나면 자동으로 다시 명단에 뜬다. 상태(재원/퇴원)는 바꾸지 않는다.
+// ============================================================
+const LEAVE_TYPES = [{ key: "결제후연기", label: "결제 후 연기(이월)" }, { key: "기타", label: "기타" }];
+function mapLeave(r) {
+    return { id: r.id, studentId: r.student_id, startDate: r.start_date, endDate: r.end_date || "", leaveType: r.leave_type || "기타", reason: r.reason || "", paymentNote: r.payment_note || "", createdAt: r.created_at };
+}
+async function fetchAllLeaves() {
+    const { data, error } = await supabaseClient.from("attn_student_leaves").select("*").order("start_date", { ascending: false });
+    if (error) throw error;
+    return data.map(mapLeave);
+}
+async function saveLeaveRow(form, authorEmail) {
+    const payload = { student_id: form.studentId, start_date: form.startDate, end_date: form.endDate || null, leave_type: form.leaveType, reason: form.reason.trim(), payment_note: form.paymentNote.trim(), updated_at: new Date().toISOString() };
+    if (form.id) {
+        const { error } = await supabaseClient.from("attn_student_leaves").update(payload).eq("id", form.id);
+        if (error) throw error;
+    } else {
+        const { error } = await supabaseClient.from("attn_student_leaves").insert({ ...payload, created_by: authorEmail || null });
+        if (error) throw error;
+    }
+}
+async function deleteLeaveRow(id) {
+    const { error } = await supabaseClient.from("attn_student_leaves").delete().eq("id", id);
+    if (error) throw error;
+}
+// 오늘 기준 상태: "active"(휴원 중) / "upcoming"(예정) / null
+function leaveStatusOn(leave, dateStr) {
+    if (dateStr < leave.startDate) return "upcoming";
+    if (!leave.endDate || dateStr <= leave.endDate) return "active";
+    return null;
+}
+function mdShort(dateStr) {
+    if (!dateStr) return "";
+    const [, m, d] = dateStr.split("-");
+    return `${Number(m)}/${Number(d)}`;
+}
+// 휴원 끝난 다음날부터 가장 가까운 정규/클리닉 수업일(최대 3주 탐색) - "첫 수업 12/15(화)" 표시용.
+function firstClassDateFrom(student, fromDate) {
+    if (!student || !fromDate) return "";
+    const clinicDays = student.clinic !== false ? ((student.clinicDays && student.clinicDays.length) ? student.clinicDays : []) : [];
+    for (let i = 0; i < 21; i++) {
+        const d = addDays(fromDate, i);
+        const w = korWeekdayOf(d);
+        if ((student.days || []).includes(w) || clinicDays.includes(w)) return d;
+    }
+    return "";
+}
+function emptyLeaveForm(studentId) {
+    return { id: null, studentId, leaveType: "결제후연기", startDate: todayStr(), endDate: "", reason: "", paymentNote: "" };
+}
 async function upsertStudent(form) {
     const payload = {
         name: form.name, class: form.class, school: form.school, grade: form.grade, days: form.days,
@@ -599,6 +652,61 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             .subscribe();
         return () => { supabaseClient.removeChannel(channel); };
     }, []);
+    // 휴원 기록 (2026-11-11) - 💤 버튼으로 학생별 패널을 펼친다.
+    const [leaves, setLeaves] = useState([]);
+    const [leaveTarget, setLeaveTarget] = useState(null);
+    const [leaveForm, setLeaveForm] = useState(null);
+    const [savingLeave, setSavingLeave] = useState(false);
+    const reloadLeaves = async () => {
+        try { setLeaves(await fetchAllLeaves()); } catch (e) { console.error(e); }
+    };
+    useEffect(() => { reloadLeaves(); }, []);
+    useEffect(() => {
+        const channel = supabaseClient
+            .channel("attn_student_leaves_manager_changes")
+            .on("postgres_changes", { event: "*", schema: "public", table: "attn_student_leaves" }, () => reloadLeaves())
+            .subscribe();
+        return () => { supabaseClient.removeChannel(channel); };
+    }, []);
+    const toggleLeaves = (id) => {
+        if (leaveTarget === id) { setLeaveTarget(null); setLeaveForm(null); return; }
+        setLeaveTarget(id);
+        setLeaveForm(null);
+    };
+    const saveLeave = async () => {
+        if (!leaveForm.startDate) { alert("휴원 시작일을 입력해주세요."); return; }
+        if (leaveForm.endDate && leaveForm.endDate < leaveForm.startDate) { alert("마지막 휴원일이 시작일보다 빠릅니다."); return; }
+        setSavingLeave(true);
+        try {
+            const { data } = await supabaseClient.auth.getUser();
+            await saveLeaveRow(leaveForm, data && data.user ? data.user.email : null);
+            await reloadLeaves();
+            setLeaveForm(null);
+        } catch (e) {
+            alert("저장 중 오류: " + e.message);
+        }
+        setSavingLeave(false);
+    };
+    const removeLeave = async (l) => {
+        if (!confirm(`${l.startDate} 휴원 기록을 삭제할까요?`)) return;
+        try { await deleteLeaveRow(l.id); await reloadLeaves(); } catch (e) { alert("삭제 중 오류: " + e.message); }
+    };
+    // 복귀일 미정(또는 예정보다 일찍) 돌아온 경우: 어제까지를 휴원으로 확정 -> 오늘부터 명단에 다시 뜸.
+    const returnLeaveToday = async (l) => {
+        const yesterday = addDays(todayStr(), -1);
+        if (yesterday < l.startDate) {
+            if (!confirm("아직 휴원이 시작되지 않은 기록입니다. 기록을 삭제할까요?")) return;
+            try { await deleteLeaveRow(l.id); await reloadLeaves(); } catch (e) { alert("오류: " + e.message); }
+            return;
+        }
+        if (!confirm(`오늘(${todayStr()})부터 복귀 처리할까요? 마지막 휴원일이 ${yesterday}로 저장됩니다.`)) return;
+        try { await saveLeaveRow({ ...l, endDate: yesterday }); await reloadLeaves(); } catch (e) { alert("오류: " + e.message); }
+    };
+    const currentLeaveOf = (studentId) => {
+        const t = todayStr();
+        const mine = leaves.filter((l) => l.studentId === studentId);
+        return mine.find((l) => leaveStatusOn(l, t) === "active") || mine.filter((l) => leaveStatusOn(l, t) === "upcoming").sort((a, b) => a.startDate.localeCompare(b.startDate))[0] || null;
+    };
     // 보기 모드를 바꿀 때마다(예: 학년별 → 학교별) 그룹은 항상 전체 접힘 상태로 새로 시작한다 —
     // 펼쳐진 채로 시작하면 전체보기와 다를 게 없어서, 접힌 "요약 인덱스"로 쓰이도록 함.
     // (아래 "!loaded 이면 return"보다 반드시 앞에 있어야 함 — 그 뒤에 두면 로딩 전/후로 훅 호출 순서가 달라져
@@ -710,7 +818,8 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         React.createElement("button", { onClick: openNew, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: NAVY, color: "#fff" } }, "+ 학생 추가")
     );
     // 전체 재원생 수를 제목 아래 한눈에 보이도록 표시(퇴원생 수는 아래 "퇴원생" 섹션에서 별도 확인).
-    const statLine = React.createElement("p", { style: { color: NAVY, fontSize: 13, fontWeight: 700, marginTop: 4, marginBottom: 2 } }, `재원생 ${activeCount}명`);
+    const onLeaveNowCount = students.filter((s) => s.status !== "퇴원" && (() => { const l = currentLeaveOf(s.id); return l && leaveStatusOn(l, todayStr()) === "active"; })()).length;
+    const statLine = React.createElement("p", { style: { color: NAVY, fontSize: 13, fontWeight: 700, marginTop: 4, marginBottom: 2 } }, `재원생 ${activeCount}명`, onLeaveNowCount > 0 && React.createElement("span", { style: { color: SUBINK, fontWeight: 700 } }, ` (💤 휴원 중 ${onLeaveNowCount}명 포함)`));
     const subText = React.createElement("p", { style: { color: SUBINK, fontSize: 13, marginBottom: 16 } }, "학생별 반과 등원 요일을 등록하면 출석체크 화면에 자동으로 반영됩니다.");
     const studentFormEl = React.createElement(
         "div",
@@ -855,6 +964,13 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                 { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement("span", { style: { fontWeight: 800, fontSize: 14.5 } }, s.name),
                 s.status === "퇴원" && React.createElement("span", { style: { fontSize: 10.5, fontWeight: 800, background: RED_SOFT, color: RED, borderRadius: 5, padding: "1.5px 6px" } }, "퇴원", s.withdrawDate ? ` · ${s.withdrawDate}` : ""),
+                s.status !== "퇴원" && (() => {
+                    const l = currentLeaveOf(s.id);
+                    if (!l) return null;
+                    const st = leaveStatusOn(l, todayStr());
+                    return React.createElement("span", { onClick: () => toggleLeaves(s.id), style: { cursor: "pointer", fontSize: 10.5, fontWeight: 800, background: st === "active" ? "#eef0f3" : AMBER_SOFT, color: st === "active" ? "#475569" : AMBER, borderRadius: 5, padding: "1.5px 6px" } },
+                        st === "active" ? `💤 휴원 중 ~${l.endDate ? mdShort(l.endDate) : "미정"}` : `💤 휴원 예정 ${mdShort(l.startDate)}~${l.endDate ? mdShort(l.endDate) : ""}`);
+                })(),
                 React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, s.class || "반 미지정"),
                 (s.school || s.grade) && React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, s.school, s.school && s.grade ? " · " : "", s.grade ? `${s.grade}학년` : "")
             ),
@@ -881,6 +997,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
             { className: "flex items-center gap-1 flex-shrink-0" },
             React.createElement("button", { onClick: () => toggleHistory(s.id), className: "p-2 rounded-lg", style: { background: historyTarget === s.id ? SKY_SOFT : PAPER, color: SKY }, title: "변경 이력 보기" }, "🔍"),
             React.createElement("button", { onClick: () => toggleCourses(s.id), className: "p-2 rounded-lg", style: { background: courseTarget === s.id ? TEAL_SOFT : PAPER, color: TEAL }, title: "추가강좌 관리" }, "📚"),
+            React.createElement("button", { onClick: () => toggleLeaves(s.id), className: "p-2 rounded-lg", style: { background: leaveTarget === s.id ? "#eef0f3" : PAPER, color: "#475569" }, title: "휴원 기록" }, "💤"),
             goToWorkLog && React.createElement("button", { onClick: () => goToWorkLog(s.id, null, "view"), className: "p-2 rounded-lg", style: { background: PAPER, color: PURPLE }, title: "근무일지(지도 이력) 보기" }, "📔"),
             React.createElement("button", { onClick: () => (editTarget === s.id ? closeForm() : openEdit(s)), className: "p-2 rounded-lg", style: { background: NAVY_SOFT, color: NAVY } }, "✎"),
             React.createElement("button", { onClick: () => requestDelete(s), className: "p-2 rounded-lg", style: { background: RED_SOFT, color: RED } }, "🗑")
@@ -1016,6 +1133,80 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                 : React.createElement("button", { onClick: () => openNewCourseForm(s.id), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: TEAL_SOFT, color: TEAL } }, "+ 강좌 추가")
         );
     };
+    const SLATE = "#475569";
+    const renderLeaveForm = () => React.createElement(
+        "div",
+        { className: "rounded-xl p-3 mt-2", style: { background: "#f1f3f6" } },
+        React.createElement(
+            "div", { className: "flex flex-col gap-2" },
+            React.createElement(
+                "div", { className: "flex gap-1.5 flex-wrap" },
+                LEAVE_TYPES.map((opt) => React.createElement("button", {
+                    key: opt.key, onClick: () => setLeaveForm({ ...leaveForm, leaveType: opt.key }),
+                    className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+                    style: { background: leaveForm.leaveType === opt.key ? SLATE : "#fff", color: leaveForm.leaveType === opt.key ? "#fff" : SUBINK, border: `1px solid ${leaveForm.leaveType === opt.key ? SLATE : LINE}` }
+                }, opt.label))
+            ),
+            React.createElement(
+                "div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("label", { style: { fontSize: 11, color: SUBINK } }, "휴원 시작일"),
+                React.createElement("input", { type: "date", value: leaveForm.startDate, onChange: (e) => setLeaveForm({ ...leaveForm, startDate: e.target.value }), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("label", { style: { fontSize: 11, color: SUBINK } }, "마지막 휴원일"),
+                React.createElement("input", { type: "date", value: leaveForm.endDate, onChange: (e) => setLeaveForm({ ...leaveForm, endDate: e.target.value }), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("span", { style: { fontSize: 10.5, color: SUBINK } }, leaveForm.endDate ? `→ ${addDays(leaveForm.endDate, 1)}(${korWeekdayOf(addDays(leaveForm.endDate, 1))})부터 명단 복귀` : "(비워두면 복귀일 미정)")
+            ),
+            React.createElement("input", { value: leaveForm.reason, onChange: (e) => setLeaveForm({ ...leaveForm, reason: e.target.value }), placeholder: "휴원 사유 (예: 장기 해외여행)", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+            React.createElement("textarea", { value: leaveForm.paymentNote, onChange: (e) => setLeaveForm({ ...leaveForm, paymentNote: e.target.value }), rows: 2, placeholder: "원비 이월 메모 (예: 11월분 결제 완료, 휴원 기간만큼 이월 → 다음 결제일 OO)", className: "px-2.5 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}`, resize: "vertical" } })
+        ),
+        React.createElement(
+            "div", { className: "flex gap-2 mt-3" },
+            React.createElement("button", { onClick: saveLeave, disabled: savingLeave, className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: SLATE, color: "#fff", opacity: savingLeave ? 0.6 : 1 } }, savingLeave ? "저장 중..." : "저장"),
+            React.createElement("button", { onClick: () => setLeaveForm(null), className: "px-4 py-1.5 rounded-lg text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소")
+        )
+    );
+    const renderLeavesPanel = (s) => {
+        const list = leaves.filter((l) => l.studentId === s.id).slice().sort((a, b) => b.startDate.localeCompare(a.startDate));
+        const t = todayStr();
+        return React.createElement(
+            "div",
+            { className: "rounded-2xl p-4 mb-4", style: { background: "#fff", border: `1px solid ${SLATE}` } },
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: SLATE, marginBottom: 4 } }, "💤 휴원 기록 (", list.length, "건)"),
+            React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginBottom: 10 } }, "휴원 기간에는 출석체크 명단(정규·클리닉·특강)에서 자동으로 빠지고, 기간이 끝나면 자동으로 다시 뜹니다. 조교 화면에는 '휴원 중'만 보이고 사유·원비 메모는 보이지 않습니다."),
+            list.length === 0 && React.createElement("div", { style: { fontSize: 12.5, color: SUBINK, marginBottom: 10 } }, "휴원 기록이 없습니다."),
+            list.length > 0 && React.createElement(
+                "div", { className: "flex flex-col gap-2 mb-3" },
+                list.map((l) => {
+                    if (leaveForm && leaveForm.id === l.id) return React.createElement("div", { key: l.id }, renderLeaveForm());
+                    const st = leaveStatusOn(l, t);
+                    const typeLabel = (LEAVE_TYPES.find((x) => x.key === l.leaveType) || { label: l.leaveType }).label;
+                    return React.createElement(
+                        "div",
+                        { key: l.id, className: "rounded-lg px-3 py-2", style: { background: st ? "#eef0f3" : "#f7f7f5", opacity: st ? 1 : 0.7 } },
+                        React.createElement(
+                            "div", { className: "flex items-center justify-between gap-2 flex-wrap" },
+                            React.createElement(
+                                "div", { className: "min-w-0" },
+                                React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: SLATE } },
+                                    React.createElement("span", { style: { fontSize: 10, fontWeight: 800, background: "#fff", borderRadius: 4, padding: "1px 5px", marginRight: 5 } }, st === "active" ? "휴원 중" : st === "upcoming" ? "예정" : "종료"),
+                                    `${l.startDate}(${korWeekdayOf(l.startDate)}) ~ `, l.endDate ? `${l.endDate}(${korWeekdayOf(l.endDate)})` : "복귀일 미정"),
+                                React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 2 } }, typeLabel, l.reason ? ` · ${l.reason}` : "", l.endDate ? (() => { const fc = firstClassDateFrom(s, addDays(l.endDate, 1)); return fc ? ` · 복귀 첫 수업 ${fc}(${korWeekdayOf(fc)})` : ` · ${addDays(l.endDate, 1)}부터 복귀`; })() : ""),
+                                l.paymentNote && React.createElement("div", { style: { fontSize: 11.5, color: AMBER, marginTop: 3, whiteSpace: "pre-wrap" } }, "💳 ", l.paymentNote)
+                            ),
+                            React.createElement(
+                                "div", { className: "flex items-center gap-1 flex-shrink-0" },
+                                st && React.createElement("button", { onClick: () => returnLeaveToday(l), className: "px-2 py-1 rounded-md text-xs font-bold", style: { background: "#fff", color: SLATE, border: `1px solid ${LINE}` }, title: "오늘부터 수업 복귀" }, "오늘 복귀"),
+                                React.createElement("button", { onClick: () => setLeaveForm({ ...l }), className: "p-1.5 rounded-md", style: { background: "#fff", color: NAVY, border: `1px solid ${LINE}` }, title: "수정" }, "✎"),
+                                React.createElement("button", { onClick: () => removeLeave(l), className: "p-1.5 rounded-md", style: { background: "#fff", color: RED, border: `1px solid ${LINE}` }, title: "삭제" }, "🗑")
+                            )
+                        )
+                    );
+                })
+            ),
+            leaveForm && !leaveForm.id && leaveForm.studentId === s.id
+                ? renderLeaveForm()
+                : React.createElement("button", { onClick: () => setLeaveForm(emptyLeaveForm(s.id)), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: "#eef0f3", color: SLATE } }, "+ 휴원 등록")
+        );
+    };
     // 학생 한 명 분(행 + 이력 패널 + 수정 폼)을 렌더링. 전체보기/검색/그룹보기 어디서든 재사용.
     const renderStudentBlock = (s) => React.createElement(
         React.Fragment,
@@ -1027,6 +1218,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         ),
         historyTarget === s.id && renderHistoryPanel(),
         courseTarget === s.id && renderCoursesPanel(s),
+        leaveTarget === s.id && renderLeavesPanel(s),
         editTarget === s.id && studentFormEl
     );
     const GROUP_MODE_LABELS = { none: "전체보기", grade: "학년별", school: "학교별", class: "반별", day: "요일별", course: "추가강좌별" };
