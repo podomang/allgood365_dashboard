@@ -522,10 +522,23 @@ function OperationsPage({ session }) {
 // [2026-10-31] "학원운영관리" 그룹 - 원장·실장(director 권한)에게만 보이는 메뉴 묶음. 학생관리를 이 안으로 옮기고
 // 급여 정산·시급 관리를 추가했다. [2026-11-02] 월간 일정표(planner.html) 추가. workboard/attendance/allgoodstudy/students/operations/planner 6개 페이지가 같은 코드를 쓴다
 // (한 곳을 고치면 나머지 페이지도 똑같이 맞춰줄 것). 그룹 펼침 상태는 localStorage에 기억한다.
+// [2026-11-17] 업무보드·출결관리·수업관리도 학원운영관리처럼 왼쪽에서 펼쳐 하위 메뉴(=각 페이지의 알약 탭)로
+// 바로 이동하도록 그룹화. 하위 메뉴 링크는 "페이지#해시" 형태이고, 각 페이지는 useHashTab으로 해시와 탭을
+// 맞춘다(알약 탭을 눌러도 해시가 따라 바뀜). 그룹마다 펼침 상태를 따로 기억한다. 6개 페이지 공통 코드.
 const NAV_ITEMS = [
-    { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭" },
-    { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅" },
-    { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓", directorOnly: true },
+    { key: "dashboard", href: "workboard.html", label: "업무보드", icon: "🧭", children: [
+        { key: "calendar", href: "workboard.html#calendar", label: "캘린더", icon: "📅" },
+        { key: "staffroom", href: "workboard.html#staffroom", label: "스태프룸", icon: "🧑‍🏫" },
+    ] },
+    { key: "attendance", href: "attendance.html", label: "출결관리", icon: "✅", children: [
+        { key: "attcheck", href: "attendance.html#check", label: "출석체크", icon: "☑️" },
+        { key: "attmonthly", href: "attendance.html#monthly", label: "월별출석부", icon: "📊", directorOnly: true },
+    ] },
+    { key: "classlog", href: "allgoodstudy.html", label: "수업관리", icon: "📓", directorOnly: true, children: [
+        { key: "textbooks", href: "allgoodstudy.html#textbooks", label: "교재별 진도", icon: "📘" },
+        { key: "assignments", href: "allgoodstudy.html#assignments", label: "수업일지", icon: "📓" },
+        { key: "questions", href: "#", label: "질문 (준비중)", icon: "💬", disabled: true },
+    ] },
     { key: "ops", href: "operations.html", label: "학원운영관리", mobileLabel: "운영관리", icon: "🏫", directorOnly: true, children: [
         { key: "students", href: "students.html", label: "학생관리", icon: "👥" },
         { key: "payroll", href: "operations.html#payroll", label: "급여 정산", icon: "💰" },
@@ -534,16 +547,38 @@ const NAV_ITEMS = [
     ] },
 ];
 const NAV_GROUP_OPEN_KEY = "nav_group_ops_open";
+function navGroupOpenKey(item) { return item.key === "ops" ? NAV_GROUP_OPEN_KEY : "nav_group_" + item.key + "_open"; }
+function visibleNavFor(isDirector) {
+    return NAV_ITEMS.filter((t) => !t.directorOnly || isDirector).map((t) => t.children
+        ? Object.assign({}, t, { children: t.children.filter((c) => !c.directorOnly || isDirector) })
+        : t);
+}
+// 페이지 안 알약 탭 <-> URL 해시 동기화. hashToTab: { "calendar": "calendar", ... } (모듈 상수로 넘길 것)
+function useHashTab(hashToTab, fallback) {
+    const read = () => hashToTab[(window.location.hash || "").slice(1)] || null;
+    const [tab, setTab] = React.useState(() => read() || (typeof fallback === "function" ? fallback() : fallback));
+    React.useEffect(() => {
+        const onHash = () => { const k = read(); if (k) setTab(k); };
+        window.addEventListener("hashchange", onHash);
+        return () => window.removeEventListener("hashchange", onHash);
+    }, []);
+    React.useEffect(() => {
+        const hn = Object.keys(hashToTab).find((k) => hashToTab[k] === tab);
+        if (hn && window.location.hash !== "#" + hn) { try { history.replaceState(null, "", "#" + hn); } catch (e) {} }
+    }, [tab]);
+    return [tab, setTab];
+}
 function navItemActive(t, activeKey) { return t.key === activeKey || (t.children || []).some((c) => c.key === activeKey); }
 function SidebarNavGroup({ item, activeKey }) {
     const containsActive = navItemActive(item, activeKey);
+    const storageKey = navGroupOpenKey(item);
     const [open, setOpen] = React.useState(() => {
         if (containsActive) return true;
-        try { const v = localStorage.getItem(NAV_GROUP_OPEN_KEY); return v === null ? true : v === "1"; } catch (e) { return true; }
+        try { const v = localStorage.getItem(storageKey); return v === null ? true : v === "1"; } catch (e) { return true; }
     });
     const toggle = () => setOpen((v) => {
         const nv = !v;
-        try { localStorage.setItem(NAV_GROUP_OPEN_KEY, nv ? "1" : "0"); } catch (e) {}
+        try { localStorage.setItem(storageKey, nv ? "1" : "0"); } catch (e) {}
         return nv;
     });
     return React.createElement("div", null,
@@ -557,11 +592,17 @@ function SidebarNavGroup({ item, activeKey }) {
             React.createElement("span", { style: { fontSize: 10, display: "inline-block", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" } }, "▾")
         ),
         open && React.createElement("div", { className: "flex flex-col gap-0.5 mt-0.5", style: { marginLeft: 16, paddingLeft: 8, borderLeft: `1px solid ${LINE}` } },
-            item.children.map((c) => React.createElement("a", {
-                key: c.key, href: c.href,
-                className: "flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold transition-colors",
-                style: { background: c.key === activeKey ? NAVY_SOFT : "transparent", color: c.key === activeKey ? NAVY : SUBINK, textDecoration: "none" },
-            }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 13 } }, c.icon), c.label))
+            item.children.map((c) => c.disabled
+                ? React.createElement("span", {
+                    key: c.key,
+                    className: "flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold",
+                    style: { color: SUBINK, opacity: 0.45, cursor: "default" },
+                }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 13 } }, c.icon), c.label)
+                : React.createElement("a", {
+                    key: c.key, href: c.href,
+                    className: "flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold transition-colors",
+                    style: { background: c.key === activeKey ? NAVY_SOFT : "transparent", color: c.key === activeKey ? NAVY : SUBINK, textDecoration: "none" },
+                }, React.createElement("span", { className: "nav-emoji", style: { fontSize: 13 } }, c.icon), c.label))
         )
     );
 }
@@ -604,7 +645,7 @@ function OpsPillTabs({ activeKey, onSelect }) {
 
 function PageShell({ session, isDirector, activeKey, children }) {
     const handleLogout = () => { supabaseClient.auth.signOut().then(() => { window.location.href = "index.html"; }); };
-    const visibleNavItems = NAV_ITEMS.filter((t) => !t.directorOnly || isDirector);
+    const visibleNavItems = visibleNavFor(isDirector);
     const sidebar = h(
         "aside",
         { className: "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:left-0 md:w-60 z-20", style: { background: "#fff", borderRight: `1px solid ${LINE}` } },
