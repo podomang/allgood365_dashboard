@@ -186,7 +186,8 @@ async function fetchPlannerItems(from, to) {
 // ---------------- 인쇄용 시험 띠표 (2026-11-22) ----------------
 // 일정표가 과제알림장으로도 쓰여서, 인쇄할 때만 학교 시험 일정을 달력 칸에서 빼고 위쪽 "시험 띠표"로 모은다.
 // 화면은 그대로(칸 안에 다 보임). 분류 규칙: "학교명(중/고로 끝나는 첫 단어) + 기말/중간/시험/고사" 문구.
-// 괄호 안 과목이 있으면 수학 시험일(검정 칸 ★과목), 없으면 일반 시험일(●). 흑백 인쇄·배경 그래픽 꺼짐에도 구분되도록 기호를 같이 쓴다.
+// 괄호 안 과목이 있으면 수학 시험일(연한 하늘색 칸 ☆과목), 없으면 일반 시험일(○). 흑백 인쇄 시 옅은 회색이 되고,
+// 배경 그래픽이 꺼져도 기호로 구분되도록 기호를 같이 쓴다(2026-11-22: 검정→연하늘, 채운 기호→빈 기호).
 function parseExamItem(title) {
     const m = /^(\S+?(?:중|고))\s+(.+)$/.exec(String(title).trim());
     if (!m || !/(기말|중간|시험|고사)/.test(m[2])) return null;
@@ -228,11 +229,11 @@ function buildPrintHtml(ym, grid, byDate) {
         const body = strip.list.map(([school, sc]) => `<tr><td class="sn">${escHtml(school)}</td>${strip.cols.map((c) => {
             const subs = sc.days[c.date];
             if (!subs) return "<td></td>";
-            if (subs.length) return `<td class="mx">★${escHtml(subs.join("·"))}</td>`;
-            return `<td class="ex">●</td>`;
+            if (subs.length) return `<td class="mx">☆${escHtml(subs.join("·"))}</td>`;
+            return `<td class="ex">○</td>`;
         }).join("")}</tr>`).join("");
         stripHtml = `<div class="strip"><table class="st"><colgroup><col style="width:19mm">${strip.cols.map(() => "<col>").join("")}</colgroup>
-<tr><th class="sn"></th>${head}</tr>${body}</table><div class="lg">● 시험일 &nbsp;&nbsp; <span class="lgm">★과목</span> 수학 시험일</div></div>`;
+<tr><th class="sn"></th>${head}</tr>${body}</table><div class="lg">○ 시험일 &nbsp;&nbsp; <span class="lgm">☆과목</span> 수학 시험일</div></div>`;
     }
     for (let w = 0; w < weeks; w++) {
         const tds = [];
@@ -278,9 +279,9 @@ tr:last-child td { border-bottom: 0; }
 .st th .dw { font-weight: 400; color: #444; margin-left: .5mm; font-size: 6pt; }
 .st .sn { text-align: left; padding-left: 1.2mm; font-weight: 700; }
 .st .ex { font-size: 6pt; }
-.st .mx { background: #000; color: #fff; font-weight: 900; }
+.st .mx { background: #b9c9e8; color: #000; font-weight: 900; }
 .lg { font-size: 6pt; text-align: right; height: 3.0mm; line-height: 3.0mm; }
-.lgm { background: #000; color: #fff; font-weight: 900; padding: 0 .8mm; }
+.lgm { background: #b9c9e8; color: #000; font-weight: 900; padding: 0 .8mm; }
 .ev { font-size: 8.5pt; font-weight: 700; line-height: 1.25; margin-top: .6mm; word-break: keep-all;
       text-decoration: underline; text-underline-offset: .6mm; text-decoration-thickness: .25mm; }
 </style></head><body><div class="page">
