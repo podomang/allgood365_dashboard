@@ -354,6 +354,20 @@ async function deleteStatusLog(id) {
     if (error) throw error;
 }
 const REREG_BADGE_DAYS = 14;
+// 학년도: 3월 1일에 바뀐다(1~2월은 전년도 학년도).
+function academicYearOf(dateStr) {
+    if (!dateStr) return null;
+    const y = Number(dateStr.slice(0, 4)), m = Number(dateStr.slice(5, 7));
+    return m >= 3 ? y : y - 1;
+}
+// 학교 이름 끝 글자로 급(초/중/고)과 마지막 학년을 판단.
+function schoolStageOf(school) {
+    const t = (school || "").trim();
+    if (/초(등학교)?$/.test(t)) return { stage: "초", last: 6, next: "중", nextLevel: "중등과정" };
+    if (/중(학교)?$/.test(t)) return { stage: "중", last: 3, next: "고", nextLevel: "고등과정" };
+    if (/(고|여고|고등학교)$/.test(t)) return { stage: "고", last: 3, next: null, nextLevel: null };
+    return null;
+}
 // 오늘 기준 상태: "active"(휴원 중) / "upcoming"(예정) / null
 function leaveStatusOn(leave, dateStr) {
     if (dateStr < leave.startDate) return "upcoming";
@@ -777,7 +791,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
     }, [groupMode, loaded, studentCourses]);
     const openNew = () => { setForm(emptyForm()); setBaseline(null); setEditTarget("new"); setPrefillSourceId(null); setConfirmingTodayApply(false); };
     const openEdit = (s) => {
-        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "", origStatus: s.status || "재원", reregMemo: "" });
+        setForm({ ...s, ...parseClassString(s.class), clinic: s.clinic !== false, clinicDays: s.clinicDays || [], clinicTime: s.clinicTime || "", regularTime: s.regularTime || "", saturdayTime: s.saturdayTime || "", effectiveDate: todayStr(), status: s.status || "재원", withdrawDate: s.withdrawDate || "", origStatus: s.status || "재원", reregMemo: "", origGrade: s.grade || "", origSchool: s.school || "" });
         setBaseline({
             school: s.school || "", grade: s.grade || "", class: s.class || "",
             regularTime: s.regularTime || "", saturdayTime: (s.days || []).includes("토") ? (s.saturdayTime || "") : "",
@@ -853,6 +867,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         const reregMode = form.id && form.origStatus === "퇴원" && form.status !== "퇴원";
         if (reregMode) {
             if (!form.effectiveDate) { alert("재등록일을 입력해주세요."); return; }
+            if (!(form.school || "").trim()) { alert("학교를 입력해주세요."); return; }
             await performSave();
             return;
         }
@@ -915,7 +930,52 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
         { className: "rounded-xl p-3 mb-4", style: { background: TEAL_SOFT, border: `1px solid ${TEAL}` } },
         React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: TEAL } }, "↩ 재등록 정보"),
         React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 2, marginBottom: 8 } },
-            "재등록일부터 출석체크 명단에 다시 나타납니다(미래 날짜면 그날부터). 반·요일·시간이 바뀌었다면 아래에서 고쳐주세요 — 재등록일부터 적용됩니다. 원래 등록일은 그대로 둡니다."),
+            "재등록일부터 출석체크 명단에 다시 나타납니다(미래 날짜면 그날부터). 바뀐 내용은 재등록일부터 적용되고, 원래 등록일은 그대로 둡니다."),
+        // 다시 확인할 항목: 과정·반 / 학교 / 학년 (2026-11-22)
+        React.createElement("div", { className: "rounded-lg p-3 mb-3", style: { background: "#fff", border: `1px dashed ${TEAL}` } },
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: TEAL, marginBottom: 6 } }, "✔ 다시 확인할 항목 — 퇴원 사이에 바뀌었을 수 있어요"),
+            (() => {
+                const logsW = statusLogsOf(form.id).filter((l) => l.eventType === "퇴원");
+                const wd = (logsW.length && logsW[logsW.length - 1].eventDate) || (students.find((x) => x.id === form.id) || {}).withdrawDate || "";
+                const ayW = academicYearOf(wd), ayR = academicYearOf(form.effectiveDate);
+                const diff = ayW != null && ayR != null ? ayR - ayW : 0;
+                const g = parseInt(form.origGrade, 10);
+                const untouched = form.grade === form.origGrade && form.school === form.origSchool;
+                if (!(diff > 0) || isNaN(g) || !untouched) return null;
+                const st = schoolStageOf(form.origSchool);
+                const ng = g + diff;
+                const crosses = st && st.next && ng > st.last;
+                const msg = crosses
+                    ? `퇴원(${wd}) 이후 새 학년이 시작됐어요. ${st.stage}${g} → ${st.next}${ng - st.last}학년으로 진학했을 수 있어요. 학교와 과정도 바꿔주세요.`
+                    : `퇴원(${wd}) 이후 새 학년이 시작됐어요. 학년을 확인해주세요 (${g}학년 → ${ng}학년?).`;
+                const apply = () => crosses
+                    ? setForm({ ...form, grade: String(ng - st.last), school: "", courseLevel: st.nextLevel || form.courseLevel, prevCourseLevel: form.courseLevel })
+                    : setForm({ ...form, grade: String(ng) });
+                return React.createElement("div", { className: "rounded-lg px-3 py-2 mb-2 flex items-center justify-between gap-2 flex-wrap", style: { background: "#fff4e0", border: "1px solid #f0c27a" } },
+                    React.createElement("span", { style: { fontSize: 11.5, color: "#9a5b00", fontWeight: 700 } }, "⚠ ", msg),
+                    React.createElement("button", { onClick: apply, className: "px-3 py-1 rounded-md text-xs font-bold", style: { background: "#e08a00", color: "#fff" } },
+                        crosses ? `${st.next}${ng - st.last}학년으로 바꾸기` : `학년 +${diff} (${ng}학년)`));
+            })(),
+            React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3" },
+                React.createElement("div", null,
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "과정 · 반"),
+                    React.createElement("div", { className: "flex gap-2 mt-1" },
+                        React.createElement("select", { value: form.courseLevel, onChange: (e) => setForm({ ...form, courseLevel: e.target.value }), className: "px-2 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${TEAL}`, flex: "0 0 96px", background: "#fff" } },
+                            React.createElement("option", { value: "" }, "선택"),
+                            React.createElement("option", { value: "중등과정" }, "중등과정"),
+                            React.createElement("option", { value: "고등과정" }, "고등과정")),
+                        React.createElement("input", { value: form.courseName, onChange: (e) => setForm({ ...form, courseName: e.target.value }), placeholder: "반 (예: 4시)", className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${TEAL}` } }))),
+                React.createElement("div", null,
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "학교"),
+                    React.createElement("input", { value: form.school, onChange: (e) => setForm({ ...form, school: e.target.value }), placeholder: form.origSchool ? `진학한 학교 (이전: ${form.origSchool})` : "예: 시지중", className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${form.school ? TEAL : "#e08a00"}`, background: form.school ? "#fff" : "#fff8ec" } })),
+                React.createElement("div", null,
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "학년"),
+                    React.createElement("input", { value: form.grade, onChange: (e) => setForm({ ...form, grade: e.target.value }), placeholder: "예: 2", className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${TEAL}` } }))
+            ),
+            (form.grade !== form.origGrade || form.school !== form.origSchool) && React.createElement("div", { style: { fontSize: 11, color: SUBINK, marginTop: 6 } },
+                `이전: ${form.origSchool || "학교 미지정"} ${form.origGrade ? form.origGrade + "학년" : ""} · `,
+                React.createElement("button", { onClick: () => setForm({ ...form, grade: form.origGrade, school: form.origSchool, courseLevel: form.prevCourseLevel != null ? form.prevCourseLevel : form.courseLevel, prevCourseLevel: null }), style: { color: TEAL, fontWeight: 700, textDecoration: "underline" } }, "되돌리기"))
+        ),
         React.createElement(
             "div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" },
             React.createElement("div", null,
@@ -948,7 +1008,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                 React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "이름"),
                 React.createElement("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), className: "w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "예: 김올곳" })
             ),
-            React.createElement(
+            !isReregForm && React.createElement(
                 "div",
                 null,
                 React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, "반"),
@@ -965,7 +1025,7 @@ function StudentManager({ onChanged, prefill, onPrefillConsumed, studentCourses,
                     React.createElement("input", { value: form.courseName, onChange: (e) => setForm({ ...form, courseName: e.target.value }), className: "flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` }, placeholder: "수강과정 (예: 심화반, 4시)" })
                 )
             ),
-            [["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"], ["학생 연락처", "studentPhone", "학생 본인 연락처"], ["학부모님 연락처", "parentPhone", "학부모님 연락처"], ["메모", "memo", "특이사항 (선택)"]].map(([label, key, ph]) => React.createElement(
+            [["학교", "school", "예: 시지중"], ["학년", "grade", "예: 2"], ["학생 연락처", "studentPhone", "학생 본인 연락처"], ["학부모님 연락처", "parentPhone", "학부모님 연락처"], ["메모", "memo", "특이사항 (선택)"]].filter(([, key]) => !(isReregForm && (key === "school" || key === "grade"))).map(([label, key, ph]) => React.createElement(
                 "div",
                 { key: key },
                 React.createElement("label", { style: { fontSize: 12, fontWeight: 700, color: SUBINK } }, label),
