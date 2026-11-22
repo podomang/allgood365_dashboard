@@ -183,18 +183,63 @@ async function fetchPlannerItems(from, to) {
     return data || [];
 }
 
+// ---------------- 인쇄용 시험 띠표 (2026-11-22) ----------------
+// 일정표가 과제알림장으로도 쓰여서, 인쇄할 때만 학교 시험 일정을 달력 칸에서 빼고 위쪽 "시험 띠표"로 모은다.
+// 화면은 그대로(칸 안에 다 보임). 분류 규칙: "학교명(중/고로 끝나는 첫 단어) + 기말/중간/시험/고사" 문구.
+// 괄호 안 과목이 있으면 수학 시험일(검정 칸 ★과목), 없으면 일반 시험일(●). 흑백 인쇄·배경 그래픽 꺼짐에도 구분되도록 기호를 같이 쓴다.
+function parseExamItem(title) {
+    const m = /^(\S+?(?:중|고))\s+(.+)$/.exec(String(title).trim());
+    if (!m || !/(기말|중간|시험|고사)/.test(m[2])) return null;
+    const subj = /\(([^)]+)\)/.exec(m[2]);
+    return { school: m[1], subject: subj ? subj[1].trim() : "" };
+}
+function buildExamStrip(grid, byDate) {
+    const schools = new Map(); // school -> { first, days: { date: [subjects] } }
+    const dates = new Set();
+    grid.forEach((cell) => {
+        (byDate[cell.date] || []).forEach((it) => {
+            const ex = parseExamItem(it.title);
+            if (!ex) return;
+            dates.add(cell.date);
+            if (!schools.has(ex.school)) schools.set(ex.school, { first: cell.date, days: {} });
+            const sc = schools.get(ex.school);
+            const arr = sc.days[cell.date] = sc.days[cell.date] || [];
+            if (ex.subject && !arr.includes(ex.subject)) arr.push(ex.subject);
+        });
+    });
+    const cols = grid.filter((c) => dates.has(c.date));
+    const list = [...schools.entries()].sort((a, b) => a[1].first < b[1].first ? -1 : a[1].first > b[1].first ? 1 : 0);
+    return { cols, list };
+}
+
 // ---------------- 인쇄용 B5 가로 페이지 ----------------
 function buildPrintHtml(ym, grid, byDate) {
     const rows = [];
     const weeks = grid.length / 7;
-    // 6주 기준 24.6mm × 6 = 147.6mm를 실제 주 수로 나눠 B5 한 장을 꽉 채운다
-    const rowH = (147.6 / weeks).toFixed(2);
+    const strip = buildExamStrip(grid, byDate);
+    const hasStrip = strip.cols.length > 0;
+    // 띠표 높이: 날짜 머리줄 4.4mm + 학교당 4.4mm + 범례 3.6mm + 위아래 간격 2.4mm
+    const stripH = hasStrip ? 4.4 + strip.list.length * 4.4 + 3.6 + 2.4 : 0;
+    // 6주 기준 24.6mm × 6 = 147.6mm에서 띠표 높이를 빼고 실제 주 수로 나눠 B5 한 장을 꽉 채운다
+    const rowH = ((147.6 - stripH) / weeks).toFixed(2);
+    let stripHtml = "";
+    if (hasStrip) {
+        const head = strip.cols.map((c) => `<th>${c.m === ym.m ? c.d : c.m + "/" + c.d}<span class="dw">${KOR_DAY[c.dow]}</span></th>`).join("");
+        const body = strip.list.map(([school, sc]) => `<tr><td class="sn">${escHtml(school)}</td>${strip.cols.map((c) => {
+            const subs = sc.days[c.date];
+            if (!subs) return "<td></td>";
+            if (subs.length) return `<td class="mx">★${escHtml(subs.join("·"))}</td>`;
+            return `<td class="ex">●</td>`;
+        }).join("")}</tr>`).join("");
+        stripHtml = `<div class="strip"><table class="st"><colgroup><col style="width:19mm">${strip.cols.map(() => "<col>").join("")}</colgroup>
+<tr><th class="sn"></th>${head}</tr>${body}</table><div class="lg">● 시험일 &nbsp;&nbsp; <span class="lgm">★과목</span> 수학 시험일</div></div>`;
+    }
     for (let w = 0; w < weeks; w++) {
         const tds = [];
         for (let i = 0; i < 7; i++) {
             const idx = w * 7 + i, cell = grid[idx];
             const other = cell.m !== ym.m;
-            const items = (byDate[cell.date] || []).map((it) => `<div class="ev">${escHtml(it.title)}</div>`).join("");
+            const items = (byDate[cell.date] || []).filter((it) => !parseExamItem(it.title)).map((it) => `<div class="ev">${escHtml(it.title)}</div>`).join("");
             tds.push(`<td class="${i === 0 ? "sun" : ""}"><div class="d${other ? " other" : ""}">${dayLabel(cell, ym, idx)}</div>${items}</td>`);
         }
         rows.push(`<tr class="w">${tds.join("")}</tr>`);
@@ -226,11 +271,21 @@ th:last-child, td:last-child { border-right: 0; }
 tr:last-child td { border-bottom: 0; }
 .d { display: inline-block; font-size: 9pt; font-weight: 700; line-height: 1.15; border-bottom: .25mm solid #000; }
 .d.other { color: #777; border-bottom-color: #777; }
+.strip { margin-top: 1mm; }
+.st { border: .35mm solid #000; }
+.st th, .st td { height: 4.4mm; border: .25mm solid #000; font-size: 7pt; text-align: center; padding: 0 .4mm; white-space: nowrap; overflow: hidden; line-height: 1; }
+.st th { font-weight: 700; }
+.st th .dw { font-weight: 400; color: #444; margin-left: .5mm; font-size: 6pt; }
+.st .sn { text-align: left; padding-left: 1.2mm; font-weight: 700; }
+.st .ex { font-size: 7pt; }
+.st .mx { background: #000; color: #fff; font-weight: 900; }
+.lg { font-size: 7pt; text-align: right; height: 3.6mm; line-height: 3.6mm; }
+.lgm { background: #000; color: #fff; font-weight: 900; padding: 0 .8mm; }
 .ev { font-size: 8.5pt; font-weight: 700; line-height: 1.25; margin-top: .6mm; word-break: keep-all;
       text-decoration: underline; text-underline-offset: .6mm; text-decoration-thickness: .25mm; }
 </style></head><body><div class="page">
 <header><h1>${ym.y}년 ${ym.m}월 일정표</h1><div class="brand"><img src="${PLANNER_LOGO}" alt="올곧수학 더센텀"><span>${PLANNER_PHONE}</span></div></header>
-<div class="frame"><table>
+${stripHtml}<div class="frame"><table>
 <tr><th class="sun">일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th>토</th></tr>
 ${rows.join("\n")}
 </table></div></div></body></html>`;
