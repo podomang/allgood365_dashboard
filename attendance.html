@@ -1468,6 +1468,13 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         )
     );
     const toggleGroupCollapsed = (key) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+    // "체크 끝난 학생 숨기기"(2026-11-22) - 켜면 출결 상태가 이미 있는 학생은 접어두고 미체크 학생만 보여준다.
+    const [hideChecked, setHideCheckedState] = useState(() => { try { return localStorage.getItem("attn_hide_checked_v1") === "1"; } catch (e) { return false; } });
+    const setHideChecked = (v) => { setHideCheckedState(v); try { localStorage.setItem("attn_hide_checked_v1", v ? "1" : "0"); } catch (e) { } };
+    const hideCheckedToggle = (hiddenCount) => React.createElement("label", { className: "flex items-center gap-1.5", style: { fontSize: 12, color: SUBINK, fontWeight: 600, cursor: "pointer" } },
+        React.createElement("input", { type: "checkbox", checked: hideChecked, onChange: (e) => setHideChecked(e.target.checked) }),
+        "체크 끝난 학생 숨기기", hideChecked && hiddenCount > 0 ? ` (${hiddenCount}명 숨김)` : "");
+    const allCheckedLine = (n) => React.createElement("div", { className: "px-4 sm:px-5 py-2.5", style: { fontSize: 12, color: SUBINK } }, "✓ ", n, "명 모두 체크했어요");
     const weekday = korWeekdayOf(selectedDate);
     const load = async () => {
         setLoading(true);
@@ -2243,7 +2250,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                 "button",
                 { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
                 GROUP_MODE_LABELS[m]
-            ))
+            )),
+            React.createElement("span", { style: { width: 1, height: 18, background: LINE, margin: "0 4px" } }),
+            hideCheckedToggle(roster.filter((s) => current[s.id]?.status).length)
         ),
         showExpandButtons && React.createElement(
             "div",
@@ -2419,7 +2428,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
-            roster.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === roster.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+            (() => { const vis = hideChecked ? roster.filter((s) => !current[s.id]?.status) : roster; return vis.length === 0 ? [allCheckedLine(roster.length)] : vis; })().map((s, idx, arr) => s && s.id ? React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === arr.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }) : React.createElement(React.Fragment, { key: "all-checked" }, s))
         );
     } else {
         listBody = React.createElement(
@@ -2427,6 +2436,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             { className: "flex flex-col gap-4" },
             groups.map((g) => {
                 const collapsed = !!collapsedGroups[g.className];
+                const visList = hideChecked ? g.list.filter((s) => !current[s.id]?.status) : g.list;
                 return React.createElement(
                     "div",
                     { key: g.className, className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -2437,11 +2447,12 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                         React.createElement(
                             "span",
                             { className: "flex items-center gap-2" },
-                            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, g.list.length, "\uBA85"),
+                            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 700 } }, hideChecked ? `미체크 ${visList.length} / ` : "", g.list.length, "\uBA85"),
                             React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, collapsed ? "\u25BC \uD3BC\uCE58\uAE30" : "\u25B2 \uC811\uAE30")
                         )
                     ),
-                    !collapsed && g.list.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === g.list.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+                    !collapsed && hideChecked && visList.length === 0 && allCheckedLine(g.list.length),
+                    !collapsed && visList.map((s, idx) => React.createElement(AttendanceRow, { key: s.id, s: s, isLast: idx === visList.length - 1, session: session, current: current, extraMeta: extraMeta, noteMeta: noteMetaForStudent(s.id), saveNote: saveNoteForStudent, saveComment: saveAssistantComment, toggleNoteDone: toggleNoteDone, setStatus: setStatus, saveReason: saveReason, saveCheckedAt: saveCheckedAt, saveScheduleChange: saveScheduleChange, saveExtraTime: saveExtraTime, removeFromExtra: removeFromExtra, isDirector: isDirector, newbieInfo: newbieInfoFor(s.id, session), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
                 );
             })
         );
@@ -2459,20 +2470,45 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         const emptyLabel = isExamPrep ? "내신대비보강이" : "특강이";
         // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
         // 강좌 묶음은 그대로 두고, 그 안에서 학교별/학년별/시간별로 다시 나눈다(2026-11-22).
+        const allCourseRows = sectionGroups.reduce((acc, g) => acc.concat(g.list), []);
+        const subKey = (g, sg) => `${g.className}::${sg.className}`;
+        const courseExpandAll = () => setCollapsedGroups({});
+        const courseCollapseAll = () => setCollapsedGroups(groupMode === "none"
+            ? Object.fromEntries(sectionGroups.map((g) => [g.className, true]))
+            : Object.fromEntries(sectionGroups.reduce((acc, g) => acc.concat(groupListBy(g.list, groupMode, "courseTime").map((sg) => [subKey(g, sg), true])), [])));
         const courseGroupToggle = !examSwitch && React.createElement(
             "div",
-            { className: "mb-3" },
-            React.createElement(SubGroupToggle, { value: groupMode, onChange: setGroupMode, accent: accentColor })
+            { className: "flex items-center justify-between gap-2 mb-3 flex-wrap" },
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement(SubGroupToggle, { value: groupMode, onChange: setGroupMode, accent: accentColor }),
+                React.createElement("span", { style: { width: 1, height: 18, background: LINE, margin: "0 4px" } }),
+                hideCheckedToggle(allCourseRows.filter((c) => courseAttendance[c.courseId]?.status).length)),
+            React.createElement("div", { className: "flex items-center gap-1" },
+                React.createElement("button", { onClick: courseExpandAll, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "전체 펼치기"),
+                React.createElement("button", { onClick: courseCollapseAll, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "전체 접기"))
         );
         const examTabBar = isExamPrep && isDirector && !examSwitch && React.createElement("div", { className: "flex items-center gap-2 mb-3 flex-wrap" },
             examSwitchButton("+ 명단 추가", "examprep"),
             examPrepActiveCourseList.length > 0 && examManageToggle(examPrepActiveCourseList.length));
         const renderCourseRows = (list) => list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveCheckedAt: saveCourseCheckedAt, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, newbieInfo: newbieInfoFor(c.studentId, "course"), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }));
-        const renderCourseBody = (list) => groupMode === "none"
-            ? renderCourseRows(list)
-            : groupListBy(list, groupMode, "courseTime").map((sg) => React.createElement(React.Fragment, { key: sg.className },
-                React.createElement("div", { className: "px-4 sm:px-5 py-1.5", style: { background: PAPER, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}`, fontSize: 12, fontWeight: 800, color: SUBINK } }, sg.className, " · ", sg.list.length, "명"),
-                renderCourseRows(sg.list)));
+        const visibleCourses = (list) => hideChecked ? list.filter((c) => !courseAttendance[c.courseId]?.status) : list;
+        const renderVisible = (list) => {
+            const vis = visibleCourses(list);
+            return hideChecked && vis.length === 0 ? allCheckedLine(list.length) : renderCourseRows(vis);
+        };
+        // 안쪽 묶음(학교/학년/시간) 제목을 누르면 그 묶음만 접힌다(2026-11-22).
+        const renderCourseBody = (g) => groupMode === "none"
+            ? renderVisible(g.list)
+            : groupListBy(g.list, groupMode, "courseTime").map((sg) => {
+                const k = subKey(g, sg);
+                const subCollapsed = !!collapsedGroups[k];
+                const vis = visibleCourses(sg.list);
+                return React.createElement(React.Fragment, { key: sg.className },
+                    React.createElement("button", { type: "button", onClick: () => toggleGroupCollapsed(k), className: "w-full px-4 sm:px-5 py-1.5 flex items-center justify-between", style: { background: PAPER, borderTop: `1px solid ${LINE}`, borderBottom: subCollapsed ? "none" : `1px solid ${LINE}`, fontSize: 12, fontWeight: 800, color: SUBINK } },
+                        React.createElement("span", null, sg.className, " · ", hideChecked ? `미체크 ${vis.length} / ` : "", sg.list.length, "명"),
+                        React.createElement("span", { style: { fontSize: 11, fontWeight: 600 } }, subCollapsed ? "▼ 펼치기" : "▲ 접기")),
+                    !subCollapsed && renderVisible(sg.list));
+            });
         const courseListBody = sectionGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 ", emptyLabel, " 없습니다.")
             : React.createElement(
@@ -2515,7 +2551,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             )
                         ),
                         gStatCards,
-                        !collapsed && renderCourseBody(g.list)
+                        !collapsed && renderCourseBody(g)
                     );
                 })
             );
@@ -3062,6 +3098,8 @@ function reportCellMark(c) {
 }
 // 학생(행) x 날짜(열) 격자표 하나 - 정규수업/클리닉/보강/특강(강좌별)에서 공통으로 재사용.
 function ReportGridTable({ title, days, rows, accentColor, groupMode }) {
+    // 그룹 제목 줄을 누르면 그 묶음을 접는다(2026-11-22). 접힌 묶음은 인쇄에서도 빠진다.
+    const [collapsedRG, setCollapsedRG] = useState({});
     if (!rows || rows.length === 0) {
         return React.createElement("div", { className: "rounded-2xl p-8 text-center mb-4", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } }, "이 달에 표시할 기록이 없습니다.");
     }
@@ -3116,8 +3154,9 @@ function ReportGridTable({ title, days, rows, accentColor, groupMode }) {
                     const grouped = groupListBy(rows.map((r) => ({ ...r.student, __row: r, rowTime: r.time || "" })), groupMode, "rowTime");
                     const out = [];
                     grouped.forEach((g) => {
-                        out.push(React.createElement("tr", { key: "g:" + g.className }, React.createElement("td", { colSpan: days.length + 6, style: { padding: "5px 8px", background: PAPER, fontSize: 11.5, fontWeight: 800, color: accent, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}`, textAlign: "left" } }, g.className, " · ", g.list.length, "명")));
-                        g.list.forEach((x) => out.push(renderRow(x.__row)));
+                        const isCol = !!collapsedRG[g.className];
+                        out.push(React.createElement("tr", { key: "g:" + g.className, onClick: () => setCollapsedRG((p) => ({ ...p, [g.className]: !p[g.className] })), style: { cursor: "pointer" } }, React.createElement("td", { colSpan: days.length + 6, style: { padding: "5px 8px", background: PAPER, fontSize: 11.5, fontWeight: 800, color: accent, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}`, textAlign: "left" } }, isCol ? "▶ " : "▼ ", g.className, " · ", g.list.length, "명", isCol ? React.createElement("span", { style: { fontWeight: 500, color: SUBINK, marginLeft: 6 } }, "(접힘)") : null)));
+                        if (!isCol) g.list.forEach((x) => out.push(renderRow(x.__row)));
                     });
                     return out;
                     })()
