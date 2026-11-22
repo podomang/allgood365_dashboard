@@ -131,7 +131,7 @@ function LoginScreen() {
 //  - attn_planner_items : 일정표 칸에 적는 날짜별 문구(원장이 직접 고른 것만). 내부 학사일정
 //    (attn_academic_events)은 학교 행사까지 전부 들어 있어서 그대로 찍으면 너무 많으므로 별도 테이블로 둔다.
 //    필요한 학사일정은 "학사일정 불러오기"로 골라서 복사해 넣는다.
-//  - 달력은 항상 6주(일요일 시작)로 그리고, 앞뒤 달 날짜 칸도 같은 테이블의 날짜를 그대로 보여준다.
+//  - 달력은 일요일 시작으로 말일이 들어 있는 주까지만(4~6주) 그리고(2026-11-22 변경, 예전엔 항상 6주), 앞뒤 달 날짜 칸도 같은 테이블의 날짜를 그대로 보여준다.
 //    → 11월 일정표 아랫줄에 12월 첫 주 일정이 자동으로 함께 찍힌다(12월 일정표에도 똑같이 나옴).
 //  - 인쇄: 숨긴 iframe에 B5 가로(257×182mm) 전용 페이지를 만들어 브라우저 인쇄 창을 띄운다.
 //    인쇄 창에서 "PDF로 저장"을 고르면 PDF 파일로도 받을 수 있다.
@@ -154,12 +154,14 @@ function shiftMonth(ym, delta) {
     const d = new Date(ym.y, ym.m - 1 + delta, 1);
     return { y: d.getFullYear(), m: d.getMonth() + 1 };
 }
-// 6주(42칸) 날짜 배열 - 해당 월 1일이 속한 주의 일요일부터
+// 날짜 배열 - 해당 월 1일이 속한 주의 일요일부터 말일이 속한 주의 토요일까지(4~6주, 7의 배수)
 function plannerGrid(ym) {
     const first = new Date(ym.y, ym.m - 1, 1);
     const start = new Date(ym.y, ym.m - 1, 1 - first.getDay());
+    const lastDate = new Date(ym.y, ym.m, 0).getDate();
+    const total = Math.ceil((first.getDay() + lastDate) / 7) * 7;
     const days = [];
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < total; i++) {
         const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
         days.push({ date: fmt(d), y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), dow: d.getDay() });
     }
@@ -184,7 +186,10 @@ async function fetchPlannerItems(from, to) {
 // ---------------- 인쇄용 B5 가로 페이지 ----------------
 function buildPrintHtml(ym, grid, byDate) {
     const rows = [];
-    for (let w = 0; w < 6; w++) {
+    const weeks = grid.length / 7;
+    // 6주 기준 24.6mm × 6 = 147.6mm를 실제 주 수로 나눠 B5 한 장을 꽉 채운다
+    const rowH = (147.6 / weeks).toFixed(2);
+    for (let w = 0; w < weeks; w++) {
         const tds = [];
         for (let i = 0; i < 7; i++) {
             const idx = w * 7 + i, cell = grid[idx];
@@ -211,7 +216,7 @@ h1 { font-size: 17pt; font-weight: 900; letter-spacing: .5pt; }
 .frame { border: 1.4mm double #000; margin-top: 1mm; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th { height: 4mm; font-size: 7pt; font-weight: 400; text-align: right; padding: 0 1.2mm; border: .3mm solid #000; color: #333; }
-tr.w { height: 24.6mm; }
+tr.w { height: ${rowH}mm; }
 table, tr { page-break-inside: avoid; break-inside: avoid; }
 td { border: .25mm solid #000; vertical-align: top; text-align: right; padding: .8mm 1.2mm; overflow: hidden; }
 .sun { background: #f1f1f1; border-right-width: .5mm; }
@@ -332,7 +337,7 @@ function ImportDialog({ ym, grid, existing, onClose, onChanged }) {
     const [rows, setRows] = useState(null);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState("");
-    const from = grid[0].date, to = grid[41].date;
+    const from = grid[0].date, to = grid[grid.length - 1].date;
     useEffect(() => {
         (async () => {
             const { data, error } = await supabaseClient.from("attn_academic_events")
@@ -425,7 +430,7 @@ function PlannerView() {
     const [editDate, setEditDate] = useState(null);
     const [importing, setImporting] = useState(false);
     const grid = React.useMemo(() => plannerGrid(ym), [ym.y, ym.m]);
-    const from = grid[0].date, to = grid[41].date;
+    const from = grid[0].date, to = grid[grid.length - 1].date;
 
     const load = React.useCallback(async () => {
         try { setItems(await fetchPlannerItems(from, to)); setErr(""); }
@@ -484,7 +489,7 @@ function PlannerView() {
                     return h("button", {
                         key: cell.date, onClick: () => setEditDate(cell.date),
                         className: "text-right align-top p-1.5 sm:p-2 transition-colors hover:bg-gray-50",
-                        style: { minHeight: 92, background: cell.dow === 0 ? "#f6f6f6" : "#fff", borderRight: idx % 7 === 6 ? "none" : `1px solid ${LINE}`, borderBottom: idx >= 35 ? "none" : `1px solid ${LINE}`, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, outline: "none" },
+                        style: { minHeight: 92, background: cell.dow === 0 ? "#f6f6f6" : "#fff", borderRight: idx % 7 === 6 ? "none" : `1px solid ${LINE}`, borderBottom: idx >= grid.length - 7 ? "none" : `1px solid ${LINE}`, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, outline: "none" },
                     },
                         h("span", { style: { fontSize: 12.5, fontWeight: 800, color: other ? "#9ca3af" : INK, borderBottom: `1.5px solid ${other ? "#9ca3af" : INK}`, lineHeight: 1.2, ...(isToday ? { background: NAVY, color: "#fff", borderBottomColor: NAVY, borderRadius: 4, padding: "0 4px" } : {}) } }, dayLabel(cell, ym, idx)),
                         list.map((it) => h("span", { key: it.id, style: { fontSize: 11.5, fontWeight: 700, color: INK, textDecoration: "underline", textUnderlineOffset: 2, lineHeight: 1.3, wordBreak: "keep-all" } }, it.title))
