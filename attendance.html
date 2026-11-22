@@ -1004,13 +1004,368 @@ function LoginScreen() {
 function emptyDiagForm() {
     return { name: "", phone: "", school: "", grade: "", time: "", note: "", sourceNote: "" };
 }
-function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses, goToWorkLog, myAssistant, goToClockIn, clockInAlertShown, markClockInAlertShown }) {
+// ---------- 내신대비 전환 (2026-11-22, 개발_22) ----------
+// 클리닉 출석화면/내신대비 탭에서 바로 학생을 골라 내신대비보강(attn_student_courses, category='examprep')으로
+// 전환한다. 저장 구조는 예전처럼 학생관리에서 하나씩 등록하던 것과 완전히 같아서, 클리닉 자동 제외·내신대비 탭·
+// 월별출석부가 그대로 따라온다(DB 변경 없음). 원장 전용.
+const EXAMPREP_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"];
+function defaultExamPrepCourseName(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const semester = m >= 3 && m <= 7 ? "1학기" : "2학기";
+    const kind = (m >= 3 && m <= 5) || (m >= 8 && m <= 10) ? "중간고사" : "기말고사";
+    // 1~2월은 전년도 2학기 기말 대비로 본다.
+    const year = m <= 2 ? y - 1 : y;
+    return `${year} ${semester} ${kind} 내신대비보강`;
+}
+function examPrepGroupLabel(s) {
+    return `${s.school || "학교 미지정"} ${s.grade ? s.grade + "학년" : ""}`.trim();
+}
+// "기말시험(2학년)", "기말고사(1·2학년)"처럼 제목에 학년이 있으면 그 학년만, 없으면 전 학년 대상으로 본다.
+function examTitleGrades(title) {
+    const m = (title || "").match(/\(([^)]*학년[^)]*)\)/);
+    if (!m) return null;
+    const nums = (m[1].match(/\d/g) || []).map((n) => n);
+    return nums.length ? nums : null;
+}
+function suggestExamEnd(examEvents, s, startDate) {
+    const grade = s.grade ? String(s.grade).trim() : "";
+    const cands = (examEvents || []).filter((e) => {
+        if (e.school !== s.school) return false;
+        if ((e.endDate || e.eventDate) < startDate) return false;
+        const gs = examTitleGrades(e.title);
+        return !gs || !grade || gs.includes(grade);
+    }).sort((a, b) => (a.eventDate < b.eventDate ? -1 : a.eventDate > b.eventDate ? 1 : 0));
+    return cands[0] || null;
+}
+async function fetchExamEvents() {
+    const { data, error } = await supabaseClient.from("attn_academic_events").select("id, title, event_date, end_date, school").eq("event_type", "시험");
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, title: r.title, eventDate: r.event_date, endDate: r.end_date || r.event_date, school: r.school || "" }));
+}
+async function createExamPrepCourses(rows) {
+    const { data, error } = await supabaseClient.from("attn_student_courses").insert(rows).select("*");
+    if (error) throw error;
+    return data.map(mapStudentCourse);
+}
+async function updateExamPrepCourse(id, patch) {
+    const { error } = await supabaseClient.from("attn_student_courses").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+}
+// 전환 취소: 아직 시작 전이면 강좌를 지우고, 이미 진행된 기간이 있으면 기록 보존을 위해 "어제"로 종료 처리한다.
+async function cancelExamPrepCourse(course, onDate) {
+    const yesterday = addDays(onDate, -1);
+    if (!course.startDate || course.startDate > yesterday) {
+        await supabaseClient.from("attn_course_attendance").delete().eq("course_id", course.id);
+        await supabaseClient.from("attn_course_notes").delete().eq("course_id", course.id);
+        const { error } = await supabaseClient.from("attn_student_courses").delete().eq("id", course.id);
+        if (error) throw error;
+        return "deleted";
+    }
+    await updateExamPrepCourse(course.id, { end_date: yesterday });
+    return "ended";
+}
+// 전환 기간 안에서 보강 탭에 "직접 추가"된 기록(일정변경으로 넘어온 진짜 보강은 제외)을 찾는다.
+async function fetchExtraRowsForExamPrep(studentIds, startDate, endDate) {
+    if (!studentIds.length || !startDate || endDate < startDate) return [];
+    const { data, error } = await supabaseClient.from("attn_extra_roster")
+        .select("attn_date, student_id, scheduled_time, plan_note, plan_done, plan_done_by, plan_done_at, assistant_comment, origin_session")
+        .in("student_id", studentIds).gte("attn_date", startDate).lte("attn_date", endDate);
+    if (error) throw error;
+    return data.filter((r) => !r.origin_session);
+}
+// 보강 탭 기록 -> 내신대비 출결로 이동(출결 상태·사유·시각·수업계획 메모까지). 옮긴 건수를 돌려준다.
+async function migrateExtraToExamPrep(courses) {
+    const today = todayStr();
+    let moved = 0;
+    for (const c of courses) {
+        const end = c.endDate && c.endDate < today ? c.endDate : today;
+        const rows = (await fetchExtraRowsForExamPrep([c.studentId], c.startDate, end)).filter((r) => (c.days || []).includes(korWeekdayOf(r.attn_date)));
+        for (const r of rows) {
+            const { data: att, error: attErr } = await supabaseClient.from("attn_attendance").select("status, reason, checked_at, target_date, target_time")
+                .eq("attn_date", r.attn_date).eq("session", "extra").eq("student_id", c.studentId).maybeSingle();
+            if (attErr) throw attErr;
+            if (att && att.status) {
+                const { error } = await supabaseClient.from("attn_course_attendance").upsert({
+                    attn_date: r.attn_date, course_id: c.id, student_id: c.studentId, status: att.status, reason: att.reason || null,
+                    checked_at: att.checked_at, target_date: att.target_date, target_time: att.target_time, updated_at: new Date().toISOString(),
+                }, { onConflict: "attn_date,course_id" });
+                if (error) throw error;
+            }
+            if (r.plan_note || r.assistant_comment) {
+                const { error } = await supabaseClient.from("attn_course_notes").upsert({
+                    attn_date: r.attn_date, course_id: c.id, student_id: c.studentId, plan_note: r.plan_note, plan_done: !!r.plan_done,
+                    plan_done_by: r.plan_done_by, plan_done_at: r.plan_done_at, assistant_comment: r.assistant_comment, updated_at: new Date().toISOString(),
+                }, { onConflict: "attn_date,course_id" });
+                if (error) throw error;
+            }
+            await supabaseClient.from("attn_attendance").delete().eq("attn_date", r.attn_date).eq("session", "extra").eq("student_id", c.studentId);
+            const { error: delErr } = await supabaseClient.from("attn_extra_roster").delete().eq("attn_date", r.attn_date).eq("student_id", c.studentId);
+            if (delErr) throw delErr;
+            moved++;
+        }
+    }
+    return moved;
+}
+// 학교+학년 단위로 묶기(전환 대상 고르기 화면 전용) - 초->중->고, 학교명, 학년 순.
+function groupBySchoolGrade(list) {
+    const buckets = {};
+    list.forEach((s) => {
+        const key = examPrepGroupLabel(s);
+        if (!buckets[key]) buckets[key] = { level: schoolLevelOf(s), school: s.school || "", grade: parseInt(s.grade, 10) || 0, list: [] };
+        buckets[key].list.push(s);
+    });
+    const levelOrder = { "초": 0, "중": 1, "고": 2, "": 3 };
+    return Object.keys(buckets).sort((a, b) => {
+        const A = buckets[a], B = buckets[b];
+        return ((levelOrder[A.level] ?? 3) - (levelOrder[B.level] ?? 3)) || A.school.localeCompare(B.school, "ko") || (A.grade - B.grade);
+    }).map((k) => ({ className: k, list: buckets[k].list.slice().sort((x, y) => x.name.localeCompare(y.name, "ko")) }));
+}
+function splitTimeRange(t) {
+    const parts = (t || "").split("~");
+    return [(parts[0] || "").trim(), (parts[1] || "").trim()];
+}
+function joinTimeRange(a, b) {
+    if (!a && !b) return "";
+    return `${a || ""}~${b || ""}`;
+}
+function DayChips({ value, onChange, accent }) {
+    return React.createElement(
+        "div", { className: "flex flex-wrap gap-1.5" },
+        EXAMPREP_WEEKDAYS.map((d) => {
+            const on = value.includes(d);
+            return React.createElement("button", {
+                key: d, type: "button",
+                onClick: () => onChange(on ? value.filter((x) => x !== d) : EXAMPREP_WEEKDAYS.filter((x) => x === d || value.includes(x))),
+                className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+                style: { background: on ? accent : "#fff", color: on ? "#fff" : (d === "일" ? RED : d === "토" ? SKY : SUBINK), border: `1px solid ${on ? accent : LINE}` },
+            }, d);
+        })
+    );
+}
+// 1단계: 전환할 학생 고르기(학교·학년 그룹마다 "전체 선택").
+function ExamPrepPicker({ title, candidates, searchable, onNext, onCancel }) {
+    const [selected, setSelected] = useState(() => new Set());
+    const [query, setQuery] = useState("");
+    const [openGroups, setOpenGroups] = useState({});
+    const q = query.trim();
+    const visible = q ? candidates.filter((s) => s.name.includes(q) || (s.school || "").includes(q)) : candidates;
+    const groups = groupBySchoolGrade(visible);
+    const toggle = (id) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    const toggleGroup = (list, allOn) => setSelected((prev) => { const n = new Set(prev); list.forEach((s) => { if (allOn) n.delete(s.id); else n.add(s.id); }); return n; });
+    return React.createElement(
+        "div", { className: "rounded-2xl overflow-hidden mb-4", style: { background: "#fff", border: `1px solid ${ROSE}` } },
+        React.createElement("div", { className: "px-4 py-3 flex items-center justify-between flex-wrap gap-2", style: { background: ROSE_SOFT, borderBottom: `1px solid ${LINE}` } },
+            React.createElement("span", { style: { fontSize: 13.5, fontWeight: 800, color: ROSE } }, title),
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: ROSE } }, selected.size, "명 선택")
+        ),
+        searchable && React.createElement("div", { className: "px-4 pt-3" },
+            React.createElement("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "이름이나 학교로 찾기", className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}` } })
+        ),
+        groups.length === 0 && React.createElement("div", { className: "px-4 py-6 text-center", style: { fontSize: 13, color: SUBINK } }, "전환할 수 있는 학생이 없어요."),
+        React.createElement("div", { className: "flex flex-col" },
+            groups.map((g) => {
+                const onCount = g.list.filter((s) => selected.has(s.id)).length;
+                const allOn = onCount === g.list.length;
+                const open = q ? true : !!openGroups[g.className] || onCount > 0;
+                return React.createElement("div", { key: g.className, style: { borderTop: `1px solid ${LINE}` } },
+                    React.createElement("div", { className: "px-4 py-2.5 flex items-center justify-between gap-2", style: { background: PAPER } },
+                        React.createElement("label", { className: "flex items-center gap-2", style: { cursor: "pointer", fontSize: 13, fontWeight: 800 } },
+                            React.createElement("input", { type: "checkbox", checked: allOn, ref: (el) => { if (el) el.indeterminate = onCount > 0 && !allOn; }, onChange: () => toggleGroup(g.list, allOn) }),
+                            g.className, React.createElement("span", { style: { fontSize: 11.5, color: SUBINK, fontWeight: 600 } }, " · ", g.list.length, "명")
+                        ),
+                        React.createElement("button", { type: "button", onClick: () => setOpenGroups((p) => ({ ...p, [g.className]: !open })), style: { fontSize: 11, color: SUBINK } }, open ? "▲ 접기" : "▼ 학생 보기")
+                    ),
+                    open && g.list.map((s) => React.createElement("label", { key: s.id, className: "px-4 py-2 flex items-center gap-2", style: { borderTop: `1px solid ${LINE}`, cursor: "pointer", fontSize: 13, paddingLeft: 36 } },
+                        React.createElement("input", { type: "checkbox", checked: selected.has(s.id), onChange: () => toggle(s.id) }),
+                        React.createElement("span", { style: { fontWeight: 700 } }, s.name),
+                        s.clinicTime && React.createElement("span", { style: { fontSize: 11, color: SUBINK } }, "클리닉 ", (s.clinicDays && s.clinicDays.length ? s.clinicDays.join("") : ""), " ", s.clinicTime)
+                    ))
+                );
+            })
+        ),
+        React.createElement("div", { className: "px-4 py-3 flex justify-end gap-2", style: { borderTop: `1px solid ${LINE}` } },
+            React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "취소"),
+            React.createElement("button", { type: "button", disabled: selected.size === 0, onClick: () => onNext(candidates.filter((s) => selected.has(s.id))), className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: ROSE, color: "#fff", opacity: selected.size === 0 ? 0.5 : 1 } }, selected.size === 0 ? "학생을 골라 주세요" : `${selected.size}명 다음 단계로`)
+        )
+    );
+}
+// 2단계: 강좌명·요일·시간·기간 정하기. 종료일은 학교·학년별로 학사일정 시험 마지막 날을 자동으로 넣는다.
+function ExamPrepSwitchPanel({ students, defaultStart, examEvents, onSave, onBack }) {
+    const [courseName, setCourseName] = useState(() => defaultExamPrepCourseName(defaultStart));
+    const startWd = korWeekdayOf(defaultStart);
+    const [days, setDays] = useState(() => (startWd === "토" || startWd === "일") ? [startWd] : []);
+    const [timeFrom, setTimeFrom] = useState("");
+    const [timeTo, setTimeTo] = useState("");
+    const [startDate, setStartDate] = useState(defaultStart);
+    const groups = useMemo(() => groupBySchoolGrade(students), [students]);
+    const [ends, setEnds] = useState({});
+    const suggestions = useMemo(() => {
+        const m = {};
+        groups.forEach((g) => { m[g.className] = suggestExamEnd(examEvents, g.list[0], startDate); });
+        return m;
+    }, [groups, examEvents, startDate]);
+    const endFor = (label) => ends[label] !== undefined ? ends[label] : (suggestions[label] ? suggestions[label].endDate : "");
+    const [migrate, setMigrate] = useState(true);
+    const [migrateCount, setMigrateCount] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const [err, setErr] = useState("");
+    useEffect(() => {
+        let alive = true;
+        const today = todayStr();
+        if (!startDate || startDate > today || days.length === 0) { setMigrateCount(0); return; }
+        fetchExtraRowsForExamPrep(students.map((s) => s.id), startDate, today)
+            .then((rows) => { if (alive) setMigrateCount(rows.filter((r) => days.includes(korWeekdayOf(r.attn_date))).length); })
+            .catch(() => { if (alive) setMigrateCount(null); });
+        return () => { alive = false; };
+    }, [students, startDate, days.join(",")]);
+    const save = async () => {
+        if (!courseName.trim()) { setErr("강좌명을 입력해 주세요."); return; }
+        if (days.length === 0) { setErr("요일을 하나 이상 골라 주세요."); return; }
+        if (!startDate) { setErr("시작일을 입력해 주세요."); return; }
+        for (const g of groups) {
+            const e = endFor(g.className);
+            if (!e) { setErr(`${g.className} 종료일을 입력해 주세요.`); return; }
+            if (e < startDate) { setErr(`${g.className} 종료일이 시작일보다 빨라요.`); return; }
+        }
+        setErr("");
+        setSaving(true);
+        try {
+            const endByStudent = {};
+            groups.forEach((g) => g.list.forEach((s) => { endByStudent[s.id] = endFor(g.className); }));
+            await onSave({ courseName: courseName.trim(), days, courseTime: joinTimeRange(timeFrom, timeTo), startDate, endByStudent, migrate });
+        } catch (e) {
+            console.error(e);
+            setErr("저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.");
+        } finally {
+            setSaving(false);
+        }
+    };
+    const label = (t) => React.createElement("div", { style: { fontSize: 11.5, fontWeight: 700, color: SUBINK, marginBottom: 4 } }, t);
+    const inputStyle = { border: `1px solid ${LINE}` };
+    return React.createElement(
+        "div", { className: "rounded-2xl p-4 sm:p-5 mb-4", style: { background: "#fff", border: `1px solid ${ROSE}` } },
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: ROSE, marginBottom: 2 } }, "📘 내신대비보강으로 전환 · ", students.length, "명"),
+        React.createElement("div", { style: { fontSize: 12, color: SUBINK, marginBottom: 14 } }, students.map((s) => s.name).join(", ")),
+        React.createElement("div", { className: "mb-3" }, label("강좌명"),
+            React.createElement("input", { value: courseName, onChange: (e) => setCourseName(e.target.value), className: "w-full px-3 py-2 rounded-lg text-sm outline-none", style: inputStyle })),
+        React.createElement("div", { className: "mb-3" }, label("요일"), React.createElement(DayChips, { value: days, onChange: setDays, accent: ROSE })),
+        React.createElement("div", { className: "mb-3" }, label("시간 (고른 학생 모두 같은 시간으로 등록, 예외는 나중에 개별 수정)"),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("input", { type: "time", value: timeFrom, onChange: (e) => setTimeFrom(e.target.value), className: "px-3 py-2 rounded-lg text-sm outline-none", style: inputStyle }),
+                React.createElement("span", { style: { color: SUBINK } }, "~"),
+                React.createElement("input", { type: "time", value: timeTo, onChange: (e) => setTimeTo(e.target.value), className: "px-3 py-2 rounded-lg text-sm outline-none", style: inputStyle }))),
+        React.createElement("div", { className: "mb-3" }, label("시작일"),
+            React.createElement("input", { type: "date", value: startDate, onChange: (e) => setStartDate(e.target.value), className: "px-3 py-2 rounded-lg text-sm outline-none", style: inputStyle })),
+        React.createElement("div", { className: "mb-3" }, label("종료일 (학교·학년별 시험 마지막 날)"),
+            React.createElement("div", { className: "flex flex-col gap-2" },
+                groups.map((g) => {
+                    const sug = suggestions[g.className];
+                    return React.createElement("div", { key: g.className, className: "flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg", style: { background: PAPER } },
+                        React.createElement("span", { style: { fontSize: 13, fontWeight: 800, minWidth: 110 } }, g.className, React.createElement("span", { style: { fontSize: 11, color: SUBINK, fontWeight: 600 } }, " ", g.list.length, "명")),
+                        React.createElement("input", { type: "date", value: endFor(g.className), onChange: (e) => setEnds((p) => ({ ...p, [g.className]: e.target.value })), className: "px-2 py-1.5 rounded-lg text-sm outline-none", style: { border: `1px solid ${LINE}`, background: "#fff" } }),
+                        React.createElement("span", { style: { fontSize: 11.5, color: sug ? ROSE : SUBINK } }, sug ? `학사일정 ${sug.title} ${mdKor(sug.eventDate)}~${mdKor(sug.endDate)}` : "학사일정에 시험이 없어요. 직접 입력해 주세요.")
+                    );
+                }))),
+        startDate <= todayStr() && React.createElement("label", { className: "flex items-start gap-2 mb-3 px-3 py-2 rounded-lg", style: { background: PAPER, cursor: "pointer", fontSize: 12.5 } },
+            React.createElement("input", { type: "checkbox", checked: migrate, onChange: (e) => setMigrate(e.target.checked), style: { marginTop: 2 } }),
+            React.createElement("span", null, "기간 안에 보강 탭에 직접 추가해 둔 기록을 내신대비 출결로 옮기기",
+                React.createElement("span", { style: { color: SUBINK } }, migrateCount === null ? "" : ` (고른 요일 기준 ${migrateCount}건)`),
+                React.createElement("div", { style: { fontSize: 11, color: SUBINK } }, "일정변경으로 넘어온 진짜 보강 기록은 그대로 둡니다."))),
+        err && React.createElement("div", { style: { fontSize: 13, color: RED, marginBottom: 8 } }, err),
+        React.createElement("div", { className: "flex justify-end gap-2" },
+            React.createElement("button", { type: "button", onClick: onBack, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "이전"),
+            React.createElement("button", { type: "button", onClick: save, disabled: saving, className: "px-4 py-2 rounded-lg text-sm font-bold", style: { background: ROSE, color: "#fff", opacity: saving ? 0.6 : 1 } }, saving ? "저장 중..." : `${students.length}명 전환하기`))
+    );
+}
+// 전환 중인 학생 관리(원장 전용): 학생별 요일·시간·종료일 수정, 전환 취소.
+function ExamPrepManageRow({ c, onDate, onChanged }) {
+    const [editing, setEditing] = useState(false);
+    const [days, setDays] = useState(c.days || []);
+    const [tf, setTf] = useState(splitTimeRange(c.courseTime)[0]);
+    const [tt, setTt] = useState(splitTimeRange(c.courseTime)[1]);
+    const [end, setEnd] = useState(c.endDate || "");
+    const [busy, setBusy] = useState(false);
+    const save = async () => {
+        if (days.length === 0 || !end) return;
+        setBusy(true);
+        try { await updateExamPrepCourse(c.id, { days, course_time: joinTimeRange(tf, tt) || null, end_date: end }); setEditing(false); if (onChanged) onChanged(); }
+        catch (e) { console.error(e); alert("저장하지 못했어요."); }
+        finally { setBusy(false); }
+    };
+    const cancel = async () => {
+        if (!confirm(`${c.name} 학생의 내신대비 전환을 취소할까요?\n이미 지난 기간 기록은 남겨두고, ${mdKor(onDate)}부터 다시 클리닉 명단에 나타납니다.`)) return;
+        setBusy(true);
+        try { await cancelExamPrepCourse(c, onDate); if (onChanged) onChanged(); }
+        catch (e) { console.error(e); alert("취소하지 못했어요."); }
+        finally { setBusy(false); }
+    };
+    return React.createElement("div", { className: "px-4 py-2.5", style: { borderTop: `1px solid ${LINE}` } },
+        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+            React.createElement("span", { style: { fontSize: 13, fontWeight: 800 } }, c.name),
+            React.createElement("span", { style: { fontSize: 11.5, color: SUBINK } }, (c.days || []).join(""), " ", c.courseTime || "시간 미정", " · ", c.startDate ? mdKor(c.startDate) : "", " ~ ", c.endDate ? mdKor(c.endDate) : "종료일 미정"),
+            React.createElement("span", { className: "ml-auto flex gap-1" },
+                React.createElement("button", { type: "button", onClick: () => setEditing((v) => !v), className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` } }, editing ? "닫기" : "수정"),
+                React.createElement("button", { type: "button", onClick: cancel, disabled: busy, className: "px-2.5 py-1 rounded-lg text-xs font-bold", style: { background: "#fff", color: SUBINK, border: `1px solid ${LINE}` } }, "전환 취소"))
+        ),
+        editing && React.createElement("div", { className: "mt-2 p-3 rounded-lg flex flex-col gap-2", style: { background: ROSE_SOFT } },
+            React.createElement(DayChips, { value: days, onChange: setDays, accent: ROSE }),
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("input", { type: "time", value: tf, onChange: (e) => setTf(e.target.value), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                "~",
+                React.createElement("input", { type: "time", value: tt, onChange: (e) => setTt(e.target.value), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("span", { style: { fontSize: 11.5, color: SUBINK, marginLeft: 6 } }, "종료일"),
+                React.createElement("input", { type: "date", value: end, onChange: (e) => setEnd(e.target.value), className: "px-2 py-1.5 rounded-lg text-xs outline-none", style: { border: `1px solid ${LINE}` } }),
+                React.createElement("button", { type: "button", onClick: save, disabled: busy || days.length === 0 || !end, className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: ROSE, color: "#fff", opacity: (busy || days.length === 0 || !end) ? 0.5 : 1 } }, "저장")))
+    );
+}
+function ExamPrepManageList({ courses, onDate, onChanged }) {
+    if (courses.length === 0)
+        return React.createElement("div", { className: "px-4 py-4", style: { fontSize: 12.5, color: SUBINK } }, "이 날짜에 내신대비 중인 학생이 없어요.");
+    const groups = groupBySchoolGrade(courses);
+    return React.createElement("div", null,
+        groups.map((g) => React.createElement("div", { key: g.className },
+            React.createElement("div", { className: "px-4 py-1.5", style: { background: PAPER, borderTop: `1px solid ${LINE}`, fontSize: 12, fontWeight: 800, color: SUBINK } }, g.className, " · ", g.list.length, "명"),
+            g.list.map((c) => React.createElement(ExamPrepManageRow, { key: c.id + (c.endDate || "") + (c.courseTime || "") + (c.days || []).join(""), c: c, onDate: onDate, onChanged: onChanged }))
+        ))
+    );
+}
+// 보기(그룹핑) 선택 - 탭마다 마지막 선택을 기억한다(localStorage, 실패해도 기본값으로 동작).
+const GROUP_MODES_STORAGE_KEY = "attn_group_modes_v1";
+function loadGroupModes(defaults, key) {
+    try { const v = JSON.parse(localStorage.getItem(key || GROUP_MODES_STORAGE_KEY) || "{}"); return { ...defaults, ...(v && typeof v === "object" ? v : {}) }; }
+    catch (e) { return defaults; }
+}
+function saveGroupModes(m, key) {
+    try { localStorage.setItem(key || GROUP_MODES_STORAGE_KEY, JSON.stringify(m)); } catch (e) { }
+}
+// 학교별/학년별/시간별/전체 공통 그룹핑. timeField는 시간별일 때 쓸 필드명.
+function groupListBy(list, mode, timeField) {
+    if (mode === "school") return groupBySchool(list);
+    if (mode === "grade") return groupByGrade(list);
+    if (mode === "time") return groupByTime(list, timeField);
+    return [{ className: "", list }];
+}
+const SUB_GROUP_LABELS = { none: "전체", school: "학교별", grade: "학년별", time: "시간별" };
+function SubGroupToggle({ value, onChange, accent }) {
+    return React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+        React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "보기"),
+        ["none", "school", "grade", "time"].map((m) => React.createElement("button", {
+            key: m, type: "button", onClick: () => onChange(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold",
+            style: { background: value === m ? accent : "#fff", color: value === m ? "#fff" : SUBINK, border: `1px solid ${value === m ? accent : LINE}` },
+        }, SUB_GROUP_LABELS[m])));
+}
+
+function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attSession, setAttSession, attGroupMode, setAttGroupMode, isDirector, goRegisterStudentFromDiagnostic, studentCourses, goToWorkLog, myAssistant, goToClockIn, clockInAlertShown, markClockInAlertShown, onCoursesChanged }) {
     // 수업계획/보강계획을 "완료"로 표시할 때 기록할 이름(원장 전용 상세 표시에 쓰임).
     const noteAuthorName = isDirector ? "원장" : (myAssistant ? myAssistant.name : "");
     const session = attSession;
     const setSession = setAttSession;
-    const groupMode = attGroupMode;
-    const setGroupMode = setAttGroupMode;
+    // 보기(그룹핑)는 탭마다 따로 기억한다(2026-11-22). 정규/클리닉: 시간별/학년별/학교별/반별,
+    // 보강/특강/내신대비: 전체/학교별/학년별/시간별(특강·내신대비는 강좌 묶음 안에서 다시 나눔).
+    const [groupModes, setGroupModes] = useState(() => loadGroupModes({ regular: attGroupMode || "time", clinic: attGroupMode || "time", extra: "none", course: "none", examprep: "none" }));
+    const groupMode = groupModes[session] || ((session === "regular" || session === "clinic") ? "time" : "none");
+    const setGroupMode = (m) => setGroupModes((prev) => { const next = { ...prev, [session]: m }; saveGroupModes(next); return next; });
     const [showScheduleList, setShowScheduleList] = useState(false);
     const [editingScheduleId, setEditingScheduleId] = useState(null);
     const [sessionAttendance, setSessionAttendance] = useState({ regular: {}, clinic: {}, extra: {} });
@@ -1019,8 +1374,6 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const [courseAttendance, setCourseAttendance] = useState({});
     // 특강 "수업계획" 메모 - attn_course_notes, course_id를 키로 사용(sessionNotes와 같은 이유로 분리된 테이블).
     const [courseNotes, setCourseNotes] = useState({});
-    // 특강 목록 보기 모드: 강좌별(기본)/시간별. 다른 탭의 groupMode와 별개로 특강 탭 전용으로 둔다.
-    const [courseGroupMode, setCourseGroupMode] = useState("name");
     const [extraMeta, setExtraMeta] = useState({});
     const [sessionNotes, setSessionNotes] = useState({ regular: {}, clinic: {}, extra: {} });
     const [loading, setLoading] = useState(true);
@@ -1324,6 +1677,59 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         resolvedStudents.forEach((s) => { m[s.id] = s; });
         return m;
     }, [resolvedStudents]);
+    // ---- 내신대비 전환(원장 전용, 2026-11-22) ----
+    const [examEvents, setExamEvents] = useState([]);
+    useEffect(() => { if (isDirector) fetchExamEvents().then(setExamEvents).catch((e) => console.error(e)); }, [isDirector]);
+    // examSwitch: null | { source: "clinic"|"examprep", step: "select"|"panel", students: [] }
+    const [examSwitch, setExamSwitch] = useState(null);
+    const [showExamManage, setShowExamManage] = useState(false);
+    useEffect(() => { setExamSwitch(null); setShowExamManage(false); }, [session]);
+    const examPrepActiveCourseList = useMemo(() => (studentCourses || []).filter((c) => c.category === "examprep" && (!c.startDate || selectedDate >= c.startDate) && (!c.endDate || selectedDate <= c.endDate))
+        .map((c) => { const st = studentById[c.studentId]; return st ? { ...c, name: st.name, school: st.school, grade: st.grade, class: st.class } : null; })
+        .filter(Boolean), [studentCourses, selectedDate, studentById]);
+    const examPrepEndById = useMemo(() => {
+        const m = {};
+        examPrepActiveCourseList.forEach((c) => { if (!m[c.studentId] || (c.endDate || "") > m[c.studentId]) m[c.studentId] = c.endDate || ""; });
+        return m;
+    }, [examPrepActiveCourseList]);
+    const examSwitchCandidates = useMemo(() => {
+        if (!examSwitch) return [];
+        return resolvedStudents.filter((s) => {
+            if (s.enrollDate && selectedDate < s.enrollDate) return false;
+            if (withdrawnGapOn(statusEvents, s.id, selectedDate)) return false;
+            if (examPrepActiveStudentIds.has(s.id)) return false;
+            if (examSwitch.source === "clinic") {
+                if (!s.clinic) return false;
+                if (leaveOnDate(leaves, s.id, selectedDate)) return false;
+            }
+            return true;
+        });
+    }, [examSwitch && examSwitch.source, resolvedStudents, selectedDate, statusEvents, leaves, examPrepActiveStudentIds]);
+    const refreshCourses = async () => { if (onCoursesChanged) await onCoursesChanged(); };
+    const saveExamPrepSwitch = async (p) => {
+        const rows = examSwitch.students.map((s) => ({ student_id: s.id, course_name: p.courseName, days: p.days, course_time: p.courseTime || null, start_date: p.startDate, end_date: p.endByStudent[s.id] || null, category: "examprep" }));
+        const inserted = await createExamPrepCourses(rows);
+        let moved = 0, migrateFailed = false;
+        if (p.migrate) {
+            try { moved = await migrateExtraToExamPrep(inserted); }
+            catch (e) { console.error(e); migrateFailed = true; }
+        }
+        await refreshCourses();
+        setExamSwitch(null);
+        loadQuiet();
+        alert(`${inserted.length}명을 내신대비보강으로 전환했어요.` + (moved ? `\n보강 탭 기록 ${moved}건을 내신대비 출결로 옮겼어요.` : "") + (migrateFailed ? "\n보강 탭 기록을 옮기는 중 문제가 생겼어요. 보강 탭을 확인해 주세요." : ""));
+    };
+    const examSwitchSection = examSwitch && (examSwitch.step === "select"
+        ? React.createElement(ExamPrepPicker, {
+            title: examSwitch.source === "clinic" ? "📘 내신대비로 전환할 클리닉 학생 고르기" : "📘 내신대비 명단에 추가할 학생 고르기",
+            candidates: examSwitchCandidates, searchable: examSwitch.source !== "clinic",
+            onNext: (list) => setExamSwitch((prev) => ({ ...prev, step: "panel", students: list })),
+            onCancel: () => setExamSwitch(null),
+        })
+        : React.createElement(ExamPrepSwitchPanel, {
+            students: examSwitch.students, defaultStart: selectedDate, examEvents: examEvents,
+            onSave: saveExamPrepSwitch, onBack: () => setExamSwitch((prev) => ({ ...prev, step: "select" })),
+        }));
     const courseRoster = useMemo(() => activeCourses
         .map((c) => {
             const st = studentById[c.studentId];
@@ -1338,8 +1744,8 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             return { id: c.id, courseId: c.id, studentId: c.studentId, name: st.name, school: st.school, grade: st.grade, courseName: c.courseName, className: c.className, courseTime: c.courseTime };
         })
         .filter(Boolean), [activeExamPrepCourses, studentById]);
-    const courseGroups = useMemo(() => courseGroupMode === "time" ? groupByTime(courseRoster, "courseTime") : groupByCourseName(courseRoster), [courseRoster, courseGroupMode]);
-    const examPrepGroups = useMemo(() => courseGroupMode === "time" ? groupByTime(examPrepRoster, "courseTime") : groupByCourseName(examPrepRoster), [examPrepRoster, courseGroupMode]);
+    const courseGroups = useMemo(() => groupByCourseName(courseRoster), [courseRoster]);
+    const examPrepGroups = useMemo(() => groupByCourseName(examPrepRoster), [examPrepRoster]);
     const setCourseStatus = async (courseId, studentId, status) => {
         const isActive = courseAttendance[courseId]?.status === status;
         setCourseAttendance((prev) => {
@@ -1735,7 +2141,9 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
     const rosterForDisplay = session === "regular"
         ? roster.map((s) => ({ ...s, regularTime: effectiveRegularTimeFor(s, weekday) }))
         : roster;
-    const groups = groupMode === "grade"
+    const groups = session === "extra"
+        ? groupListBy(rosterForDisplay.map((s) => ({ ...s, extraTime: (extraMeta[s.id] && extraMeta[s.id].time) || "" })), groupMode, "extraTime")
+        : groupMode === "grade"
         ? groupByGrade(rosterForDisplay)
         : groupMode === "school"
             ? groupBySchool(rosterForDisplay)
@@ -1819,27 +2227,62 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             ))
         )
     );
-    const GROUP_MODE_LABELS = { time: "\uC2DC\uAC04\uBCC4", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4" };
+    const GROUP_MODE_LABELS = { none: "전체", time: "\uC2DC\uAC04\uBCC4", grade: "\uD559\uB144\uBCC4", school: "\uD559\uAD50\uBCC4", class: "\uBC18\uBCC4" };
+    const groupModeKeys = session === "extra" ? ["none", "school", "grade", "time"] : ["time", "grade", "school", "class"];
+    const showExpandButtons = !(session === "extra" && groupMode === "none");
     const expandAllGroups = () => setCollapsedGroups({});
     const collapseAllGroups = () => setCollapsedGroups(Object.fromEntries(groups.map((g) => [g.className, true])));
-    const groupToggle = session !== "extra" && session !== "diagnostic" && React.createElement(
+    const groupToggle = session !== "diagnostic" && !(examSwitch && examSwitch.source === "clinic" && session === "clinic") && React.createElement(
         "div",
         { className: "flex items-center justify-between gap-2 mb-4 flex-wrap" },
         React.createElement(
             "div",
             { className: "flex items-center gap-2 flex-wrap" },
             React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "\uBCF4\uAE30"),
-            ["time", "grade", "school", "class"].map((m) => React.createElement(
+            groupModeKeys.map((m) => React.createElement(
                 "button",
                 { key: m, onClick: () => setGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: groupMode === m ? NAVY : "#fff", color: groupMode === m ? "#fff" : SUBINK, border: `1px solid ${groupMode === m ? NAVY : LINE}` } },
                 GROUP_MODE_LABELS[m]
             ))
         ),
-        React.createElement(
+        showExpandButtons && React.createElement(
             "div",
             { className: "flex items-center gap-1" },
             React.createElement("button", { onClick: expandAllGroups, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "\uC804\uCCB4 \uD3BC\uCE58\uAE30"),
             React.createElement("button", { onClick: collapseAllGroups, className: "px-2.5 py-1.5 rounded-lg text-xs font-semibold", style: { color: SUBINK, background: "#fff", border: `1px solid ${LINE}` } }, "\uC804\uCCB4 \uC811\uAE30")
+        )
+    );
+    // ---- 클리닉 탭: 내신대비 전환 버튼(원장) + 전환 중 회색 박스 ----
+    const examPrepClinicToday = session === "clinic" ? resolvedStudents.filter((s) => {
+        if (!s.clinic || !examPrepActiveStudentIds.has(s.id)) return false;
+        if (s.enrollDate && selectedDate < s.enrollDate) return false;
+        if (leaveOnDate(leaves, s.id, selectedDate)) return false;
+        const clinicDays = s.clinicDays.length > 0 ? s.clinicDays : s.days;
+        return clinicDays.includes(weekday);
+    }) : [];
+    const examPrepClinicAll = examPrepActiveCourseList.filter((c) => { const st = studentById[c.studentId]; return st && st.clinic; });
+    const examSwitchButton = (label, source) => React.createElement("button", {
+        type: "button", onClick: () => setExamSwitch({ source, step: "select", students: [] }),
+        className: "px-3 py-2 rounded-lg text-xs font-bold", style: { background: ROSE, color: "#fff" },
+    }, label);
+    const examManageToggle = (count) => React.createElement("button", {
+        type: "button", onClick: () => setShowExamManage((v) => !v),
+        className: "px-3 py-2 rounded-lg text-xs font-bold", style: { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` },
+    }, "전환 중 관리 ", count, "명 ", showExamManage ? "▲" : "▼");
+    const examManagePanel = (list) => showExamManage && React.createElement("div", { className: "rounded-2xl overflow-hidden mb-4", style: { background: "#fff", border: `1px solid ${ROSE}` } },
+        React.createElement("div", { className: "px-4 py-2.5", style: { background: ROSE_SOFT, fontSize: 13, fontWeight: 800, color: ROSE } }, "📘 ", mdKor(selectedDate), " 기준 내신대비 중인 학생"),
+        React.createElement(ExamPrepManageList, { courses: list, onDate: selectedDate, onChanged: refreshCourses }));
+    const clinicExamBar = session === "clinic" && isDirector && !examSwitch && React.createElement("div", { className: "flex items-center gap-2 mb-3 flex-wrap" },
+        examSwitchButton("📘 내신대비 전환", "clinic"),
+        examPrepClinicAll.length > 0 && examManageToggle(examPrepClinicAll.length));
+    const examPrepClinicBox = session === "clinic" && examPrepClinicToday.length > 0 && React.createElement(
+        "div",
+        { className: "rounded-xl px-3 py-2 mb-3 flex items-center gap-x-3 gap-y-1.5 flex-wrap", style: { background: "#f1f3f6", border: `1px dashed #cbd2db` } },
+        React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: "#475569", whiteSpace: "nowrap" } }, "📘 내신대비 전환 중 ", examPrepClinicToday.length, "명 ", React.createElement("span", { style: { fontWeight: 500, fontSize: 11 } }, "(클리닉 대신 내신대비 탭에서 체크)")),
+        React.createElement(
+            "div", { className: "flex flex-wrap gap-1.5" },
+            examPrepClinicToday.map((s) => React.createElement("span", { key: s.id, style: { fontSize: 12, fontWeight: 700, color: "#64748b", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, padding: "2px 9px" } },
+                s.name, examPrepEndById[s.id] ? React.createElement("span", { style: { fontWeight: 500, fontSize: 11, marginLeft: 4 } }, `~${mdKor(examPrepEndById[s.id])}`) : null))
         )
     );
     let addPicker = null;
@@ -1972,7 +2415,7 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
             ? "\uC624\uB298 \ucd94\uAC00\ub41c \ubcf4\uac15 \ud559\uc0dd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4. \uc704 \ubc84\ud2bc\uc73c\ub85c \ud559\uc0dd\uc744 \ucd94\uac00\ud574\ubcf4\uc138\uc694."
             : `${weekday}\uc694\uc77C ${SESSIONS[session]}\uc5D0 \uBC30\uC815\uB41C \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.`;
         listBody = React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, emptyMsg);
-    } else if (session === "extra") {
+    } else if (session === "extra" && groupMode === "none") {
         listBody = React.createElement(
             "div",
             { className: "rounded-2xl overflow-hidden", style: { background: "#fff", border: `1px solid ${LINE}` } },
@@ -2015,16 +2458,21 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
         const accentSoft = isExamPrep ? ROSE_SOFT : TEAL_SOFT;
         const emptyLabel = isExamPrep ? "내신대비보강이" : "특강이";
         // 강좌별(기본, 같은 강좌를 묶어 보여줌) / 시간별(같은 강좌라도 요일마다 시간이 다른 경우 - 예: 박성욱처럼 - 시간 기준으로 보고 싶을 때)
-        const courseGroupToggle = React.createElement(
+        // 강좌 묶음은 그대로 두고, 그 안에서 학교별/학년별/시간별로 다시 나눈다(2026-11-22).
+        const courseGroupToggle = !examSwitch && React.createElement(
             "div",
-            { className: "flex items-center gap-2 mb-3 flex-wrap" },
-            React.createElement("span", { style: { fontSize: 12, color: SUBINK, fontWeight: 600 } }, "보기"),
-            ["name", "time"].map((m) => React.createElement(
-                "button",
-                { key: m, onClick: () => setCourseGroupMode(m), className: "px-3 py-1.5 rounded-lg text-xs font-bold", style: { background: courseGroupMode === m ? accentColor : "#fff", color: courseGroupMode === m ? "#fff" : SUBINK, border: `1px solid ${courseGroupMode === m ? accentColor : LINE}` } },
-                m === "name" ? "강좌별" : "시간별"
-            ))
+            { className: "mb-3" },
+            React.createElement(SubGroupToggle, { value: groupMode, onChange: setGroupMode, accent: accentColor })
         );
+        const examTabBar = isExamPrep && isDirector && !examSwitch && React.createElement("div", { className: "flex items-center gap-2 mb-3 flex-wrap" },
+            examSwitchButton("+ 명단 추가", "examprep"),
+            examPrepActiveCourseList.length > 0 && examManageToggle(examPrepActiveCourseList.length));
+        const renderCourseRows = (list) => list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveCheckedAt: saveCourseCheckedAt, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, newbieInfo: newbieInfoFor(c.studentId, "course"), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }));
+        const renderCourseBody = (list) => groupMode === "none"
+            ? renderCourseRows(list)
+            : groupListBy(list, groupMode, "courseTime").map((sg) => React.createElement(React.Fragment, { key: sg.className },
+                React.createElement("div", { className: "px-4 sm:px-5 py-1.5", style: { background: PAPER, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}`, fontSize: 12, fontWeight: 800, color: SUBINK } }, sg.className, " · ", sg.list.length, "명"),
+                renderCourseRows(sg.list)));
         const courseListBody = sectionGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, weekday, "요일에 진행되는 ", emptyLabel, " 없습니다.")
             : React.createElement(
@@ -2067,21 +2515,30 @@ function Attendance({ students, selectedDate, setSelectedDate, authorEmail, attS
                             )
                         ),
                         gStatCards,
-                        !collapsed && g.list.map((c, idx) => React.createElement(CourseAttendanceRow, { key: c.id, c: c, isLast: idx === g.list.length - 1, current: courseAttendance, noteMeta: courseNotes[c.courseId] || emptyNoteMeta(), saveNote: saveCourseNote, saveComment: saveCourseAssistantComment, toggleNoteDone: toggleCourseNoteDone, setStatus: setCourseStatus, saveReason: saveCourseReason, saveCheckedAt: saveCourseCheckedAt, saveScheduleChange: saveCourseScheduleChange, isDirector: isDirector, newbieInfo: newbieInfoFor(c.studentId, "course"), goToWorkLog: goToWorkLog ? (sid) => (isDirector ? goToWorkLog(sid, null, "view") : goToWorkLog(sid, selectedDate)) : null, locked: blockedByClockIn }))
+                        !collapsed && renderCourseBody(g.list)
                     );
                 })
             );
-        return React.createElement("div", null, header, liveClock, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, closureBanner, (!showClosureBanner || showClosureRoster) && courseGroupToggle, (!showClosureBanner || showClosureRoster) && courseListBody, clockInModal);
+        const examTabSwitching = isExamPrep && examSwitch && examSwitch.source === "examprep";
+        return React.createElement("div", null, header, liveClock, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, closureBanner,
+            (!showClosureBanner || showClosureRoster) && examTabBar,
+            (!showClosureBanner || showClosureRoster) && isExamPrep && isDirector && !examSwitch && examManagePanel(examPrepActiveCourseList),
+            examTabSwitching && examSwitchSection,
+            (!showClosureBanner || showClosureRoster) && !examTabSwitching && courseGroupToggle,
+            (!showClosureBanner || showClosureRoster) && !examTabSwitching && courseListBody, clockInModal);
     }
     return React.createElement(
         "div", null, header, liveClock, dateInput, sessionTabs, blockedByClockIn && clockInBlockedBanner, closureBanner,
         (!showClosureBanner || showClosureRoster) && subLine,
         (!showClosureBanner || showClosureRoster) && statCards,
         (!showClosureBanner || showClosureRoster) && scheduleChangeSection,
+        clinicExamBar,
+        clinicExamBar && examManagePanel(examPrepClinicAll),
         (!showClosureBanner || showClosureRoster) && groupToggle,
         (!showClosureBanner || showClosureRoster) && onLeaveBox,
+        (!showClosureBanner || showClosureRoster) && !(session === "clinic" && examSwitch) && examPrepClinicBox,
         (!showClosureBanner || showClosureRoster) && addPicker,
-        (!showClosureBanner || showClosureRoster) && listBody,
+        session === "clinic" && examSwitch ? examSwitchSection : ((!showClosureBanner || showClosureRoster) && listBody),
         clockInModal
     );
 }
@@ -2604,7 +3061,7 @@ function reportCellMark(c) {
     return React.createElement("span", { style: { color: cfg ? cfg.color : INK, fontWeight: 800 } }, REPORT_STATUS_MARK[c.status] || c.status);
 }
 // 학생(행) x 날짜(열) 격자표 하나 - 정규수업/클리닉/보강/특강(강좌별)에서 공통으로 재사용.
-function ReportGridTable({ title, days, rows, accentColor }) {
+function ReportGridTable({ title, days, rows, accentColor, groupMode }) {
     if (!rows || rows.length === 0) {
         return React.createElement("div", { className: "rounded-2xl p-8 text-center mb-4", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK, fontSize: 13 } }, "이 달에 표시할 기록이 없습니다.");
     }
@@ -2638,7 +3095,8 @@ function ReportGridTable({ title, days, rows, accentColor }) {
                 React.createElement(
                     "tbody",
                     null,
-                    rows.map((row) => {
+                    (() => {
+                    const renderRow = (row) => {
                         const stats = computeReportRowStats(row.cells);
                         return React.createElement(
                             "tr",
@@ -2652,7 +3110,17 @@ function ReportGridTable({ title, days, rows, accentColor }) {
                             row.cells.map((c, i) => React.createElement("td", { key: i, style: { ...reportTdStyle, background: c.scheduled ? "#fff" : "#f4f5f7" } }, reportCellMark(c))),
                             reportStatTds(stats)
                         );
-                    })
+                    };
+                    // 그룹 보기(2026-11-22): 학교별/학년별/시간별로 묶고 그룹마다 제목 줄을 넣는다.
+                    if (!groupMode || groupMode === "none") return rows.map(renderRow);
+                    const grouped = groupListBy(rows.map((r) => ({ ...r.student, __row: r, rowTime: r.time || "" })), groupMode, "rowTime");
+                    const out = [];
+                    grouped.forEach((g) => {
+                        out.push(React.createElement("tr", { key: "g:" + g.className }, React.createElement("td", { colSpan: days.length + 6, style: { padding: "5px 8px", background: PAPER, fontSize: 11.5, fontWeight: 800, color: accent, borderTop: `1px solid ${LINE}`, borderBottom: `1px solid ${LINE}`, textAlign: "left" } }, g.className, " · ", g.list.length, "명")));
+                        g.list.forEach((x) => out.push(renderRow(x.__row)));
+                    });
+                    return out;
+                    })()
                 )
             )
         )
@@ -2683,6 +3151,11 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
     // "학생별" 탭 전용 - 퇴원생 포함 토글(2026-08-25 추가). 정규수업/클리닉/보강/특강 그리드(다른
     // 서브탭)는 재원생 명단(students prop)을 그대로 쓰고, 이 토글은 studentRows 계산에만 영향을 준다.
     const [showWithdrawn, setShowWithdrawn] = useState(false);
+    // 격자표 그룹 보기 - 서브탭마다 마지막 선택을 기억한다(2026-11-22).
+    const REPORT_GROUP_KEY = "attn_report_group_modes_v1";
+    const [reportGroupModes, setReportGroupModes] = useState(() => loadGroupModes({ regular: "none", clinic: "none", extra: "none", course: "none" }, REPORT_GROUP_KEY));
+    const reportGroup = reportGroupModes[subTab] || "none";
+    const setReportGroup = (m) => setReportGroupModes((prev) => { const next = { ...prev, [subTab]: m }; saveGroupModes(next, REPORT_GROUP_KEY); return next; });
     const [withdrawnStudents, setWithdrawnStudents] = useState([]);
     const [withdrawnLoaded, setWithdrawnLoaded] = useState(false);
     useEffect(() => { fetchAllStudentHistory().then(setHistory).catch((e) => console.error(e)); }, []);
@@ -2738,7 +3211,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const st = attByDate[d.dateStr]?.regular?.[s.id] || "";
             return leaveCell(s.id, d.dateStr, st) || { scheduled: true, status: st };
         });
-        return { student: s, cells };
+        return { student: s, cells, time: s.regularTime || "" };
     }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave)), [students, days, historyByStudent, attByDate, leaves, statusEvents]);
     const clinicRows = useMemo(() => (students || []).map((s) => {
         const cells = days.map((d) => {
@@ -2750,7 +3223,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
             const st = attByDate[d.dateStr]?.clinic?.[s.id] || "";
             return leaveCell(s.id, d.dateStr, st) || { scheduled: true, status: st };
         });
-        return { student: s, cells };
+        return { student: s, cells, time: s.clinicTime || "" };
     }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave)), [students, days, historyByStudent, attByDate, studentCourses, leaves, statusEvents]);
     const extraRows = useMemo(() => {
         const ids = new Set();
@@ -2762,7 +3235,8 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                     return { scheduled: false };
                 return { scheduled: true, status: attByDate[d.dateStr]?.extra?.[s.id] || "" };
             });
-            return { student: s, cells };
+            const firstTime = days.map((d) => extraByDate[d.dateStr] && extraByDate[d.dateStr][s.id] && extraByDate[d.dateStr][s.id].time).find(Boolean) || "";
+            return { student: s, cells, time: firstTime };
         });
     }, [students, days, extraByDate, attByDate]);
     const courseGroups = useMemo(() => {
@@ -2784,7 +3258,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
                     const st = courseAttByDate[d.dateStr]?.[match.id] || "";
                     return leaveCell(student.id, d.dateStr, st) || { scheduled: true, status: st };
                 });
-                return { student, cells };
+                return { student, cells, time: (courses[0] && courses[0].courseTime) || "" };
             }).filter((row) => row.cells.some((c) => c.scheduled || c.onLeave));
             return { courseName: name, rows };
         }).filter((g) => g.rows.length > 0);
@@ -2875,19 +3349,20 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
         REPORT_SUB_TABS.map((t) => React.createElement("button", { key: t.key, onClick: () => setSubTab(t.key), className: "px-2 py-3 rounded-xl text-sm font-semibold transition-all", style: { background: subTab === t.key ? NAVY : "transparent", color: subTab === t.key ? "#fff" : SUBINK } }, t.label))
     );
     const printNote = React.createElement("div", { className: "no-print", style: { fontSize: 11.5, color: SUBINK, marginBottom: 8 } }, "📄 인쇄할 때는 가로(landscape) 방향을 선택하면 더 깔끔하게 나옵니다.");
+    const reportGroupToggle = subTab !== "student" && React.createElement("div", { className: "mb-3 no-print" }, React.createElement(SubGroupToggle, { value: reportGroup, onChange: setReportGroup, accent: NAVY }));
     let body;
     if (loading) {
         body = React.createElement("div", { style: { color: SUBINK, fontSize: 13, textAlign: "center", padding: "40px 0" } }, "불러오는 중...");
     } else if (subTab === "regular") {
-        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 정규수업 출석부`, days: days, rows: regularRows, accentColor: NAVY }));
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 정규수업 출석부`, days: days, rows: regularRows, accentColor: NAVY, groupMode: reportGroup }));
     } else if (subTab === "clinic") {
-        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 클리닉 출석부`, days: days, rows: clinicRows, accentColor: AMBER }));
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 클리닉 출석부`, days: days, rows: clinicRows, accentColor: AMBER, groupMode: reportGroup }));
     } else if (subTab === "extra") {
-        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 보강 출석부`, days: days, rows: extraRows, accentColor: PURPLE }));
+        body = React.createElement("div", null, React.createElement(ReportLegend, null), React.createElement(ReportGridTable, { title: `${monthLabel(month)} 보강 출석부`, days: days, rows: extraRows, accentColor: PURPLE, groupMode: reportGroup }));
     } else if (subTab === "course") {
         body = courseGroups.length === 0
             ? React.createElement("div", { className: "rounded-2xl p-10 text-center", style: { background: "#fff", border: `1px solid ${LINE}`, color: SUBINK } }, "이 달에 특강 출석 기록이 없습니다.")
-            : React.createElement("div", null, React.createElement(ReportLegend, null), courseGroups.map((g) => React.createElement(ReportGridTable, { key: g.courseName, title: `${monthLabel(month)} 특강 출석부 · ${g.courseName}`, days: days, rows: g.rows, accentColor: TEAL })));
+            : React.createElement("div", null, React.createElement(ReportLegend, null), courseGroups.map((g) => React.createElement(ReportGridTable, { key: g.courseName, title: `${monthLabel(month)} 특강 출석부 · ${g.courseName}`, days: days, rows: g.rows, accentColor: TEAL, groupMode: reportGroup })));
     } else {
         // 이번 달 지각 TOP5 카드 - 정렬을 안 눌러도 탭에 들어가자마자 바로 보이도록 표 위에 둔다
         // (2026-08-21 추가). 지각이 한 번도 없으면 카드 자체를 표시하지 않는다.
@@ -2990,6 +3465,7 @@ function MonthlyAttendanceReport({ students, studentCourses }) {
         monthPicker,
         subTabButtons,
         printNote,
+        reportGroupToggle,
         React.createElement("div", { id: "monthlyReportPrintArea" }, body)
     );
 }
@@ -3450,7 +3926,7 @@ function MainApp({ session }) {
             React.createElement(AttendancePillTabs, { pageTab: pageTab, setPageTab: setPageTab, isDirector: isDirector }),
             pageTab === "attendance" && React.createElement(Attendance, {
                 students: students, selectedDate: selectedDate, setSelectedDate: setSelectedDate, authorEmail: session.user.email,
-                attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode,
+                attSession: attSession, setAttSession: setAttSession, attGroupMode: attGroupMode, setAttGroupMode: setAttGroupMode, onCoursesChanged: reloadStudentCourses,
                 isDirector: isDirector, goRegisterStudentFromDiagnostic: goRegisterStudentFromDiagnostic, studentCourses: studentCourses, goToWorkLog: goToWorkLog,
                 myAssistant: myAssistant, goToClockIn: goToClockIn, clockInAlertShown: clockInAlertShown, markClockInAlertShown: () => setClockInAlertShown(true),
             }),
