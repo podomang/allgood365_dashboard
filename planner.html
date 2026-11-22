@@ -218,8 +218,8 @@ function buildPrintHtml(ym, grid, byDate) {
     const weeks = grid.length / 7;
     const strip = buildExamStrip(grid, byDate);
     const hasStrip = strip.cols.length > 0;
-    // 띠표 높이: 날짜 머리줄 4.4mm + 학교당 4.4mm + 범례 3.6mm + 위아래 간격 2.4mm
-    const stripH = hasStrip ? 4.4 + strip.list.length * 4.4 + 3.6 + 2.4 : 0;
+    // 띠표 높이: 날짜 머리줄 3.6mm + 학교당 3.6mm + 범례 3.0mm + 위아래 간격 2.4mm (글씨 6pt, 2026-11-22 축소)
+    const stripH = hasStrip ? 3.6 + strip.list.length * 3.6 + 3.0 + 2.4 : 0;
     // 6주 기준 24.6mm × 6 = 147.6mm에서 띠표 높이를 빼고 실제 주 수로 나눠 B5 한 장을 꽉 채운다
     const rowH = ((147.6 - stripH) / weeks).toFixed(2);
     let stripHtml = "";
@@ -273,13 +273,13 @@ tr:last-child td { border-bottom: 0; }
 .d.other { color: #777; border-bottom-color: #777; }
 .strip { margin-top: 1mm; }
 .st { border: .35mm solid #000; }
-.st th, .st td { height: 4.4mm; border: .25mm solid #000; font-size: 7pt; text-align: center; padding: 0 .4mm; white-space: nowrap; overflow: hidden; line-height: 1; }
+.st th, .st td { height: 3.6mm; border: .25mm solid #000; font-size: 6pt; text-align: center; padding: 0 .4mm; white-space: nowrap; overflow: hidden; line-height: 1; }
 .st th { font-weight: 700; }
 .st th .dw { font-weight: 400; color: #444; margin-left: .5mm; font-size: 6pt; }
 .st .sn { text-align: left; padding-left: 1.2mm; font-weight: 700; }
-.st .ex { font-size: 7pt; }
+.st .ex { font-size: 6pt; }
 .st .mx { background: #000; color: #fff; font-weight: 900; }
-.lg { font-size: 7pt; text-align: right; height: 3.6mm; line-height: 3.6mm; }
+.lg { font-size: 6pt; text-align: right; height: 3.0mm; line-height: 3.0mm; }
 .lgm { background: #000; color: #fff; font-weight: 900; padding: 0 .8mm; }
 .ev { font-size: 8.5pt; font-weight: 700; line-height: 1.25; margin-top: .6mm; word-break: keep-all;
       text-decoration: underline; text-underline-offset: .6mm; text-decoration-thickness: .25mm; }
